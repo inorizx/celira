@@ -20,9 +20,15 @@
  *   （`AGENT_FILES_HOME_WORKORDER_2026-10-14.md` 被 `agent/README.md` 两处与
  *   `agent/src/terminal_app.rs` 引用，索引里没有它）——**漏登记的后果是它看起来"该焚"**，
  *   而焚是照着索引做的。这条守卫把"引用 ⊆ 登记"变成机械判据。
+ * - **判据三（词表条目名必须活着）**：`docs/runtime/AGENT_VOCABULARY.md` 自称"**名字的权威
+ *   位置**"，而**没有任何东西量过那些名字有没有人用**。2026-10-18 实测：§9 主表 28 条里
+ *   **4 条只在词表里出现**（`屏上轨迹` 全仓 1 处——就是定义它自己那一行；`视野容量` 3 处；
+ *   `操作栏` 6 处；`进 App 读全文` 1 处），而大家实际在用的是**另外的名字**（回执 824 /
+ *   上下文窗口 38 / 工具面 51）⇒ **读者按表里的名字去代码里找，找不到**。
+ *   判据与行内豁免机制见下方那一段。
  *
- * ⇒ 两条判据都是"**声明即受约束**"：一个文件自称对外入口，它就接受判据一；
- * 一份 outputs 文件被活文档点名，它就接受判据二。
+ * ⇒ 三条判据都是"**声明即受约束**"：一个文件自称对外入口，它就接受判据一；
+ * 一份 outputs 文件被活文档点名，它就接受判据二；一个词进了 §9 主表，它就接受判据三。
  *
  * ## 判据方向（写死，别反过来）
  *
@@ -31,14 +37,19 @@
  * 2. **被活文档按名字引用的 `outputs/*.md` ⊆ `outputs/README.md` 的索引**。
  *    反方向（登记了、文件却不在盘上）**不报红**——那可能是已焚，也可能是"删了没记账"，
  *    **脚本分不出这两者**（已焚的名字也登记在索引里）。这一条要靠人读"已焚"那张表。
+ * 3. **§9 主表的每行主名，在词表之外至少被引用一次**。⚠ **一行只判主名**——括号里那个是
+ *    **别名**，别名不要求独立引用：要求它活着等于要求"两个名字都留着"，与 §9.1① 自相矛盾。
+ *    确实只在词表里用的概念名，**在那一行写「豁免判据三」并把理由写在同处**。
  *
  * ## 它量得到什么、量不到什么（如实登记）
  *
  * - 量得到：对外入口有没有**定义过**那个代词；被引用的 outputs 文件有没有**登记**；
- *   两张入口表与磁盘上的候选文档**是否恰好一一对上**（新加一个入口文档会自动要一个理由）。
+ *   两张入口表与磁盘上的候选文档**是否恰好一一对上**（新加一个入口文档会自动要一个理由）；
+ *   词表主名在**词表之外**还出不出现（"表名与实现分家"的下限探测）。
  * - 量**不到**：定义写得**对不对**（脚本只认"代词与『指』同现"这个形状，认不出定义写歪了）；
- *   索引里那条**该不该**是证据锚；`outputs/README.md` 的 §1 与 §2 有没有归错类。
- *   本脚本只做"有没有"这一层，不假装管更多。
+ *   索引里那条**该不该**是证据锚；`outputs/README.md` 的 §1 与 §2 有没有归错类；
+ *   **词表之外那个同名字指的是不是同一个东西**（`includes` 只回答"这个字符串还在不在别处
+ *   出现"），也量不到那个名字用得**对不对**。本脚本只做"有没有"这一层，不假装管更多。
  *
  * ⚠ **本文件不许写出那个字**：写成转义常量 `PRONOUN_SHE`，判据与夹具都用它拼。
  *   这不是洁癖——`check-voice.mjs` 的头里记着理由：守卫要是写得出它，就会被"清一遍"的
@@ -186,6 +197,80 @@ function registeredNames(indexText) {
   return out
 }
 
+// ---------------------------------------------------------------------------
+// 判据三：词表条目名必须**活在词表之外**（2026-10-18 立）
+// ---------------------------------------------------------------------------
+//
+// **它补的是哪一类洞**：词表是"名字的权威位置"，但**没有任何东西量过那些名字有没有人用**。
+// 实测（2026-10-18）：§9 主表 28 条里有 4 条**只在词表里出现**——`屏上轨迹` 全仓 1 处
+// （就是定义它自己那一行）、`视野容量` 3 处、`操作栏` 6 处、`进 App 读全文` 1 处，
+// 而大家实际在用的是**另外的名字**（回执 824 / 上下文窗口 38 / 工具面 51）。
+// ⇒ **词表记了一个没人用的名字，而活名不在表里**——读者按表里的名字去代码里找，找不到。
+//
+// **判据一句话**：§9 主表的每一行，其**主名**必须在词表之外**至少被引用一次**。
+//
+// ⚠ **一行只判一个主名**：括号里那个是**别名**，别名不要求独立引用——它本来就该退场
+// （见 §9.1①）。要求别名也活着，等于要求"两个名字都留着"，与那条登记自相矛盾。
+//
+// ⚠ **豁免写在行里**（照 `INTERNAL_DOCS` 里 `outputs/README.md` 那条的先例）：确实只在
+// 词表里用的概念名，就在**它自己那一行**写「豁免判据三」并把理由写在同处。
+// **白名单是「什么都不查」，这个标记不是**——它要求理由跟着那一行走，人读得到。
+//
+// **量不到什么（如实登记）**：量不到"这个名字用得**对不对**"，也量不到"词表之外那个同名字
+// 指的是不是同一个东西"——`includes` 只回答"这个字符串还在不在别处出现"。
+// 它是**分家的下限探测**，不是语义一致性证明。
+
+/** 名字的权威位置。**本文件只读它，不改它**。 */
+const VOCAB_FILE = 'docs/runtime/AGENT_VOCABULARY.md'
+/** 行内豁免标记（见上）。 */
+const VOCAB_EXEMPT = '豁免判据三'
+
+/**
+ * 从词表 §9 主表取出每行的**主名**与它有没有行内豁免。
+ *
+ * 主名 = 名字列里第一个分隔符（`（` / `/` / `·`）之前的那一段，去掉强调与反引号。
+ * **表读不到时返回 `null`**（调用方据此报红）——不返回空数组：空数组会假装"没有条目要查"。
+ */
+function vocabMainNames(text) {
+  const lines = String(text ?? '').split(/\r?\n/)
+  const headerAt = lines.findIndex((l) => /^\|\s*名字\s*\|\s*是什么\s*\|\s*权威在哪\s*\|/.test(l))
+  if (headerAt < 0) return null
+  const out = []
+  for (let i = headerAt + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (!line.startsWith('|')) break
+    if (/^\|[\s:-]+\|/.test(line)) continue
+    const cells = line.split(/(?<!\\)\|/)
+    if (cells.length < 4) continue
+    const raw = cells[1].trim()
+    const primary = raw
+      .replace(/\*\*/g, '')
+      .replace(/`/g, '')
+      .split(/[（/·]/)[0]
+      .trim()
+    if (primary) out.push({ name: primary, exempt: line.includes(VOCAB_EXEMPT) })
+  }
+  return out
+}
+
+/** 判据三：主名在词表之外至少被引用一次；做不到就得在那一行写明理由。 */
+function checkVocabLive(names, contents) {
+  const problems = []
+  for (const { name, exempt } of names) {
+    if (exempt) continue
+    const used = contents.some(([rel, text]) => rel !== VOCAB_FILE && text.includes(name))
+    if (!used) {
+      problems.push(
+        `${VOCAB_FILE}：条目「${name}」在**词表之外一处都没有用过** ⇒ ` +
+          `这是"表名与实现分家"：词表记了一个没人用的名字，而大家实际用的那个不在表里。` +
+          `两条出路——**改成活名**（照「回执」行：表名全仓 1 处、活名 824 处 ⇒ 已改正），` +
+          `或在那一行写「${VOCAB_EXEMPT}」并把理由写在同处。`,
+      )
+    }
+  }
+  return problems
+}
+
 // 自检：故意埋的违例**必须**被抓到（否则这个守卫就是装饰）
 function selfCheck() {
   const missed = []
@@ -228,6 +313,36 @@ function selfCheck() {
   if (!isEntryCandidate('NOTES.md')) missed.push('草稿排除自检：正经的根级 *.md **不许**被放行')
   if (!isEntryCandidate('agent/SKILL_PACK_GUIDE.md')) missed.push('草稿排除自检：`*_GUIDE.md` **不许**被放行')
   if (!isEntryCandidate('im/server/README.md')) missed.push('草稿排除自检：任何 `README.md` **不许**被放行')
+
+  // 判据三自检：**必须**抓住"只在词表里用的名字"，**必须**放行行内豁免的那条。
+  // ⚠ 夹具里的名字**拼出来、不写字面量**：本文件也在扫描面里（`.mjs`），写死会让守卫抓到
+  //   自己的夹具 —— 判据二那里为同一个坑踩过两次（连注释里写一遍都会红）。
+  const DEAD = '只在词表' + '里的名字'
+  const EXEMPTED = '另一个' + '名字'
+  const planted =
+    '| 名字 | 是什么 | 权威在哪 |\n|---|---|---|\n' +
+    `| ${DEAD} | 一个没有实现的格子 | 无 |\n` +
+    `| ${EXEMPTED} | 豁免了 | 无（${VOCAB_EXEMPT}：理由写在行里） |\n`
+  const plantedNames = vocabMainNames(planted)
+  if (plantedNames === null) missed.push('判据三自检：主名解析读不到表头（应当读得到）')
+  else if (plantedNames.length !== 2)
+    missed.push(`判据三自检：主名解析期望 2 条，实得 ${plantedNames.length}`)
+  else {
+    // 词表之外零引用 ⇒ 未豁免的那条必须红，豁免的那条必须不红。
+    const onlyInVocab = [[VOCAB_FILE, `${DEAD} ${EXEMPTED}`]]
+    const found = checkVocabLive(plantedNames, onlyInVocab)
+    if (found.length !== 1)
+      missed.push(`判据三自检：零引用时未豁免的那条**必须**被抓到（实得 ${found.length} 条）`)
+    // 别处用过 ⇒ 不许红。
+    const usedElsewhere = [['some.md', DEAD], [VOCAB_FILE, EXEMPTED]]
+    if (checkVocabLive(plantedNames, usedElsewhere).length !== 0)
+      missed.push('判据三自检：词表之外用过的那条**不许**报红')
+    // 只在词表里出现（正是"屏上轨迹"那一形态）⇒ 必须红。
+    if (checkVocabLive(plantedNames, [[VOCAB_FILE, DEAD], ['other.md', '无关正文']]).length !== 1)
+      missed.push('判据三自检：只在词表里出现的那条**必须**被抓到')
+  }
+  if (vocabMainNames('这里根本没有表') !== null)
+    missed.push('判据三自检：表读不到时**必须**返回 null（不假装通过）')
 
   return missed
 }
@@ -285,6 +400,27 @@ function main() {
     problems.push(...checkIndex([...refs], registered))
   }
 
+  // 3) 词表条目名判据
+  //
+  // ⚠ **没有词表就报 `N/A`**（与判据二同规）：不适用既不算通过也不算失败。
+  // ⚠ 但**表在、表头读不到时要红**——那是"判据无法执行"，不是"不适用"。
+  const vocabPath = join(ROOT, VOCAB_FILE)
+  let vocabNames = null
+  if (!existsSync(vocabPath)) {
+    console.log(`[check-docs] 判据三 N/A：本仓没有词表（${vocabPath}）`)
+  } else {
+    vocabNames = vocabMainNames(readFileSync(vocabPath, 'utf8'))
+    if (vocabNames === null) {
+      problems.push(
+        `${VOCAB_FILE}：读不到 §9 主表（表头「| 名字 | 是什么 | 权威在哪 |」）⇒ ` +
+          `判据三无法执行，**不假装通过**`,
+      )
+    } else {
+      const contents = files.map((rel) => [rel, readFileSync(join(ROOT, rel), 'utf8')])
+      problems.push(...checkVocabLive(vocabNames, contents))
+    }
+  }
+
   const missed = selfCheck()
   const all = [...problems, ...missed]
   if (all.length) {
@@ -297,6 +433,10 @@ function main() {
       (hasIndex
         ? `被引用的 outputs 文件 ${refs.size} 份 ⊆ 索引 ${registered.size} 个名字`
         : '判据二 N/A（本仓没有证据库）') +
+      ' · ' +
+      (vocabNames
+        ? `词表 ${vocabNames.length} 条主名都在词表之外活着（判据三）`
+        : '判据三 N/A（本仓没有词表）') +
       ' · 自检全过',
   )
 }

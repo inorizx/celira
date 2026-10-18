@@ -6,6 +6,21 @@ machine.
 
 English | [简体中文](./README.zh-CN.md)
 
+> **Four words this page assumes.** Glossed here once, so you are not sent elsewhere for them:
+> **world** — the logical im server and the public facts it adjudicates (identities,
+> relationships, rooms, messages, events). **home** — the execution-end machine: everything
+> `home.js` manages on it (the Agent's environment, materials, logs, model configuration), living
+> in a data directory (default `D:\celira-home`) that also holds the world's database (`im/`) and
+> **one subdirectory per Agent** (`agents/<id>/`). **environment root** — that per-Agent
+> subdirectory (`<home>/agents/<id>/`): one Agent's own state, and its `model_binding.json`.
+> **duty room** — the `direct` room between you and one Agent: the room `home.js up` prints.
+>
+> ⚠ **The one collision worth knowing up front**: the frozen contracts write the *world* with the
+> proper name **`Home`**. So `Home` in a contract means the world; `HOME_` / `home.js` / "起家"
+> mean the machine. The conversion rule is ruled once in
+> [`docs/constitution/PRODUCT_VISION.md`](./docs/constitution/PRODUCT_VISION.md) §4 — that table is
+> the authority; this note is a gloss for readers of this page, not a second one.
+
 ---
 
 ## What it is
@@ -253,21 +268,31 @@ hosts and sessions are not. The full container view and data flows live in
 
 The repository is grouped by system:
 
-- `im/` — the IM system: `im/server` plus `im/connectors`;
+- `im/` — the IM system: `im/server`, which is the world itself. **`im/connectors/` no longer
+  exists**: the one example connector was retired and deleted on 2026-09-28 (see Two extension
+  points);
 - `agent/` — the agent system: the current line is the **standalone crate** `agent/` (not part of
   the root workspace); the old lines `agent/runtime/` and `agent/acp-supervisor/` were retired on
   2026-09-17 (archaeology goes through Git history);
 - `client/` — the whole product's presentation face (top level);
-- `host/` — **removed on 2026-09-20**: the Local Client Host crate (local all-in-one
-  orchestration + narrow BFF) retired on 2026-09-20 and its source is gone from the worktree
-  (archaeology goes through Git history; the design record is kept in
-  [`docs/client/LOCAL_CLIENT_HOST.md`](./docs/client/LOCAL_CLIENT_HOST.md)). The *Host* role
-  still appears in the responsibility vocabulary of `AGENTS.md` / `ARCHITECTURE.md`, but no
-  longer as a component here; local process orchestration is `home.js` (see `scripts/`);
+- `app/` — the desktop shell (Tauri + Rust): **the source of `celira-app.exe`**, the thing path
+  **A** above asks you to double-click. It is a **wrapping layer** around the three containers,
+  not a fourth one;
+- `examples/` — copy-and-run samples; [`examples/README.md`](./examples/README.md) says which
+  extension cell each one belongs to;
+- `tools/` — offline utilities that are **not** in the release package
+  (`tools/home_portability.py`, `model_stub.py`, `trace_view.py`);
 - `scripts/` — the home entry point (`home.js` at the repo root, with `scripts/home/*.js`), the
   packaging/install scripts and the static server (the old `home_*.sh` were removed once the Node
   entry point was verified);
 - `docs/` — constitutional documents and frozen contracts.
+
+One directory you will see named below but **not** in this tree: `host/` — the Local Client Host
+crate (local all-in-one orchestration + narrow BFF) was **removed on 2026-09-20**, and its source
+is gone from the worktree (archaeology goes through Git history; the design record is kept in
+[`docs/client/LOCAL_CLIENT_HOST.md`](./docs/client/LOCAL_CLIENT_HOST.md)). The *Host* role still
+appears in the responsibility vocabulary of `AGENTS.md` / `ARCHITECTURE.md`, but no longer as a
+component here; local process orchestration is `home.js` (see `scripts/`).
 
 Naming map (dual-system layout, 2026-09-11): **Core v1 = the im server v1 contract** (file names and
 the words "Core v1" are kept as historical version names); crates, binaries and environment-variable
@@ -298,7 +323,7 @@ spelling) is **frozen**.
 v1 is being closed out: the im server's public contract is frozen; the agent side is rebuilt around
 "persistent identity + an environment of its own + continuous experience", and its capability
 surface (files / notes / im / web / terminal / MCP) is wired step by step with behavioural readings.
-The two-product split above is **the frame the entry-level documents are being rewritten to**; facts
+The two-product split above is **the frame these entry-level documents are written to**; facts
 about the current implementation are the code and the tests — the **architecture snapshot** is
 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §6, and the **per-step agent readings** are in
 [`agent/README.md`](./agent/README.md).
@@ -312,8 +337,8 @@ on, and a build that compiles is not support.
 **The package directory and the home directory are two different places.** The unpacked
 `celira-<version>-<platform>/` (e.g. `…-win-x64`, `…-linux-x64`) is the **artifact**; the home
 (default `D:\celira-home`, movable with
-`CELIRA_HOME_DIR`) is the **data** — the im database and media (`im/`), the agent's environment and
-notes (`env/`, `materials/`), `home.conf`, `logs/`.
+`CELIRA_HOME_DIR`) is the **data** — the im database and media (`im/`), one subdirectory per Agent
+holding its environment and notes (`agents/`, `materials/`), `home.conf`, `logs/`.
 
 **Upgrading = swap the package, leave the home alone**:
 
@@ -328,6 +353,9 @@ The first `up` in an **existing** home does these things, each idempotent or "on
 - missing directories are created; `home.conf` is written **only when it does not exist** — an
   existing configuration is not touched;
 - `human_id` / `agent_id` from `home.conf` are reused (**no identity is rebuilt**);
+- **a home from before 2026-10-01 is migrated to the resident layout**: its single `env/`
+  environment root becomes `agents/<id>/` — one subdirectory per Agent (the manual has the
+  section);
 - `<home>/README.md` is refreshed when the shipped manual changed;
 - **the im server runs its SQLite migrations on startup** (sqlx, idempotent, checksum-verified).
 
@@ -347,12 +375,12 @@ node home.js down      # stop first (a copy taken while running is "probably usa
 node home.js backup    # copies to <home>-backup-<timestamp>; --to <dir> to choose the place
 ```
 
-It backs up **the whole home** (`im/`, `env/`, `materials/`, configuration …), skipping only runtime
+It backs up **the whole home** (`im/`, `agents/`, `materials/`, configuration …), skipping only runtime
 artifacts (`logs/`, pid files). Two preconditions are hard — anything still running, or a previous
 stop that was not clean, makes it **refuse** with exit code 3 — every file is sha256-checked on both
 sides, and the manifest is written last. It ships **inside the release package** (no Python needed).
 ⚠ The backup contains `<home>/model_sources.json`, so **it carries your model keys** — treat it like
-`env/`.
+`agents/`.
 
 The reason (checked against the code): migrations are **up only** (`im/server/migrations/` has no down
 SQL), the new version's first `up` applies the pending ones, and from then on **any older binary

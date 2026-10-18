@@ -5,6 +5,19 @@
 
 [English](./README.md) | 简体中文
 
+> **本文默认你已经知道这四个词。** 在这里一次说清，免得你为了它们翻到别处：
+> **世界** —— 逻辑 im 服务端，以及它裁决的那些公共事实（身份、关系、房间、消息、事件）。
+> **家** —— 执行端机器：`home.js` 在这台机器上管的那一整套（Agent 的环境、资料、日志、模型
+> 配置），它们住在一个数据目录里（默认 `D:\celira-home`），那里同时也装着世界的库（`im/`）与
+> **一支 Agent 一个子目录**（`agents/<支>/`）。**环境根** —— 就是那个支级子目录
+> （`<家>/agents/<支>/`）：那一支自己的状态与它的 `model_binding.json` 都在里面。
+> **值班室** —— 你与某一支 Agent 之间的 `direct` 房，也就是 `home.js up` 打印的那一间。
+>
+> ⚠ **最该先知道的一处撞词**：冻结契约用专名 **`Home`** 写**世界**。所以契约里的 `Home`
+> 读「世界」；`HOME_`／`home.js`／「起家」读「执行端机器」。这条换算规则只在
+> [`docs/constitution/PRODUCT_VISION.md`](./docs/constitution/PRODUCT_VISION.md) §4 裁一次，
+> **那张表是权威**；本条只是给这一页读者的注解，不是第二个权威。
+
 ---
 
 ## 它是什么
@@ -214,27 +227,35 @@ Linux 的那几步（布置家、如实报缺什么）正是 `node home.js up` �
 
 仓库按两套系统分组：
 
-- `im/` —— IM 系统：`im/server` 服务端 + `im/connectors` 连接器；
+- `im/` —— IM 系统：`im/server`，它就是世界本身。**`im/connectors/` 今天不存在**：
+  那一个示例连接器已于 2026-09-28 退役并删除（见「两个扩展位」）；
 - `agent/` —— Agent 系统：当前线是**独立 crate** `agent/`（不属根 workspace），
   旧线 `agent/runtime/` 与 `agent/acp-supervisor/` 已于 2026-09-17 退役（考古走 Git 历史）；
 - `client/` —— 整个产品的呈现面（顶层）；
-- `host/` —— **已于 2026-09-20 删除**：Local Client Host（本机全托管编排 + 窄 BFF）当天退役，
-  源码已从工作树移除（考古走 Git 历史；设计记录保留在
-  [`docs/client/LOCAL_CLIENT_HOST.md`](./docs/client/LOCAL_CLIENT_HOST.md)）。*Host* 这个角色
-  仍留在 `AGENTS.md` / `ARCHITECTURE.md` 的职责词汇里，但不再是本仓库的一个组件；
-  本机进程编排现在是 `home.js`（见 `scripts/`）；
+- `app/` —— 桌面壳（Tauri + Rust）：**`celira-app.exe` 就是从它编出来的**，也就是上面 A 路
+  让你双击的那个东西。它是包着三个容器的一层**包装层**，不是第四个容器；
+- `examples/` —— 拿起来就能抄的样例；哪份属于哪一格见
+  [`examples/README.md`](./examples/README.md)；
+- `tools/` —— **不进发布包**的离线工具（`tools/home_portability.py`、`model_stub.py`、
+  `trace_view.py`）；
 - `scripts/` —— 家的开机入口（仓库根的 `home.js` + `scripts/home/*.js`）、打包/安装脚本与静态页服务
   （旧的 `home_*.sh` 已在 Node 入口验证通过后删除）；
 - `docs/` —— 宪法级文档与冻结契约。
 
+还有一个**下面会被提到、但不在本工作树里**的目录：`host/` —— Local Client Host
+（本机全托管编排 + 窄 BFF）**已于 2026-09-20 删除**，源码已从工作树移除（考古走 Git 历史；
+设计记录保留在 [`docs/client/LOCAL_CLIENT_HOST.md`](./docs/client/LOCAL_CLIENT_HOST.md)）。
+*Host* 这个角色仍留在 `AGENTS.md` / `ARCHITECTURE.md` 的职责词汇里，但不再是本仓库的一个组件；
+本机进程编排现在是 `home.js`（见 `scripts/`）。
+
 命名映射（2026-09-11 双系统重排）：**Core v1 = im 服务端 v1 契约**（冻结契约里的文件名与
-「Core v1」字样保留为历史版本名）；crate / 二进制 / 环境变量键族同刀更名为 `celira-im` 与
+「Core v1」字样保留为历史版本名）；crate / 二进制 / 环境变量键族也在同一次变更里更名为 `celira-im` 与
 `CELIRA_IM_*`；`CELIRA_LOCAL_CLIENT_*` 键族（含保留 WEB 字样的 `CELIRA_LOCAL_CLIENT_WEB_DIST`）
 **冻结**。
 
-「世界」与「家」这两个词各指什么，只在
+「世界」与「家」作为**产品词**的定义，只在
 [`docs/constitution/PRODUCT_VISION.md`](./docs/constitution/PRODUCT_VISION.md) §4
-解释一遍，全仓不重复解释。
+解释一遍，全仓不重复解释（本文开头那一段是给这一页读者的注解，不是第二个权威）。
 
 ## 文档导航
 
@@ -258,7 +279,7 @@ Linux 的那几步（布置家、如实报缺什么）正是 `node home.js up` �
 
 v1 正在收口：im 服务端公共契约已封板冻结；Agent 侧以「持续身份 + 归属环境 + 连续经历」重建，
 能力面（文件 / 笔记 / im / web / 终端 / MCP）已逐步接线并有行为读数。上面那个「两个产品」的框
-是**入口层文档正在改写过去的框架**；当前实现的事实以代码与测试为准——**架构快照**见
+就是**入口层文档已经写成的框架**；当前实现的事实以代码与测试为准——**架构快照**见
 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §6，**Agent 侧逐步读数**见 [`agent/README.md`](./agent/README.md)。
 
 产品支持面是 Windows 与 Linux ；v1 的验收今天都落在 Windows，Linux 是已登记的扩展面。macOS 未在支持面内——没有环境就无从验收，能编译不等于能用。
@@ -268,7 +289,8 @@ v1 正在收口：im 服务端公共契约已封板冻结；Agent 侧以「持�
 **产物目录和家目录是两个地方**。解压出来的那一包（`celira-<版本>-<平台>/`，如 `…-win-x64`、
 `…-linux-x64`）是**产物**；
 家目录（默认 `D:\celira-home`，可用 `CELIRA_HOME_DIR` 换）是**数据** —— im 的库与媒体
-（`im/`）、Agent 的环境与笔记（`env/`、`materials/`）、`home.conf`、`logs/` 都在那里。
+（`im/`）、一支 Agent 一个子目录装着的环境与笔记（`agents/`、`materials/`）、`home.conf`、
+`logs/` 都在那里。
 
 **升级 = 换包，家目录不动**：
 
@@ -282,6 +304,8 @@ node home.js up        # 在新包里开机
 
 - 缺的目录补上；`home.conf` **只在不存在时**才写 —— 已有的配置一字不动；
 - 复用 `home.conf` 里的 `human_id` / `agent_id`（**不重建身份、不重开用户**）；
+- **2026-10-01 以前的老家会自动迁成住户化布局**：它那一个 `env/` 环境根变成 `agents/<支>/`
+  ——一支 Agent 一个子目录（手册里有专节）；
 - `<家>/README.md` 在随包手册内容变了时被刷新（说明书是我们发的，不是用户的自持物）；
 - **im 服务端启动时自动跑 SQLite 迁移**（sqlx，幂等、checksum 校验）。
 
@@ -298,10 +322,10 @@ node home.js down      # 先关机（运行中复制出来的库是"可能能用
 node home.js backup    # 默认复制到 <家>-backup-<时间戳>；--to <目录> 换地方
 ```
 
-它备的是**整个家**（`im/`、`env/`、`materials/`、配置…），只排除运行产物（`logs/`、进程号）；
+它备的是**整个家**（`im/`、`agents/`、`materials/`、配置…），只排除运行产物（`logs/`、进程号）；
 两个前置条件是硬的（还有东西在跑 / 上次不是干净停的 ⇒ 拒绝，退出码 3），逐文件双侧 sha256，
 清单最后写。它**在发布包里**（不需要 Python）。⚠ 备份里有 `<家>/model_sources.json` ⇒ **它带着
-模型 key**，像 `env/` 一样保管。
+模型 key**，像 `agents/` 一样保管。
 
 理由（核过）：迁移**只有
 上行**，`im/server/migrations/` 里全是 up SQL、没有 down；新版本第一次 `up` 会把 pending 迁移
