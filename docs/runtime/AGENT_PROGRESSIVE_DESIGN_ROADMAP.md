@@ -13,7 +13,7 @@ Agent 的能力可以很复杂，但 Agent 每次能看到的内容有限。因�
 核心稳定
   -> 初始 Context
   -> 统一状态栏
-  -> Extension / Tool
+  -> App / Tool
   -> 记忆环境
   -> 检索方式
 ```
@@ -48,6 +48,14 @@ System Prompt
 + 可选临时注入内容
 ```
 
+> ⚠ **2026-10-18 标注（只映射，不改写）**：上面这一格与下面第一条规则里的
+> `Tool / Extension Catalog` 是**当时的形状名**，今天**不存在这个件**（`agent/src` 零命中；
+> 只有测试夹具里一个不相干的 `catalogue()`）。今天的对应物是**动作目录**
+> （`composition::action_directory_batch`——每扇门一行门牌 ＋ 门后每动词一行，只在首轮发一次）
+> ＋ **工具面**（`os.rs` 的 `Desktop::verbs`，每轮重新声明一次）。
+> ⚠ **本段保留当时的写法**：本文的用途是"规定推进顺序"（见文档头），这些阶段段是**推进过程的
+> 记录**——改写成今天的词，就看不出当时定的是什么了。
+
 初始 Context 的规则：
 
 - 固定身份和稳定边界来自 System Prompt；
@@ -74,26 +82,34 @@ IM：来自 3 个房间，共 12 条新消息
 
 本阶段验证：不同来源的变化是否能共享同一入口，而不丢失来源和可追溯性。
 
-## 5. 阶段四：Extension 与 Tool
+## 5. 阶段四：App 与 Tool（旧线叫 `Extension`——正名见 `AGENT_VOCABULARY.md` §9.1①）
 
-每个 Extension 是一个可进入的小系统；每个 Tool 是该系统暴露的原子读取或行动。
+每个 App 是一个可进入的小系统；每个 Tool 是该系统暴露的原子读取或行动。
 
 ```text
-Extension：维护系统
+App：维护系统
 Tool：暴露原子动作
 ```
 
 能力逐层呈现：
 
 ```text
-主入口 -> 文件夹 / 组合 -> Extension -> Tool -> 具体事实或行动
+主入口 -> 文件夹 / 组合 -> App -> Tool -> 具体事实或行动
 ```
 
 （暂缓，非原则）自行整理入口的构想无真实消费者前不立项；pin 与主体命名入口已覆盖大半表达。
 
 本阶段先用一个真实 Extension 验证完整链路，优先选择同时包含读取、行动、权限、失败和结果回流的 IM Extension。不要先做通用插件市场或自动安装系统。
 
+> ⚠ **这一句里的 `Extension` 故意不改名**（2026-10-18）：它记的是**当时做的事**（那时叫 `Extension`），
+> 改成 `App` 就成了"当时叫 App"的**假话**。本节其余现在时的形状句已按词表改为 `App`。
+
 ## 6. 阶段五：Memory Extension
+
+> ⚠ **这一格的 `Extension` 也故意不改名**（2026-10-18），理由与上一处不同：记忆今天**不是单个 App**
+> ——App 模块里**没有 `memory_app`**（只有 `file` / `im` / `im_profile` / `im_social` / `notes` /
+> `terminal` / `timer` / `web`），记忆今天是 **`notes_app` ＋ `records`/`pins`**。
+> ⇒ 改成 `Memory App` 会**造出一个不存在的概念**。别顺手改。
 
 Memory 先作为一个 Agent 私有的目录式外部环境：
 
