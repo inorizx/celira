@@ -141,7 +141,7 @@ function isFile(candidate) {
 //
 // 一句话原理：**隔离的事实单位是 Agent，不是机器**。所以：
 //   · 一支 Agent 一个**环境根**：`<家>/agents/<支>/`（**与壳同一套布局**，见
-//     `app/src-tauri/src/anjia/home.rs` 的 `agent_env_root` —— CLI 不许造第三套）；
+//     `app/src-tauri/src/home_facts.rs` 的 `agent_env_root`（2026-10-03 从 `anjia/home.rs` 提升）—— CLI 不许造第三套）；
 //   · 支级配置（身份 / 值班室 / 住户序号 / 显示名）住**它自己的环境根**里：`agent.conf`；
 //   · 家级配置（`home.conf`）只留机器级事实（端口表、世界地址、`home_id`、`mcp_*`、
 //     家钥匙摘要……）。
