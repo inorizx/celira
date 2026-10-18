@@ -1,0 +1,159 @@
+﻿/* celira-theme: 纸张墨 */
+
+[data-theme='paper'] {
+  --radius: 0.375rem;
+
+  --background: #f6f4ef;
+  --foreground: #2a2620;
+  --card: #fcfaf7;
+  --card-foreground: #2a2620;
+  --popover: #fcfaf7;
+  --popover-foreground: #2a2620;
+  --primary: #333025;
+  --primary-foreground: #f6f4ef;
+  --secondary: #edeae0;
+  --secondary-foreground: #4a4436;
+  --muted: #edeae0;
+  --muted-foreground: #6f6858;
+  --accent: #efe9dc;
+  --accent-foreground: #9c3a2d;
+  --destructive: #b64237;
+  --destructive-foreground: #fcfaf7;
+  --border: #dcd7ca;
+  --input: #b3aea3;
+  --ring: #b3372f;
+  --overlay: #2a262066;
+
+  --brand: #b3372f;
+  --agent: #40616f;
+  --agent-surface: #e3eae8;
+  --bubble-self-from: #333025;
+  --bubble-self-to: #524c3c;
+  --bubble-self-foreground: #f6f4ef;
+  --bubble-peer: #fcfaf7;
+  --bubble-peer-foreground: #2a2620;
+  --presence-online: #427351;
+  --presence-thinking: #40616f;
+  --presence-silent: #8c8473;
+  --presence-timeout: #85632a;
+  --presence-failed: #b64237;
+
+  --code-keyword: #9c3a2d;
+  --code-string: #4a6b4f;
+  --code-comment: #6f6858;
+  --code-number: #8f5f24;
+  --code-function: #40616f;
+  --code-type: #7d5a6e;
+  --code-variable: #2a2620;
+  --code-meta: #6f6858;
+}
+
+.dark[data-theme='paper'] {
+  /* 夜间 = 松烟墨（蓝黑）底 + 暖纸字：冷暖对撞，避免纯暖棕显脏 */
+  --background: #14161a;
+  --foreground: #e8e2d0;
+  --card: #1c1f25;
+  --card-foreground: #e8e2d0;
+  --popover: #20242b;
+  --popover-foreground: #e8e2d0;
+  --primary: #ddd6c4;
+  --primary-foreground: #14161a;
+  --secondary: #20242b;
+  --secondary-foreground: #e8e2d0;
+  --muted: #20242b;
+  --muted-foreground: #9a9689;
+  --accent: #252a33;
+  --accent-foreground: #e08a7f;
+  --destructive: #e46d61;
+  --destructive-foreground: #14161a;
+  --border: #2e333c;
+  --input: #494f5a;
+  --ring: #d4574c;
+  --overlay: #00000080;
+
+  --brand: #d4574c;
+  --agent: #8fc3d1;
+  --agent-surface: #1c2b2e;
+  --bubble-self-from: #3a3f4b;
+  --bubble-self-to: #565d6b;
+  --bubble-self-foreground: #ece7d6;
+  --bubble-peer: #1c1f25;
+  --bubble-peer-foreground: #e8e2d0;
+  --presence-online: #7fbf8f;
+  --presence-thinking: #8fc3d1;
+  --presence-silent: #6f747d;
+  --presence-timeout: #d0a95d;
+  --presence-failed: #e46d61;
+
+  --code-keyword: #d08a7d;
+  --code-string: #9cba8f;
+  --code-comment: #858b95;
+  --code-number: #d0a95d;
+  --code-function: #8fc3d1;
+  --code-type: #c9a0b8;
+  --code-variable: #e8e2d0;
+  --code-meta: #9a9689;
+}
+
+/* ===== 纸张墨形态层：衬线 / 去阴影 / 纸纹 =====
+   印刷气质三招：字族换衬线、表面无投影、细点纸纹。 */
+
+/* 衬线字族：内嵌思源宋体优先（中西文配套设计，跨平台同一张脸），
+   系统衬线兜底（字体未加载/未切主题时的退路） */
+[data-theme='paper'] body,
+[data-theme='paper'] .theme-scope-body {
+  font-family:
+    'Noto Serif SC', Georgia, 'Times New Roman', 'Songti SC', 'SimSun', serif;
+}
+
+/* 纸面颗粒：极细点纹（前景色 2.5% 透明度，阅读不可感知但去"塑料感"） */
+[data-theme='paper'] body {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--foreground) 2.5%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 22px 22px;
+}
+
+/* 印刷无投影：卡片/弹层/按钮的阴影全部拿掉，靠发丝边框分层 */
+[data-theme='paper'] .bg-card,
+[data-theme='paper'] .bg-popover,
+[data-theme='paper'] .shadow-xs,
+[data-theme='paper'] .shadow-sm {
+  box-shadow: none;
+}
+
+/* paper · indigo（日） */
+[data-theme='paper']:not(.dark)[data-variant='indigo'] {
+  --brand: #3a61c4;
+  --ring: #3a61c4;
+  --accent-foreground: #2d4c9b;
+}
+
+/* paper · pine（日） */
+[data-theme='paper']:not(.dark)[data-variant='pine'] {
+  --brand: #127c4e;
+  --ring: #127c4e;
+  --accent-foreground: #10623d;
+}
+
+/* paper · indigo（夜） */
+.dark[data-theme='paper'][data-variant='indigo'] {
+  --brand: #557fe4;
+  --ring: #557fe4;
+  --accent-foreground: #84a3e8;
+}
+
+/* paper · pine（夜） */
+.dark[data-theme='paper'][data-variant='pine'] {
+  --brand: #1e9d65;
+  --ring: #1e9d65;
+  --accent-foreground: #65b98b;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='paper'] body {
+      background-image: none;
+    }
+}

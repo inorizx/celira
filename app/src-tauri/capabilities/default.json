@@ -1,0 +1,43 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Celira 桌面 app：核心默认权限 + 由 Rust 侧代前端发 HTTP（见 src/lib.rs 的说明） + **只许往系统下载目录写文件**（下载落盘，2026-10-08）。 ⚠ 作用域里那两段 `:*` 不是装饰：URL 模式的端口是**独立分量**，`http://*` 只匹配**不带端口**的地址，而世界地址永远带端口（`http://127.0.0.1:8080`）—— 2026-10-03 真机实测：留着旧写法时每一次出网都回 `url not allowed on the configured scope`，app 连不上任何世界。 ⚠ fs 那两条的作用域是这一刀的安全边界：只放开 `$DOWNLOAD/**`，webview 写不到别处（页面算出来的落点再离谱也出不了这个圈）；`write` 与 `exists` 都只给这一个圈 ——不放开 `fs:default`（那会连读、删、目录遍历）。 ⚠ **窗口那五条是自绘标题栏要的**（2026-10-17）：`allow-start-dragging`（`data-tauri-drag-region` 走的正是这条 IPC —— 少了它窗口**拖不动**，真机当场撞到）、`allow-minimize`、`allow-toggle-maximize`、`allow-is-maximized`（那颗按钮的图标是读数）、`allow-close`。 只放这五条，不放 `core:window:default`（那会连 `set-position`/`set-size`/`set-always-on-top` 一起给出去）。",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "http://*:*"
+        },
+        {
+          "url": "https://*:*"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        {
+          "path": "$DOWNLOAD/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        {
+          "path": "$DOWNLOAD/**"
+        }
+      ]
+    },
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close"
+  ]
+}

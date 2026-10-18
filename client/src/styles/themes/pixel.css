@@ -1,0 +1,194 @@
+﻿/* celira-theme: 像素风 */
+
+[data-theme='pixel'] {
+  --radius: 0;
+
+  --background: #f0e8d8;
+  --foreground: #26261e;
+  --card: #f6efdd;
+  --card-foreground: #26261e;
+  --popover: #f6efdd;
+  --popover-foreground: #26261e;
+  --primary: #a23d2e;
+  --primary-foreground: #ffffff;
+  --secondary: #e2d7bd;
+  --secondary-foreground: #26261e;
+  --muted: #e2d7bd;
+  --muted-foreground: #645e4f;
+  --accent: #efe0c4;
+  --accent-foreground: #a73928;
+  --destructive: #b3281a;
+  --destructive-foreground: #ffffff;
+  --border: #26261e;
+  --input: #26261e;
+  --ring: #d14f3b;
+  --overlay: #26261e66;
+
+  --brand: #d4503c;
+  --agent: #256199;
+  --agent-surface: #d5e4f2;
+  --bubble-self-from: #cb4d3a;
+  --bubble-self-to: #b75c4e;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #f6efdd;
+  --bubble-peer-foreground: #26261e;
+  --presence-online: #2a6b36;
+  --presence-thinking: #256199;
+  --presence-silent: #817965;
+  --presence-timeout: #7c5811;
+  --presence-failed: #b3281a;
+
+  --code-keyword: #a73928;
+  --code-string: #286b36;
+  --code-comment: #645e4f;
+  --code-number: #7e5708;
+  --code-function: #256199;
+  --code-type: #6f5096;
+  --code-variable: #26261e;
+  --code-meta: #645e4f;
+}
+
+.dark[data-theme='pixel'] {
+  --background: #1a1a2e;
+  --foreground: #eae6d1;
+  --card: #22223a;
+  --card-foreground: #eae6d1;
+  --popover: #262640;
+  --popover-foreground: #eae6d1;
+  --primary: #ff6991;
+  --primary-foreground: #1a1a1a;
+  --secondary: #2c2c48;
+  --secondary-foreground: #eae6d1;
+  --muted: #2c2c48;
+  --muted-foreground: #a29d86;
+  --accent: #32324e;
+  --accent-foreground: #ff7a92;
+  --destructive: #ffaa9a;
+  --destructive-foreground: #242424;
+  --border: #eae6d1;
+  --input: #eae6d1;
+  --ring: #e94560;
+  --overlay: #00000080;
+
+  --brand: #e94560;
+  --agent: #4dd6c1;
+  --agent-surface: #1e3a38;
+  --bubble-self-from: #e94560;
+  --bubble-self-to: #f06d84;
+  --bubble-self-foreground: #1a1a1a;
+  --bubble-peer: #22223a;
+  --bubble-peer-foreground: #eae6d1;
+  --presence-online: #58c75e;
+  --presence-thinking: #4dd6c1;
+  --presence-silent: #837d6a;
+  --presence-timeout: #e8b93f;
+  --presence-failed: #ff6e63;
+
+  --code-keyword: #ff7a92;
+  --code-string: #8fd69e;
+  --code-comment: #9e987f;
+  --code-number: #e8b93f;
+  --code-function: #7fb8f0;
+  --code-type: #c99ade;
+  --code-variable: #eae6d1;
+  --code-meta: #9d9882;
+}
+
+/* ===== 像素风形态层：像素字体 + 阶梯描边 =====
+   内嵌 OFL 缝合像素字体（中西文同风格像素字形）；
+   四向阶梯 box-shadow 模拟像素描边（无圆角由 --radius: 0 承担）。 */
+
+[data-theme='pixel'] body,
+[data-theme='pixel'] .theme-scope-body {
+  font-family:
+    'Fusion Pixel', 'Fusion Pixel 12px Proportional', ui-monospace,
+    'PingFang SC', 'Microsoft YaHei', monospace;
+}
+
+[data-theme='pixel'] .bg-card,
+[data-theme='pixel'] .bg-popover,
+[data-theme='pixel'] .bg-bubble-peer,
+[data-theme='pixel'] .from-bubble-self-from {
+  box-shadow:
+    0 -3px 0 0 var(--border),
+    0 3px 0 0 var(--border),
+    -3px 0 0 0 var(--border),
+    3px 0 0 0 var(--border);
+}
+
+/* pixel · arcade（日） */
+[data-theme='pixel']:not(.dark)[data-variant='arcade'] {
+  --primary: #1261a2;
+  --brand: #177fd4;
+  --ring: #177dd1;
+  --bubble-self-from: #1679cb;
+  --bubble-self-to: #357abb;
+  --accent: #c8def6;
+  --accent-foreground: #0160a7;
+  --background: #deeaf8;
+  --card: #e4f1ff;
+  --popover: #e4f1ff;
+  --secondary: #c6daf0;
+  --muted: #c6daf0;
+  --border: #20262c;
+  --input: #20262c;
+  --bubble-peer: #e4f1ff;
+}
+
+/* pixel · gameboy（日） */
+[data-theme='pixel']:not(.dark)[data-variant='gameboy'] {
+  --primary: #4d6705;
+  --brand: #648706;
+  --ring: #638506;
+  --bubble-self-from: #608106;
+  --bubble-self-to: #647f2f;
+  --accent: #d2ddc3;
+  --accent-foreground: #4b660b;
+  --background: #e5ecdc;
+  --card: #ebf3e1;
+  --popover: #ebf3e1;
+  --secondary: #d2ddc3;
+  --muted: #d2ddc3;
+  --border: #24271f;
+  --input: #24271f;
+  --bubble-peer: #ebf3e1;
+}
+
+/* pixel · arcade（夜） */
+.dark[data-theme='pixel'][data-variant='arcade'] {
+  --primary: #25a2ff;
+  --brand: #1e84e3;
+  --ring: #1e84e3;
+  --bubble-self-from: #1e84e3;
+  --bubble-self-to: #2c9cf4;
+  --accent: #1c3047;
+  --accent-foreground: #56a7fd;
+  --background: #0e1d2e;
+  --card: #14263a;
+  --popover: #172b40;
+  --secondary: #1c3148;
+  --muted: #1c3148;
+  --border: #d8e7f8;
+  --input: #d8e7f8;
+  --bubble-peer: #14263a;
+}
+
+/* pixel · gameboy（夜） */
+.dark[data-theme='pixel'][data-variant='gameboy'] {
+  --primary: #84a90a;
+  --brand: #6e8d08;
+  --ring: #6e8d08;
+  --bubble-self-from: #6e8d08;
+  --bubble-self-to: #88a012;
+  --accent: #283116;
+  --accent-foreground: #8caf33;
+  --background: #19200a;
+  --card: #20290f;
+  --popover: #242d12;
+  --secondary: #2a3416;
+  --muted: #2a3416;
+  --border: #e1e9d5;
+  --input: #e1e9d5;
+  --bubble-peer: #20290f;
+}
+

@@ -1,0 +1,221 @@
+﻿/* celira-theme: 炫光 */
+
+/* ---- 炫光（流光渐变 · 张扬灯带）：圆角 + 双色渐变 + 发光投影，与赛博朋克的锐利霓虹互为两极 ---- */
+[data-theme='dazzle'] {
+  --background: #f1f2f8;
+  --foreground: #1a1c2c;
+  --card: #ffffff;
+  --card-foreground: #1a1c2c;
+  --popover: #ffffff;
+  --popover-foreground: #1a1c2c;
+  --primary: #6251d6;
+  --primary-foreground: #ffffff;
+  --secondary: #e7e9f3;
+  --secondary-foreground: #3a3d55;
+  --muted: #e9ebf3;
+  --muted-foreground: #5d6078;
+  --accent: #e5e3f8;
+  --accent-foreground: #4639b8;
+  --destructive: #c52338;
+  --destructive-foreground: #ffffff;
+  --border: #c4c6d3;
+  --input: #9ea1af;
+  --ring: #6a58e8;
+  --overlay: rgb(20 22 40 / 0.45);
+  --brand: #7c6bff;
+  --bubble-self-from: #8a79ff;
+  --bubble-self-to: #4cc3e8;
+  --bubble-self-foreground: #12102a;
+  --bubble-peer: #ffffff;
+  --bubble-peer-foreground: #1a1c2c;
+  --agent: #9e38b3;
+  --agent-surface: #f3e9fb;
+  --radius: 0.875rem;
+  --shadow-card: 0 1px 2px rgb(60 50 120 / 0.06), 0 10px 28px rgb(60 50 120 / 0.1);
+  --shadow-popover: 0 12px 32px rgb(40 32 90 / 0.16);
+  --shadow-bubble-self: 0 0 16px rgb(124 107 255 / 0.35), 0 2px 6px rgb(60 50 120 / 0.18);
+  --popover-outline: color-mix(in srgb, var(--primary) 14%, var(--popover));
+  --presence-online: #26734d;
+  --presence-thinking: #6255ca;
+  --presence-silent: #7f8193;
+  --presence-timeout: #885e1f;
+  --presence-failed: #c52338;
+  --code-keyword: #6557d1;
+  --code-string: #0b775f;
+  --code-comment: #666977;
+  --code-number: #995a23;
+  --code-function: #0b738e;
+  --code-type: #6554dc;
+  --code-variable: #1a1c2c;
+  --code-meta: #666977;
+}
+
+.dark[data-theme='dazzle'] {
+  --background: #0c0d15;
+  --foreground: #e8e9f4;
+  --card: #141626;
+  --card-foreground: #e8e9f4;
+  --popover: #181a2c;
+  --popover-foreground: #e8e9f4;
+  --primary: #9481ff;
+  --primary-foreground: #14102e;
+  --secondary: #1d2033;
+  --secondary-foreground: #cfd2e6;
+  --muted: #181a29;
+  --muted-foreground: #9699b0;
+  --accent: #252844;
+  --accent-foreground: #aab0ff;
+  --destructive: #f16575;
+  --destructive-foreground: #14102e;
+  --border: #2a2d47;
+  --input: #525883;
+  --ring: #8a79ff;
+  --overlay: rgb(4 5 10 / 0.66);
+  --brand: #8a79ff;
+  --bubble-self-from: #7c6bff;
+  --bubble-self-to: #35c5ec;
+  --bubble-self-foreground: #0f0d26;
+  --bubble-peer: #1b1d30;
+  --bubble-peer-foreground: #e8e9f4;
+  --agent: #e06ee8;
+  --agent-surface: #251a35;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 24px rgb(124 107 255 / 0.05);
+  --shadow-popover: 0 12px 32px rgb(0 0 0 / 0.5), 0 0 28px rgb(53 197 236 / 0.06);
+  --shadow-bubble-self: 0 0 18px rgb(124 107 255 / 0.4);
+  --popover-outline: color-mix(in srgb, var(--primary) 18%, var(--popover));
+  --presence-online: #5fd6a0;
+  --presence-thinking: #9481ff;
+  --presence-silent: #71748d;
+  --presence-timeout: #e8b45f;
+  --presence-failed: #f16575;
+  --code-keyword: #a89bff;
+  --code-string: #7fd6ae;
+  --code-comment: #7d829d;
+  --code-number: #e8b45f;
+  --code-function: #6fc3ea;
+  --code-type: #8a79ff;
+  --code-variable: #e8e9f4;
+  --code-meta: #9699b0;
+}
+
+/* ===== 炫光氛围层：环境辉光场 + 流动光带 =====
+   未来感的来源是"气场"而非表面色：夜景在页面两角点紫/青两盏环境灯，
+   一道极低透明度的斜向光带缓慢扫过（transform 动画，GPU 合成，几乎零成本）。
+   全部从 var(--primary)/var(--bubble-self-to) 派生——配色变体切换时光场同步转向；
+   pointer-events 穿透；prefers-reduced-motion 时静止。删除本段即退回基础炫光。 */
+[data-theme='dazzle'] .bg-background {
+  background-image:
+    radial-gradient(52rem 34rem at 8% -8%, color-mix(in srgb, var(--primary) 11%, transparent), transparent 62%),
+    radial-gradient(48rem 34rem at 96% 108%, color-mix(in srgb, var(--bubble-self-to) 9%, transparent), transparent 62%);
+}
+
+.dark[data-theme='dazzle'] .bg-background {
+  background-image:
+    radial-gradient(64rem 44rem at 6% -10%, color-mix(in srgb, var(--primary) 34%, transparent), transparent 60%),
+    radial-gradient(58rem 42rem at 98% 110%, color-mix(in srgb, var(--bubble-self-to) 27%, transparent), transparent 60%),
+    radial-gradient(90rem 30rem at 50% 118%, color-mix(in srgb, var(--primary) 10%, transparent), transparent 70%);
+}
+
+[data-theme='dazzle'] body::before {
+  content: '';
+  position: fixed;
+  inset: -20%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 42%,
+    color-mix(in srgb, var(--primary) 5%, transparent) 49%,
+    color-mix(in srgb, var(--bubble-self-to) 5%, transparent) 53%,
+    transparent 60%
+  );
+  animation: dazzle-drift 26s ease-in-out infinite alternate;
+}
+
+.dark[data-theme='dazzle'] body::before {
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    color-mix(in srgb, var(--primary) 11%, transparent) 47%,
+    color-mix(in srgb, var(--bubble-self-to) 12%, transparent) 52%,
+    transparent 61%
+  );
+}
+
+/* 夜间主行动件微光：徽章/发送键等像亮起的小灯 */
+.dark[data-theme='dazzle'] .bg-primary {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 38%, transparent);
+}
+
+/* dazzle · flare（日） */
+[data-theme='dazzle']:not(.dark)[data-variant='flare'] {
+  --primary: #a331b6;
+  --brand: #c248d5;
+  --ring: #ac34bf;
+  --bubble-self-from: #c85dd9;
+  --bubble-self-to: #8eb9fa;
+  --accent-foreground: #830d93;
+  --background: #f6f0f7;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #efe6f0;
+  --muted: #f0e8f1;
+  --border: #cec4cf;
+  --input: #a99eaa;
+  --bubble-peer: #ffffff;
+}
+
+/* dazzle · pulse（日） */
+[data-theme='dazzle']:not(.dark)[data-variant='pulse'] {
+  --primary: #137624;
+  --brand: #1d9530;
+  --ring: #148027;
+  --bubble-self-from: #1ca233;
+  --bubble-self-to: #e1b155;
+  --accent-foreground: #0b5a19;
+  --background: #eef4ee;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #e3ede3;
+  --muted: #e6eee6;
+  --border: #c0c9c0;
+  --input: #99a499;
+  --bubble-peer: #ffffff;
+}
+
+/* dazzle · flare（夜） */
+.dark[data-theme='dazzle'][data-variant='flare'] {
+  --primary: #d565e7;
+  --brand: #cb60dc;
+  --ring: #cb60dc;
+  --bubble-self-from: #c54cd8;
+  --bubble-self-to: #8db7fa;
+  --accent: #3a243d;
+  --accent-foreground: #dfa1e9;
+  --background: #110b12;
+  --card: #1e1220;
+  --popover: #231626;
+  --secondary: #2a1c2c;
+  --muted: #221724;
+  --border: #3b273e;
+  --input: #714f75;
+  --bubble-peer: #271929;
+}
+
+/* dazzle · pulse（夜） */
+.dark[data-theme='dazzle'][data-variant='pulse'] {
+  --primary: #13ae48;
+  --brand: #13ae48;
+  --ring: #13ae48;
+  --bubble-self-from: #18a144;
+  --bubble-self-to: #e0b245;
+  --accent: #16321b;
+  --accent-foreground: #81cd8d;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='dazzle'] body::before {
+      animation: none;
+    }
+}

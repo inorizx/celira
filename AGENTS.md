@@ -1,0 +1,251 @@
+# AGENTS.md
+
+## 项目身份
+
+Celira 是一个让 Human 与 AI Agent 以持续身份长期、平等共处的通信产品。当前项目以 im 服务端先行的方式建立公共身份、关系、权限、消息和可靠协调地基。
+
+项目文档和代码只陈述当前目标、契约与事实。未确认提案不构成本项目的设计依据。仓库只保留当前产品价值、系统地图、无法从代码/测试推导且会影响产品/架构/公共契约/安全/验收的唯一事实；实现细节归代码，行为证明归测试，历史过程归 Git。**每个事实只能有一个权威位置。**
+
+**本文件是每轮自动注入的工作区指令，加载器按字节截断（预算 64 KiB，超出即从尾部丢弃）。** 所以这里只写「动手前必须知道」的判据和指针：状态、过程、每刀记录一概不写。加内容前先问一句——**这句删掉，下一次动工会不会做错事？**不会，就不该写在这里。
+
+## 权威文档顺序
+
+1. 用户当次明确确认的方向；
+2. `docs/constitution/PRODUCT_VISION.md`；
+3. `docs/constitution/PROJECT_SHAPE.md`（**项目形态判据**：发布单元构成、切分与合并的四条判据、一个发布一个版本号、前端为何不单独发包、app 是总控台——凡"该不该拆包／该怎么发／谁带前端"的提案，先过这里）；
+4. `ARCHITECTURE.md`（唯一 C4 L1–2 系统地图；区分当前实现与目标架构；目标描述不覆盖冻结契约）；
+5. `docs/contracts/core-v1/CORE_V1_IM_CONTRACT.md` 与 `CORE_V1_AGENT_PROTOCOL.md`（Core v1 冻结契约）；
+6. `docs/contracts/core-v1/CORE_V1_ACCEPTANCE.md`（冻结基线、四类解封条件、**窄解冻切片的唯一登记处 §6.1**）；
+7. `docs/contracts/core-v1/` 其余切片契约：`HOME_ACCESS.md`、`HOME_PORTABILITY.md`、`CORE_V1_CALL.md`、`CORE_V1_PARTICIPANT_PRESENTATION.md`、`CORE_V1_AVATAR_P0.md`、`CORE_V1_CONTACT_REVERSIBILITY.md`、`CORE_V1_MENTION_TARGETS.md`、`CORE_V1_AGENT_SPEAK.md`、`CORE_V1_AGENT_DIRECTORY.md`、`CORE_V1_AGENT_HISTORY.md`、`CORE_V1_AGENT_READ_SURFACE.md`、`CORE_V1_AGENT_READ_CURSOR.md`、`CORE_V1_AGENT_LEAVE.md`——**切片的公共语义只在各自文件里**；
+8. `docs/constitution/AGENT_PHILOSOPHY.md`；
+9. `docs/constitution/AGENT_FOUNDATION_CONTRACT.md`；
+10. `docs/constitution/AGENT_CONTINUITY_CONSTITUTION.md`（**Agent 连续性宪法**：23 条判据句 + 判错纪律 + 概念定义表 + 代笔定罪标准——Runtime 侧连续性/会话/上下文/记忆/唤醒/注入/空槽/自主状态类提案的最高判据层）；
+11. `docs/runtime/terminal/README.md` 及它导航的终局正文（**Runtime 终局设计入口**；组内修订裁决见 `RUNTIME_TERMINAL_DECISIONS.md`；不覆盖宪法与冻结契约，也不表示已获实现授权）；
+12. `client/README.md` 与 `client/DESIGN_SYSTEM.md`（前端边界）；
+13. `docs/agent/06_AGENT_RUNTIME_END_STATE.md` → `00_AGENT_CONSTITUTION.md` → `05_AGENT_ENGINEERING.md` → `02_AGENT_FOUNDATION.md` → `agent/README.md`（新 Agent 线的阅读顺序，详见下方「新 Agent 工程护栏」）；
+14. Rust 实现。
+
+**命名权威（2026-10-18 立）**：凡「**这个词在这个项目里指什么**」的问题，先查 `docs/runtime/AGENT_VOCABULARY.md`（**名字的权威位置**）与 `docs/runtime/terminal/README.md` §「跨文档重名」（**同名不同指的登记处**）。⚠ 两者**都不是契约**：它们回答「叫什么、指什么」，不回答「该怎么做」；与宪法、冻结契约、终局正文冲突时**以后者为准**。⇒ 推论：**新造词之前先查这两处**——查得到就不得另造近义名；查不到而确实缺一格，按「新 Agent 工程护栏」的进词表三问补，**不先造词**。
+
+已退役的实现与已删除的文档**不占**本顺序（考古走 Git 历史）。`docs/client/LOCAL_CLIENT_HOST.md` 保留为 BFF 安全模式与 Host 威胁模型的历史记录，不再是当前实现路径。
+
+### Runtime 文档纪律
+
+- `docs/runtime/` 只保留活文档：词表（`AGENT_VOCABULARY.md`）、原则（`AGENT_CORE_PRINCIPLES.md`）、路线图（`AGENT_PROGRESSIVE_DESIGN_ROADMAP.md`）、分层（`RUNTIME_CORE_AND_LAYERING.md`）、地基设计（`RUNTIME_FOUNDATION_DESIGN.md`）与 `terminal/` 终局正文。施工单与讨论稿**竣工即焚**：每刀收工提交时随刀删除，事实沉淀进 `agent/README.md` §3.x、测试与活文档；考古经 Git 历史。旧文里的「已批准」「必须」「下一步」「待实现」只说明当时上下文，不自动授权本轮实现。
+- **`agent/README.md` §3.x 收的是「当前事实」，不是「这一刀的经过」**：新事实进**已有的、关于那件事的节**，**不按刀新开节**；过程归 Git（考古走历史）。**判据**：这一节回答「**这里现在是什么**」；回答「**这是哪一刀**」的句子不属于活文档。理由与量出来的代价见 `agent/README.md` §5「本文收什么、放哪」。
+- 删任何文档前先核唯一有效信息与反向引用；不能因降级就删数据、代码或放弃仍有效的安全与公共承诺。代码注释里的施工单名是事件标签（类似引用一个 commit），不随文件删除而改名。
+- 上层契约仍明确引用的具体条款，按任务定向核对 Git 原文，不扩大成整份旧目标生效；条款有效性未裁定前，不得借导航调整解除既有约束，也不得把旧机制抄进终局当永久原则。发现与 terminal 或上层契约冲突，先报告并暂停相关实现，交主人裁决。
+- **终局组与实现冲突时谁赢：看那句话是什么句子**（2026-10-06 主人裁决）。判据一句话——**「不许/必须」（规范句）以终局与宪法为准；「是/有」（描述句）以实现为准。** 理由：**规范句是约束**，约束必须来自上游（否则下游可以自己放宽自己）；**描述句是事实**，事实必须来自实现（否则文档描述的不是这个系统）。这不是新判据——它就是下方「新 Agent 工程护栏」那条**句子分类**纪律（"规范句讲不许/必须，主语是系统；描述句讲是/有，主语是事实"），用在"两份文档打架"上。⚠ **与下一条不冲突**：下一条防的是"代码行为**自动**变成**契约**"（那是规范），本判据说的是"描述句以**实现**为准"（那是事实）——**约束从上往下，事实从下往上**。
+
+如果文档、测试和实现冲突，必须先报告冲突及影响，不得让代码行为自动成为新的产品契约。
+
+### 证据库归宿（`outputs/`）
+
+- `outputs/` 是**证据库，不是权威**：一个结论若今天还有效力，它必须已经在 `docs/`、`agent/README.md` §3.x、测试或代码里。**谁进、谁焚、索引在哪**、以及今天的**证据锚清单**见 `outputs/README.md`；施工单与审计 prompt 与 `docs/runtime/` 同规——**竣工即焚**（考古走 Git）。活文档按名字引用一处 `outputs/` 文件，就是那份文件**不得删除**的理由。
+
+## 动手前门禁
+
+在修改代码、生成实现文件或执行不可逆操作前，必须先产出：
+
+1. C4 Level 1–2 拓扑图，说明涉及的系统、容器、连接和数据流；
+2. 一句原理声明，说明核心问题、关键假设和权衡；
+3. **先读那几处原文，再推荐方案**（2026-10-08 记账，两次实测的教训）。凡要动 Core / OS / 存储的
+   中立面，或推荐一条**"集中 / 收编 / 统一"**的方案，**动手前先读当事人自己写的边界**——
+   `core.rs` 的词表说明、`store.rs` 的 `UnknownFailureClass` 这类地方，**它们常写着
+   「本文件不越界收编它们」「本层不解释、也不校验」**。判据一句话：
+   **推荐"集中"之前，先查有没有人明文禁止过集中。**
+   两次实测：① 曾判"流式要动 Core 的中立协议"（错——流式落在 adapter 里）；
+   ② 曾推荐"中立封闭枚举收编行动面全部失败分类"（错——`core.rs` 明文禁止收编 App 业务词）。
+   **两次都是先读了代码才发现**。⚠ 推论：**没读过那几处原文的方案不算方案，只是印象。**
+   交付时还要说清这一刀的**负空间**（它不碰什么）——"越改越乱"从来不是单刀质量差，
+   而是**没有全局约束的局部最优**在互相摆。
+
+如果改动会影响产品价值、范围边界、跨容器连接、公共协议、核心领域模型、不可逆操作或重大安全风险，必须暂停并请求主人作最终取舍。
+
+## Core v1 封板门禁
+
+Core v1 公共契约已封板冻结（身份、房间、成员、权限、消息、Human Event、Agent Event、附件、撤回与 read state）。封板不承诺零 bug，只默认不改 Core v1 公共契约；**四类解封条件见 `CORE_V1_ACCEPTANCE.md` §6**。
+
+- AI 默认不得修改 im 服务端源码、SQLite migration、公共 API/协议和 v1 权威契约；只涉及 Client、Native Runtime 或 Adapter 的任务必须在**外部边界**解决，不得反推改动 im 服务端（本项目不维护第三方 Agent 适配器）；
+- 命中解封条件时必须暂停，按「动手前门禁」请求主人确认，**不得自行解封**；普通 bug 修复若能在 Adapter 或外部边界解决，一律不得改 im 服务端；
+- README 状态或明显文档事实错误可按证据更正，但不得借文档更新改写协议或 im 服务端行为。
+
+### 已批准的解冻切片（当前口径）
+
+**本表只留"不查就会猜错"的那一句**；完整记录（migration、落地清单、门禁证据、主人原话、已知边界）只在 `CORE_V1_ACCEPTANCE.md` §6.1，本文件不重复。
+
+| 口径 | 不查会猜错的那一句 | 权威位置 |
+|---|---|---|
+| 准入 = ownership **或** accepted 关系（并集） | 私人房准入与群邀请资格**同形**；Human 与"自己并不拥有的 Agent"有关系即可开房 | `CORE_V1_IM_CONTRACT.md` §5.7 |
+| 一间房 = 一段关系 | 同一 Human–Agent 对**至多一间** `direct` 房；`direct` 房没有标题 | 同上 §5.1/§5.5 |
+| owner = 创建者 | 判据是「谁创建」而**不是 kind**；Agent owner 的邀请权与移除权（含 Human 成员）与 Human owner 同规则 | 同上 §5.1/§5.4/§5.6–§5.8、`CORE_V1_AGENT_PROTOCOL.md` §2.4/§2.5 |
+| 关系与拉黑对**两个主体**开放 | 同意归**被申请的那一方**（Owner 不代答）；目标不可用统一 404 `participant_not_found` | `CORE_V1_CONTACT_REVERSIBILITY.md` |
+| 表达权归主体 | 自己的 Profile / 头像 / 群内呈现由**自己或它的 Owner** 写（并集）；代笔有署名（`published_by_kind`） | `CORE_V1_PARTICIPANT_PRESENTATION.md` §4、`CORE_V1_AVATAR_P0.md` |
+| 读面对齐 | Agent 读面与 Human 侧**同一可见性裁决**；Backend 面非成员 `403` 与 Human 侧 `404` 的偏斜**记为已知照顾**——不统一、不改既有端点 | `CORE_V1_AGENT_READ_SURFACE.md` |
+| 读游标与退房 | Agent 的成员周期有**自己的**读游标；非 owner 可由**它自己**以 `closed_by='leave'` 关闭；`human_direct` 的出口归关系模型 | `CORE_V1_AGENT_READ_CURSOR.md`、`CORE_V1_AGENT_LEAVE.md` |
+| 已读回执（`direct` 房） | 房间列表多一格 `peer_read`（`read`/`unread`/`null` ＝ 我还没说过话）；**是投影不是新事实**（零新写者、零新事件）；**不做**逐条/群房/Human↔Human/推送 | `CORE_V1_READ_RECEIPT.md` |
+| Mention 目标 | 群房 `@` 的对象是**该房 active 成员**（人与 Agent 均可）；`direct`/`human_direct` 仍要求 mentions 为空；**`@` 不授予任何读取权** | `CORE_V1_MENTION_TARGETS.md` |
+| 唤醒流与 Agent 读取面 | `events/stream` 是**只发无事实门铃**的 SSE（轮询仍是完整降级路径） | `CORE_V1_AGENT_PROTOCOL.md` §8、`CORE_V1_AGENT_DIRECTORY.md`、`CORE_V1_AGENT_HISTORY.md`、`CORE_V1_AGENT_SPEAK.md` |
+| 邀请一个人进这个世界 | `new_human` 兑换产出**一个新 Human** + 它自己的会话；**不做匿名自注册** | `HOME_ACCESS.md` §1.1 |
+| Call P0 | 进程内有界、可过期、非持久；**Core 不接触媒体字节**；任意两个 active participant 可互呼 | `CORE_V1_CALL.md` |
+| 迁移与真家数据 | **schema-only 重建**、不搬行、无升级桥；**不改任何既有迁移**（sqlx checksum） | `CORE_V1_IM_CONTRACT.md` |
+| 人自己的资料可改写（名字 ＋ 头像） | `display_name` 是**既有 Participant 身份事实**（不在呈现版本链上）⇒ 改名是**状态写**（无版本号、无幂等键）；头像走版本链；**只有本人能写**（Human 没有 Owner 这一支）；头像字节读取**照旧只有房间成员那一条**（自己那张脸在客户端借"我所在的房间"读） | `CORE_V1_PARTICIPANT_PRESENTATION.md` §4、`CORE_V1_AVATAR_P0.md` |
+
+**生长规则**：新切片只在 `CORE_V1_ACCEPTANCE.md` §6.1 追加记录；本文件只在上表加/改一行、必要时补一句红线。migration 名、表名、错误码清单、主人原话、逐条"不做什么"——**不写进本文件**。
+
+### 已退役并删除
+
+下面这些今天**不存在**（完整退役记录见 §6.1，考古走 Git）：不要再引用、不要再实现。
+
+- **Completion / ACK**：投递确认不是 IM 事实（2026-09-24 裁、2026-09-28 连端点带表删除）；投递由「拉取 + say + 幂等键」承担；
+- **Agent Service 层**（Publication / Service Access / 服务房 / `ServiceApi` / `/app/services`）：服务声明层是**工作态**而不是 IM 事实，且把**预先同意**塞进一个只有事后同意的模型；
+- **旧 Agent Live State 执行面投影**（实例心跳、Activity 阶段·流·草稿、独立 Live WS）：它长着**宿主的形状**——"在线"该由连接说、"正在写"该是主体自己的动作；
+- **第三方 Agent 适配器**（Hermes connector）：执行端只有 Native Runtime 一家；
+- **Local Client Host 全托管路径**（`host/` crate、前端 Host 模块、`/api/v1/local/*`）：唯一连接模式是 core 直连。
+
+## 架构红线（不可违反）
+
+- **单一写者**：一个 Home 任一时刻只有一个可写的 im 服务端，作为公共事实唯一裁决者；不存在双 im 服务端同步/合并、备用写者或任何形式的公共事实双写；
+- **产品角色只有 Client / IM / Agent**：Human 与 Agent 都是 Participant 且都可成为 Room 成员；Runtime、Connector、Host、进程、Session、Gateway 不是 Participant，也不是 Room 成员；职责面严格四类——呈现（Client）/公共事实（im 服务端）/执行（Agent 与 Runtime/执行端）/连接（Connector）；执行点是承载一个或多个隔离 Agent 执行端的机器或部署位置，不是 Agent 身份；Host 是横向部署编排（常驻服务级启动/健康检查/重启/回收），不属于连接面或任何职责层；**Gateway Connector** 只承载执行端以公开协议主动接入时的连接侧映射、重试与实际事件上报，不管理它的内部生命周期；
+- **事实分离**：Agent Ownership、Backend Binding、Credential、Room Membership 和 Permission 是不同事实；Credential 归属于 Binding、可轮换、可撤销、只代表指定 Agent，不代表承载它的宿主；同一 Agent 同时至多一个 active Binding 是 V1 当前限制，非永久架构承诺；执行期控制只经 **Home 准入授权的独立控制路径或同域路由**，不成为 im 服务端的耐久公共事实，私有状态仍归执行端；
+- **公共消息主链**：普通新消息的公共处理主链是**公共 Message → Agent Event →（拉取）**；撤回通知等其他 Event 按版本化契约定稿；Event 可在无 Binding 时存在，active Binding 只决定哪个 Backend 可观察指定 Agent 的 Event，不是事件的创建者；Human 与 Agent 走同一普通消息路径；这条主链是 im 服务端的公共协议，不是 Runtime Run 起源的全称；
+- **双平面**：Celira 产品中心是 im 服务端的公共世界，Native Runtime 同时拥有私有世界。对 Runtime 内部本体，im 服务端是可替换渠道；对 Celira 产品，Runtime 是可替换执行端。im 服务端与 QQ/微信同属 IM、平级通道，唯一区别是 agent-native（agent 是一等用户）；不得把 im 服务端写成凌驾于其他通道的中央仲裁层或「跨通道公共事实层」，也不得把 Runtime 写成第二个公共事实写者；
+- **Runtime Run 起源**：Run 是有限清醒期，不限于「一个 im 侧 Event → 一个 Run」。im-bound Run 的源 Event 供拉取（`GET /v1/backend/events`），收口是 Runtime 私有终态（trace 收敛），不欠 im 侧任何确认；im-less / 本地 Run 无源 Event，同样私有终态收敛。权威定义见 `docs/constitution/AGENT_FOUNDATION_CONTRACT.md` §3.6，产品口径见 `PRODUCT_VISION.md`；
+- **内容与执行归属**：im 服务端不生成 Agent 内容，不拥有 Agent 私有 Session、Run、Memory 或 Tool 状态；执行端的人格、模型、Memory、Tool 与内部权限全部归它自己的系统所有，Celira 不接管、不复制、不替其审批；Agent Backend 不是 Participant，只能在明确授权下代表指定 Agent 行动，不得直写 im 服务端数据库；Tool 不是 Agent、Participant、Message 或 im 侧 Event；Runtime 的工具面分**原生**（fs/terminal/web/im 等出厂内置，组合期静态注册）与**外部**（MCP Tool Provider，走宿主声明授权）两个来源，同一 Tool 概念；门控的精确轴是**跨边界写效应需 Grant，Retrieve 与 OS 自有动词免门**，各层走各层既有规则，不做统一经门；**MCP 已实现并冻结**（宿主 `--mcp` 显式声明，默认档 `unverifiable-write`、可声明 `read-only`；见 `agent/README.md` §3.29 与 §6）；
+- **沉默与失败语义分离**：回复、明确沉默（no-reply）、失败、超时和断线必须语义分离——这类区分是**执行端私有终态**，im 侧只认"说没说"；恢复、幂等与执行权转移必须可验证；失败路径和撤销路径是一等契约；重放不等于重新生成，绝不因重放重复公共消息；
+- **主体进行态边界**：IM 侧**只放主体进行态**——**在不在**（由连接派生：Human 的 WS、Agent 的门铃流或"最近被看见"，**不新增任何写者、没有心跳上报**）与**正在写**（主体自己的一个易失动作，几秒过期、被自己的消息取代，**人与 Agent 同一条判据**）；两者都是进程内易失投影，不写 SQLite、不进 Human Event 表或 `events.available`，im 服务端重启即失忆。**执行过程一律不进 IM**：阶段（在想/在调工具/在答）、生成流与 revision、**草稿正文**、实例与心跳容量都不放——判据一句话：**把 im 服务端换成微信/QQ，"对方在线吗 / 对方正在输入吗"仍成立 ⇒ 该放；"它在调工具 / 草稿写了什么" ⇒ 不放**。宿主读数与身体态归**执行端**那一层（`/app/runtimes`）；这与「双平面」是同一条红线的两面：**IM 侧不得有宿主读数，执行端侧不得有内容与关系**；
+- **外部边界纪律**：Native Runtime、前端等只作为协议边界存在，不能反向污染 im 服务端领域模型；所有扩展不得引入第二个公共事实写者；每增加一层抽象都必须证明它降低当前复杂度；新能力必须有可验证的验收路径，不能只为想象中的未来建设；轨迹是执行端实际提供的可观察执行事件，Celira 不虚构缺失轨迹，也不把模型未公开的隐藏思维链纳入轨迹承诺；平台公共 Permission（im 服务端裁决）与执行端私有 Capability 授权（Runtime/宿主内部）是两类不同事实，后者不进入 Core v1 公共契约。
+
+## 前端边界
+
+`client/` 是 Celira 前端（Vite + React + shadcn/ui + zustand；视觉层 + Client 接口层），**只作为协议边界存在，不反推改动 im 服务端**。**连接模式只剩一种：core 直连**——浏览器凭登录页填的服务器地址 + Human Bearer token，直连 im 服务端 HTTP 与 WS（Host 全托管路径 2026-09-20 退役，`ConnectionMode` 只剩 `'core'`；`scripts/check-no-host.mjs` 守它不复生，判据与反例在那个文件头）。
+
+`src/api/` 四层：**契约面**（`contracts.ts`：与冻结契约一一对应的白名单投影，字段名照抄服务端 snake_case）／**传输面**（`client.ts`：只管「怎么发、怎么解错误信封」，不含业务判断）／**数据面**（`core.ts` 按**事实域**拆窄接口，合取类型 `WorldApi`；`store.ts`／`idb.ts`／`asyncOwnership.ts`／`broadcast.ts`；写路径纯函数 `presentation.ts`／`profile.ts`）／**策略面**（纯逻辑、可 `node --test` 直测：`uiPolicy.ts`／`contractErrors.ts`／`entry.ts`／`prefs.ts`／`selfIdentity.ts`／`homeStatus.ts`）。**新接口必须先落在契约层再进页面；禁止组件直连 fetch，禁止绕过 api 层直接消费 fixtures。**
+
+**凭据纪律**：浏览器只持有用户自己的 Human token **与家钥匙**，**绝不接收/存储 Backend / Runtime / Provider / operator 凭据**；token 只经 `Authorization: Bearer` 头与 WS 建连后的 `authenticate` 帧送出，**绝不进 URL、绝不进日志或输出**。**家钥匙按机器发、不是身份**（possession 证明，与 Human token 同类），只经 Bearer 头送出、只存客户端本地（IndexedDB），**不与模型 key 同列**——家钥匙进这台执行端，模型 key 进模型供应商。
+
+**呈现与 fixtures 纪律**：颜色只允许来自 `src/styles/tokens.css` 语义令牌（`scripts/check-tokens.mjs` 守卫）；页面只做组件组合与状态流转。`src/fixtures/` **只服务演示通道**（未连接），**唯一权威判据是「手里有没有真实凭据」**（`api/prefs.ts` 的 `isRealWorldSession`，**不是 `mode`**），由 `FixtureGuard.tsx` 拦在真实世界之外。
+
+**扩展接缝**（⚠ **本节是它的权威位置**：`client/DESIGN_SYSTEM.md` 与 `client/README.md` 按名字引用这里）：前端只有一条合法接缝——**提供呈现，不拥有事实**（句式与准入判据见 `docs/runtime/terminal/RUNTIME_TERMINAL_EXTENSIBILITY.md` §3/§4）。按它量三处：**外观**（令牌/主题/壁纸）不引用任何公共事实 ⇒ **合法接缝**；**结构/交互/能力**（布局、信息架构、交互配方、新页面）必须解释公共事实 ⇒ **不构成接缝，那是产品，要改走 fork**；**加载任意代码的插件不做**。⚠ 推论：**凡是「每个用户可能不一样」的外观事实，不许编进所有用户共享的构建产物**（与世界地址同一条形态判据，见 `docs/constitution/PROJECT_SHAPE.md` §4）。这一格已建成（2026-10-08）：用户装一份**带作用域的 CSS** 即生效、删掉回默认、**不用重编**——格式与验收口径见 `client/THEME_GUIDE.md`，设计侧见 `client/DESIGN_SYSTEM.md`。
+
+**观察面**：每条路由属于哪个平面由 `client/src/api/routeRegistry.ts` 声明，判据一句话——**「把 im 服务端换成微信/QQ，这一页还成立吗？」成立 ⇒ `world`，不成立 ⇒ `home`**；声明还要写清**这一页读哪几个平面**（新增路由没声明、声明陈旧、平面读错都红：`tests/route-admission.test.ts` 对 `App.tsx` 的表，`tests/route-planes.test.ts` 顺着 import 闭包对表）。页面地图与逐路由说明看 `client/README.md`，本机那两个口与来源判据看 `app/README.md`。两条不随页面而变的判据：① **本机条目走同源代转**（源码形态 = `vite.config.ts` 的 proxy，发布形态 = `scripts/serve_client.mjs`）——**页面永远不知道口子开在哪个端口**；② **远程条目**（`/settings/homes`）＝绝对地址 + Bearer 家钥匙（认证只靠钥匙、TLS 必须、家口对 CORS 开放）。机器侧：**模型配置是「清单 + 绑定」两件事**（`<家>/model_sources.json` 与 `<环境根>/model_binding.json`），**key 只到那台机器为止，永不进 core、永不回浏览器**，且**绑定在场时进程侧再声明任何模型来源即拒绝启动**（口径见 `README.zh-CN.md`）；机器只按 id 与世界的 Agent 列表精确匹配（`resolveAgentHome` 四态）——**不做任何新协议**。
+
+在 `client/` 内工作前**必须先读 `client/DESIGN_SYSTEM.md` 与 `client/README.md`**。**像素对齐已于 2026-09-25 按主人裁决拆掉**：那条通道只守灾难（dist 过期 / 静默变成门禁页 / 展示节没渲染或没面积），**样式改动不需要更新任何基线**；防「AI 乱写新样式」的是**固定组件 + 语义令牌**，不是视觉回归。门禁见下方「验证与汇报」。
+
+## 新 Agent 工程护栏
+
+本节适用于 `agent/src/`、`agent/tests/` 及其装配入口，不将旧线（已退役，考古走 Git 历史）的实现路线套入新工程，也不改变冻结公共契约。
+
+### 权威入口与统一语言
+
+- 新 Agent 阅读顺序：`docs/agent/06_AGENT_RUNTIME_END_STATE.md`（终局与路线）→ `00_AGENT_CONSTITUTION.md`（产品与词汇）→ `05_AGENT_ENGINEERING.md`（架构与归属）→ `02_AGENT_FOUNDATION.md`（执行可靠性）→ `agent/README.md`（当前实现与缺口）。任务涉及的局部设计/施工文档最后读；它们只约束当前任务，不覆盖终局、宪法与工程边界。不在本节复制产品词典或错误枚举表。
+- **一个概念一个名称**：不得新增近义容器重新表示已有 Run、Trace、View 或 Ledger；业务词可以存在于所属 App，但不能用改名掩盖边界越界。
+- **名字与解释分开，比喻不占名字的位置**（2026-10-05 主人裁决）：名字只有一个（`Run` / `Turn` / `max_turns` / `turn_limit`）；解释可以贴着名字给一句人话（「Run 是有限清醒期」），但不得变成第二个名字、不得作规范句的主语。**比喻（油表、手机、电池、手脚…）不作正式说法，也不进 Agent 的上下文。**
+- **面向 Agent 的文本用标识符与结构化字段，不用比喻**：判据是**这条上下文要求模型推断什么**——凡要它从比喻或散文里推断**机械事实**（轮次、上限、余量、窗口、条数、时刻）的，就是缺了一格；且「没有」与「读不到」分开表达。面向人的文本用**同一批词**（不是第二套）＋ 解释；UI 标签与概念 **1:1**（「轮」= `Turn`、「活动」= `Run`），同义词一律不留。
+- **每一格还要带归属**（2026-10-11 记账）：上下文里每一条限制都要写明**它是谁的限制**——「世界的规则 / 你这个动作的形状 / 你自己不知道的事」三者不许混成一格；判据是**这一格的主语是谁**（混一格的实测代价见 `agent/tests/im_app.rs` 那条守卫的注释）。⇒ **工具面的边界是合法的**（那是 app 的形状，不是缺陷），不合法的是**没写清主语**。同一条纪律的另一半：**物理限制可以硬**（她读不动就是读不动），**产品判断不许硬**（她该不该递由她定）——判据：**这条限制换成微信/QQ 还成立吗？** 成立 ⇒ 物理；不成立 ⇒ 产品判断，不许由工具面替她做。
+- **三类读者、三套判据**（2026-10-08 主人确认）：**给她的**用标识符与结构化字段（上一条）；**给写代码的人的**用依赖方向与词表纪律；**给操作者/用户的**唯一判据是——**人不许比系统知道得更少**：退出码、读数行与 `[next]` 那一行**不许丢掉系统已经分好的类别、阶段与已确认边界**。
+- **`Agent` 与 `主体` 是两个轴，不是一个东西的两个名字**：`Agent` 回答「是谁」（实体、参与者、计数、归属、能力面）；`主体` 回答「这是谁的判断/经历/责任」（**规范句**用它——写成 `Agent` 会把一条禁令读成一句描述）。判据：把 `主体` 换成 `Agent`，这句话还在说同一件事吗？在，那本来就该是 `Agent`。**同一句里不许用两个词指同一个东西。**
+- **描述 Agent 的语言只有三个原语**：`主体`、`事实`（一切能被记下来的东西）、`动作`（一切改变事实的东西）——`Run` 是主体的**有界动作**，`View` 是某刻可见的**事实**，`Trace` 是动作产出的**事实**，`Room`/`Message` 是**公共事实**，`Home` 是**私有事实**住的地方，`Capability` 是一次装配里可用的**动作**，`Effect` 是动作的后果（按能不能核实分档）。**没有第五种东西**：新名词说得清它是这三者的哪种组合才进得来（同一把尺子见 `docs/runtime/AGENT_VOCABULARY.md`）。
+- **每句话只有一个主语，且必须说清它是三者中的哪一个**：规范句讲「不许/必须」（主语是系统），描述句讲「是/有」（主语是事实）；**绝不用叙事句讲事实，绝不用描述句讲规范**。自检三问：主语是谁？规范句还是描述句？这个词能计数吗（能 → 实体，不能 → 主体）？**三问答不上来就是装饰。**
+- 文档目标、代码实现、测试证明分开陈述；历史报告里的缺口先核当前源码，已修问题不按旧施工单重复建设。
+
+### 依赖与状态归属
+
+- Foundation 不依赖 Core；Core 只依赖中立契约，不依赖 OS、具体 App、Provider 或存储格式。外层实现内层接口，运行时调用方向不等于源码依赖方向。
+- App 面向 OS 的窄接入契约，不导入其他 App 的内部实现，不以另一 App 的展开或存活作为隐式前提。目标契约尚未落地的现有差距应如实登记，不靠扩大豁免假装已符合。
+- Composition 只负责构造、配置和接线，不拥有第二条 Run 循环或隐藏业务决策。同一不变量有明确的权威实现；适配器或便利入口必须委托，不复制执行链。
+- 新增状态必须说明：权威所有者、允许的写者、生命周期、失败后状态、是否持久化及重启解释。派生视图不能成为第二份可变权威；活动槽、环境写资格和持久执行准入不能互相冒充。
+
+### 错误与确认语义
+
+- 错误类型按所属模块定义，在边界做明确转换；不为统一外观建立包揽所有层的万能错误类，也不预建没有消费者的错误枚举。错误定义的位置贴着拥有语义的那层（如 `RunError` 在 core、`LedgerError` 在 foundation、`MachineFailure` 在 os）；不建集中 error.rs——集中制造耦合。
+- 必须保留影响调用方决策的类别、阶段和已确认边界：明确行动失败不等于 Run 失败；Unknown 不等于明确失败；存储失败不等于模型失败；结束确认失败不等于封存失败；系统终止不等于主体任务完成。
+- 不用空集合、默认成功、统一字符串或宽泛兜底吞掉身份拒绝、读写失败及未知结果。错误对外展示不得泄露凭据或敏感正文；文本标签不能替代内部必要的结构化状态。
+- 保存、重试与恢复行为必须遵循执行可靠性契约；不能通过释放对象、清活动槽或自动重发掩盖未确认状态。
+
+**错误词汇表三条纪律**：
+
+1. **稳定字符串是一份词汇表，必须有权威位置**：每个对外暴露失败分类的枚举，其 `as_str()`（或等价物）就是该词汇表的权威；新增取值必须**同一刀**补齐解码端校验（封闭表、未知取值明确拒绝），不许只写编码端。持久字段上的词表一律 fail-closed。
+2. **载荷要么结构化、要么稳定字符串，禁止裸动态文本**：允许的字符串载荷存的是分类标记，不是错误详情。判据：**同一故障两次发生，该字符串必须逐字节相同**——做不到就是违规。
+3. **词表不跨层**：下层失败词汇到上层（或跨 App/适配层）只允许"归类 + 携带原文"，不允许下层动态细节原文穿透到不认识它的层（`FileAppRefused(FailureClass)` 携带不翻译是正例；名字本就中立时一一同名映射是特例，如 `ProviderFailure` → `ModelFailureClass`）。
+
+### 抽象、守卫与验证
+
+- 新抽象须有当前消费者，并说明消除了什么重复或隔离了什么变化；不为想象中的扩展预建万能 Host、全局总线、注册中心或兼容分支。名字本身不是罪证，职责和依赖才是判据。
+- 优先用模块可见性、类型及窄接口限制越界，再用源码守卫补充。词表守卫应识别真实引用，包含正反例，不用裸子串误报中立词汇；不得改名绕过真实违规。
+- 修改守卫或公开面时，说明原约束、新边界和真实消费者，保留越界反例；不因本次实现过不了测试就扩大白名单。测试夹具豁免必须限定范围，不能覆盖产品模块。
+- 行为测试覆盖正常、拒绝、失败、未知和生命周期边界；持久化及隔离承诺须有相应故障与独立进程证据。测试数量、格式检查和编译通过不等于完整行为证明；无法注入的故障明确列为未覆盖。
+
+### 执行与评审
+
+- 一个主执行者负责完整职责包，在授权边界内自行实现、排错、测试和增量提交；普通内部设计不需逐步审批。产品边界、公共契约、持久格式兼容、恢复语义或重大安全取舍改变时，暂停相关部分请求裁决。
+- 同一工作树只允许一个代码/Git 写者；审查者只读明确版本，不修改正在施工的文件或调整断言替实现过关。不得夹带其他工作流的改动。
+- 每次交付复核：新增词汇与抽象、状态归属、依赖方向、错误转换、执行路径及真实门禁。新 Agent 门禁必须针对独立 `agent/Cargo.toml`，根 workspace 通过不能代替。
+
+## 验证与汇报
+
+> 判据一句话：**凡要真环境、进不了常规套件的门禁，必须在这里写死触发条件**（`verify:ui` 曾因 8 处断言陈旧而无人知道，原因就是仓库里从没写过何时该跑）。
+> ⚠ **本节是全篇最末一节 ⇒ 也就是最先消失的一节**：本文件按字节注入（DSH `dsh-agent-instructions`，`maxBytes: 65536`）——**超预算时先整份丢掉更宽的文件（用户全局那份），再截最具体的那份，且截法是「留头丢尾」**（那行 `Workspace instruction budget … truncated …` 只提示、不拦人）。**2026-09-29 它连跨四次预算（65,647 → 68,810 B）就是这样被截尾的。** ⇒ 本节**只留「触发条件 ＋ 判据指针」**：一条门禁的来龙去脉（为什么有它、它抓过什么缺陷、射程与已知边界）写在**它自己的文件头/测试**里，**这里不复述**。加内容前先问：这句删掉，下一次动工会不会做错事？
+> 通用三条：**不适用报 `N/A`／退出 2，既不算通过也不算失败**；**脚本收尾必须断言语用例数 > 0**（`PASSED` ＋ `running 0 tests` 是空跑）；**`#[ignore]` 必须带理由**（`#[ignore = "……为什么、何时重建"]`），让它在计数里可见。
+
+### 改完之后怎么让改动生效（构建顺序）
+
+**① 源码全改完 → ② `cd client && npm run verify`（它重建 `client/dist`，也是唯一该重建它的地方）→ ③ `cd app && npm run build -- --no-bundle`（壳在编译期把当前 dist 嵌进去）→ ④ 要它替你判，再跑 `npm run verify:ui:app`。**
+
+- 顺序错的样子：改完 → 编壳 → 又改源码 → 跑 `verify` ⇒ **dist 比壳新**，你看到的是旧页面；`verify:ui:app` 会红在「壳里嵌的产物是最新的」那一条——**那不是误报**。
+- 只改 `*.md` 与 `client/scripts/`（不进 dist、不参与打包）⇒ 不必重编，壳也不陈旧。
+- ⚠ **同一棵树上两个写者同时构建 ⇒ 假红**（实测 28 条路由 25 条白屏＋未捕获异常，一行代码都没坏）：判据是**先看这棵树上是不是还有人在构建**，重跑一次完整 `verify` 就自证。
+
+### 什么时候必须跑哪一条（触发速查）
+
+| 你动了什么 | 必须跑 |
+|---|---|
+| 任何 client 改动 | `npm run verify`（源码级；不需要任何服务） |
+| **任一侧端点面**（客户端 / 执行端：新增·改名·换方法·换调用点）或**壳命令面**（`invoke('…')`） | `scripts/check-boundary.mjs`（随 `npm run verify` 跑） |
+| **文档**（`*.md`：对外入口的称谓首现定义、`outputs/README.md` 的证据锚索引） | `scripts/check-docs.mjs`（随 `npm run verify` 跑） |
+| **改 `agent/README.md` 的 §3.x 正文**（改写/压缩/搬内容） | `scripts/check-doc-honesty.mjs`（随 `npm run verify` 跑）：拿 `HEAD` 当基线，**某节少了一整类诚实声明就红**（未覆盖/未裁/如实登记/触发条件/不假装…）。⚠ 它**量不到**不带标记的事实被删——那一格只有人核 |
+| 执行端端点面（路径、方法、响应解析、失败分类） | `probe-agent-im.js` |
+| 转发 · 附件上传/下载那条路（含整窗拖放）· `ForwardSheet`/多选条 | `probe-forward.js` |
+| 消息/唤醒那条链（im 事件与门铃、Runtime 唤醒与回合、宿主与凭据、模型计划） | `probe-loop.js` |
+| 换模型（含换供应商/型号）· 技能桌面 / 开场线索 / `files_*` 那一面 | `probe-recall.js` ＋ 开场块可撤性 |
+| **她的视觉那条链**（`vision` 那一格 · `im_read_attachment` 的媒体形态 · 材料折进请求） | `probe-vision.js`（起临时家；判据：码**画进像素** → 她报出来 · 材料字节不进她的环境根 · 账本里有 `form = media` · 回执 `pixels` 与文件头**逐数对上**） |
+| 用户可见面（文案、页面结构、路由归属、能力探测） | `npm run verify:ui`（现成路：`probe-ui.js`） |
+| 用户可见面 · 壳的门与读数 · 本机那两个口的来源判据 | 上一条 **＋** `npm run verify:ui:app` |
+| 壳的权限处理器（`app/src-tauri/src/lib.rs` 的 `on_permission_request`）· `client/src/lib/voice.ts` 采集路 · 通话（Call P0） | `client/scripts/probe-shell-mic.mjs` |
+| 通话那条链（信令、媒体面、入口、`callEntryFor`） | `probe-call.js` |
+| 模型配置门（清单/绑定/门的写接口）· 宿主与唤醒（`host_loop` 的"等/跑"次序、`agent_host` 的边界重判）· 页面「模型配置」那一族 · 换供应商/型号 | `probe-zero.js` |
+| **她起的东西的寿命与「回得来」**（`resident_lifetime` 的收容 · 终端 `keep` 那一档 / `terminal_held` / `terminal_stop` / `<环境根>/terminal` 那本账） | `probe-service-lifetime.js`（`--task keep` 量"随家走"，`--task keep-stop` 量"起→看→读→停"，`--task own` 量"她会怎么起"） |
+| **聊天时间线的行位**（气泡重叠 / 行盒矮于内容 / 重复行身份）· `ChatPage` 的进房落点与翻页锚定 | `probe-chat-layout.js`（种一段长对话 → 打开那间房 → 一路滚进历史，量每一行的矩形） |
+| **她写下的字有没有被用**（判据 3 的直接读数 · `notes_*` 那一族的读写面 · 「未用 → 可达性降级」那一格） | `probe-note-use.js`（只读；**年龄从账里折，mtime 一律不算数**） |
+| **Celira 的标记 / 应用图标**（`client/public/logo/`、`app/src-tauri/icons/`、窗口·任务栏·托盘那一枚） | `node client/scripts/render-logo.mjs` → `python app/src-tauri/icons/make-icons.py`（＋托盘 `make-tray-running.py`）→ 重编壳；⚠ **编之前必须停掉世界**（`celira-im`/`agent_host` 正跑在 `target/release/bin/`，构建脚本要往那儿拷 ⇒ `os error 32`；壳起来会把它们带回来），且**图标改了要碰一下 `tauri.conf.json`** 逼构建脚本重跑（否则 exe 里还是旧图标） |
+
+`probe-*` 与 `probe-shell-mic` **一律从仓根跑**；起宿主的几条先读下面「真机探针的前置」。
+
+### 每条门禁：退出码 · 它不会替你判的那一处
+
+**读数怎么读，各门禁自己会打出来**（脚本里的 `[probe-…]` 那几行就是它的说明书）；判据钉在各自的**文件头与 `tests/`** 里。这里只留两样：退出码里那几档语义、以及**脚本不会替你判**的地方。
+⚠ `probe-loop` / `probe-recall` / `probe-zero` / `probe-service-lifetime` / `probe-vision` 各花掉**真模型调用**（1 / 1 / 至多 2 / 1 / 1 次）。
+
+- **`check-boundary.mjs`**（随 `npm run verify` 跑）：**调用点 ⊆ 服务端路由**（反方向不报红：服务端领先客户端是安全的）；⚠ 它**只量端点存在性与方法**，量不到请求/响应形状与可见性裁决。射程为什么是派生的、20 条自检——见文件头。
+- **`probe-agent-im.js`**：只读动词对**真 im** 逐个必须回 `success`；退出 **4** ＝ 有 `unknown`（边界对不上）、**3** ＝ 有确定的 `failure`。**写动词一律不探**（会改真家世界）。
+- **`probe-forward.js`**：硬证据是**目标房那份附件的字节与原件逐字节相同**（只比 id 或名字都能被"占了个位"骗过去）。退出 0/1/2。
+- **`probe-loop.js`**：退出 **0** ＝ 她回了／**2** ＝ 装配不起来（含"这台机器上**没有任何模型来源**"——**不适用，不是失败**）／**3** ＝ 没等到她回（**如实报，不假装**）。判据在 `scripts/home/tests/probe-loop.test.js`（**别按 `sender` 找发送者，那一格叫 `actor`**）。
+- **`probe-recall.js`**：**主判据完全黑盒**（回信里有没有那个随机回执码）；**辅助判据（`trace.ndjson`）只用于给失败分类，从不用于证明成功**。退出 **0** ＝ 翻了且报对／**3** ＝ 没翻／**4** ＝ 翻了但没报对（**不并进 3**）／**2** ＝ 不适用（含这台机器上没有模型钥匙）。⚠ **样本 ＝ 1 什么都证明不了**（要重复 N 次、换 M 个任务；设计见 `outputs/RECALL_EXPERIMENT_DESIGN_2026-10-06.md`）。
+- **`probe-vision.js`**：退出 **0** ＝ 四条判据都成立／**3** ＝ 没等到她回（**如实报，不假装**）／**4** ＝ 她回了但没报对那个码（**不并进 3**）／**5** ＝ 报对了码、但另三条有不成立／**2** ＝ 不适用（含"这台机器上没有任何模型来源"）。⚠ **它不会替你判**：② 只挡"**照直落盘**"（原始字节 / base64 两种形态）——**任意重编码挡不住**；③ 读的是**经历账本**（`trace.ndjson` ＋ `trace.parts/`），世界那一份字节在 `<家>/im/media` **不在它的射程里**（那是世界的存储，不是她的经历）。
+- **`probe-zero.js`**：**判据一句话：配完之后的第一段清醒期就该用新的。** 退出 **0** ＝ 配完**第 1 条就回**／**2** ＝ 不适用、装配不起来、或**配之前她就回了**（前提不成立 ⇒ **不许**当通过）／**3** ＝ 配完仍不回话、或**只有第 2 条回**。⚠ **两处它不会替你判**：① 门铃是**合并**的（容量 1）⇒ 她可能**一次答掉两条**，**看第 1 条那格**；② **它只量「她不在场时改配置」**——"她正在场时改配置"那一路量不到（改动要等她这一段收场才生效，**那是设计不是"差一拍"**）。
+- **`verify:ui` / `verify:ui:app`**：**不在 `verify` 里**，起不来就不该拦人，**不适用报 `N/A` 并单列**（既不算通过也不算失败）；前置与量什么见各自文件头。⚠ `verify:ui:app` **可以连跑**：连跑两次都不该有失败、跑完**零残留**（判据钉在 `client/tests/verify-ui-app.test.ts`；**条目总数以脚本自己打的那一行为准** —— 断言随刀增减、也会合并，写死数字必陈旧）。**Agent 从没被唤醒过的世界是允许的**（「活动记录」那一条报不适用）。⚠ 门那两个口的判据**两个门禁共用一张表**（`client/scripts/door-cases.mjs`）：`verify:ui` 量源码形态的门、`verify:ui:app` 量壳 ⇒ **一边不同形就有一边红**。
+- **`probe-shell-mic.mjs`**：跑两次、**只改浏览器参数**；**A 档没落定（`no-answer`）＝ 壳里那一处放行被摘掉了**（它自己会这么打）。退出 **0** ＝ 落定／**1** ＝ A 档没落定／**2** ＝ 没有打包形态的壳。⚠ 壳侧那一处**只放行麦克风**（`Camera` 一律 `Default` ＝ 拒）。
+- **`probe-call.js`**：判据与**它没验的**（响铃 45 秒、重启收敛、NAT 打洞、群呼/多方、视频）都在文件头。退出 0/1/2。
+- **`probe-chat-layout.js`**：种一段长对话 → 打开那间房 → 一路滚进历史再回底部，**量每一行的矩形**：退出 **0** ＝ 行与行不重叠、行盒不矮于内容、没有重复行身份；**1** ＝ 量到重叠/矮盒/重复身份；**2** ＝ 装配不起来。⚠ 它**只量行位**（重叠/矮盒/重复身份），量不到"好不好看"，也**量不到非消息行**（会话列表那侧）。判据与这次事故（180 处重叠、行距恒为估值 84px）写在文件头。
+- **`probe-note-use.js`**：**判据一句话：年龄从账里折，mtime 一律不算数**（笔记文件只有 `{pinned,text,title}`，而 `notes_edit`/`notes_append` 会**改写文件** ⇒ mtime 是"最后动过"，不是"什么时候写的"）。退出 **0** ＝ 算出来了／**2** ＝ 不适用（没有住户 / 没有笔记 / 账本还没建）／**3** ＝ 账本在场但一行都读不出来／**1** ＝ 用法错。⚠ **它不会替你判**：读数说的是「**从未被 `notes_read` 点名读过**」，**不是**"从未出现在她视野里"（`notes_list` 会列身份与标题）；它**也不判"该不该删"**——判据 7 是「未用 → 可达性降级，**绝不** → 删」，那是裁决不是读数。
+- **开场那几块必须能被单独撤掉**（2026-10-08 主人确认）：`reading-guide`、技能区那一行读数这类**补偿型**开场块，**撤掉之后同一条门禁仍然绿**，才说明它是补偿而不是条件；撤不动（门禁红）⇒ 它是条件，把理由登记下来。**换模型时与 `probe-recall` 一起重跑**（逐块清单见 `agent/README.md` §3.37）。
+
+### 真机探针的前置与环境纪律
+
+- **编译与真机探针的三条硬前置**：① **跑真机探针之前，两边二进制都要先编 release**——im 服务端（`cargo build --release --manifest-path im/server/Cargo.toml`，探针拿的是 `target/release/celira-im.exe`）与 **Agent 侧宿主**（源码形态下取自 `agent/target/release`，见 `scripts/home/paths.js`）；`cargo test`/`cargo check` **只编 debug**，探针却永远拿 release ⇒ 跑的是**上一次编的旧二进制**，症状是"新加的那一格/那个字段**整个不存在**"。判据：在 `[System.IO.File]::ReadAllBytes` 里搜你新加的字符串，**别信 `cargo build` 那句 "Finished"**。② **编之前先看有没有残留的 `celira-im` 占着那份 exe**（`Get-Process celira-im`；症状 `failed to remove file …`／`拒绝访问 (os error 5)`；真家的 release 那份**不该**被杀）。③ **起宿主的探针要给模型那一家加 proxy bypass**（`NO_PROXY` 里补主机名，如 `api.deepseek.com`）——宿主经代理时大回信会被截断（`transport-failure:io`/`timeout`）⇒ **假红**。教训见 `agent/README.md` §3.64（搜「先编 release」）。
+- **只跟我自己起的那个世界说话**：世界地址从**那个家自己的** `home.conf` 读（`conf.worldBaseOf`；`up` 建新家时本来就会避开被占的口），**读不到就拒绝跑、绝不回落默认口**。⇒ **跑任何驱动页面的探针（`probe-zero`/`probe-ui`/`probe-call`/`probe-forward`）之前，先确认它 spawn `serve_client.mjs` 时带了 `--home`**（`temp-world.js` 与 `probe-zero` 都带了）；`serve_client.mjs` 的缺省链是**显式旗标 > 给了 `--home` 就去问那个家 > 默认 5190 / 5191**（写死那一半实测害过主人家的清单与绑定）。⚠ 8080 让路那套**已废**；⚠ **别去杀别人的世界**——`home.js down` 的凭据判据只能证明"它不是本家的"，证明不了"没人要它"。
+- **离线套件要在"干净环境"里跑**：家里的凭据有两条来路——模型那一半在 `HKCU\Environment`（`DEEPSEEK_API_KEY`），后端那一半在**按身份分条的本地存储**（`%LOCALAPPDATA%\Celira\credentials\`；`CELIRA_IM_BACKEND_AUTH` 降为老路、仍可能在场），而终端/编辑器进程会继承它们；离线夹具的规矩是"im 端点与凭据**必须成对**，缺一半即拒绝" ⇒ 这个变量**单方面在场**就让夹具在入口 panic，整片离线用例**假红**。⇒ 跑离线门禁前先摘掉（`env -u CELIRA_IM_BACKEND_AUTH cargo test …`）；真实调用那侧照旧**内联注入**。
+- **组件级门禁**以各权威文档的命令为准（im 服务端/Runtime/Host：`cargo fmt --check`、`cargo check --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo test --all-targets`、独立进程黑盒；client 见上）。
+- **行为证明必须来自公开协议/真实进程黑盒**，不能以直读数据库冒充成功证据；测试通过只证明对应契约，不升级为 OS 沙箱或产品承诺。
+- **提交只点名自己的文件，别用 `git add -A`**：这棵树里**可能同时有别的活**（并行会话的改动、别人的临时探针、`app/` 侧的 Rust 改动），而本文件明写"不得夹带其他工作流的改动"。做法：**逐条点名** `git add <路径…>` ⇒ **提交前先 `git diff --cached --name-only` 看一眼**（别人的文件**可能已经躺在暂存区里**，而 `git commit` 提交的是**整个暂存区**）⇒ 提交后 `git show --stat` 核一遍，**出现不认识的文件就是夹带了**；命中就 `git reset --soft HEAD~1` ＋ `git restore --staged <那些文件>` 干净拆开（改动回到原状，不丢）。
+- 完成实现或修复后，使用以下高层格式汇报，不罗列代码行号：**症状/目标**（用户或系统要解决什么问题）→ **根因/边界**（涉及哪个系统或业务事实）→ **修复策略**（改变了哪条连接、契约或状态流）→ **验证**（真实运行了哪些测试和路径）→ **风险**（改变了什么拓扑或引入什么权衡）。

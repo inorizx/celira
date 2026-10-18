@@ -1,0 +1,239 @@
+﻿/* celira-theme: 赛博朋克 */
+
+/* ===== 主题预设：赛博朋克（neon） =====
+   质感差异点：锐利边缘（小圆角）+ 夜间霓虹辉光（见文末质感层）。
+   主行动色 = 霓虹品红，Agent 身份 = 霓虹青，两者保持色相分离。 */
+[data-theme='neon'] {
+  --radius: 0.375rem;
+
+  --background: #eef1f6;
+  --foreground: #141824;
+  --card: #ffffff;
+  --card-foreground: #141824;
+  --popover: #ffffff;
+  --popover-foreground: #141824;
+  --primary: #b4348d;
+  --primary-foreground: #ffffff;
+  --secondary: #e8ebf2;
+  --secondary-foreground: #3a4152;
+  --muted: #e8ebf2;
+  --muted-foreground: #5d6577;
+  --accent: #f6e3f3;
+  --accent-foreground: #a32b80;
+  --destructive: #ba3c3c;
+  --destructive-foreground: #ffffff;
+  --border: #cacdd5;
+  --input: #a2a6ad;
+  --ring: #d63ea8;
+  --overlay: #14182466;
+
+  --brand: #d63ea8;
+  --agent: #0b747e;
+  --agent-surface: #dff4f6;
+  --bubble-self-from: #cb3b9f;
+  --bubble-self-to: #9c56d1;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #ffffff;
+  --bubble-peer-foreground: #141824;
+  --presence-online: #277747;
+  --presence-thinking: #0b747e;
+  --presence-silent: #808596;
+  --presence-timeout: #896127;
+  --presence-failed: #ba3c3c;
+
+  --code-keyword: #b6319c;
+  --code-string: #357750;
+  --code-comment: #5d6577;
+  --code-number: #955e1d;
+  --code-function: #0c7583;
+  --code-type: #a64c6f;
+  --code-variable: #141824;
+  --code-meta: #5d6577;
+}
+
+.dark[data-theme='neon'] {
+  --background: #0a0c12;
+  --foreground: #e6e9f2;
+  --card: #12151f;
+  --card-foreground: #e6e9f2;
+  --popover: #151926;
+  --popover-foreground: #e6e9f2;
+  --primary: #f472d0;
+  --primary-foreground: #2a0a20;
+  --secondary: #151926;
+  --secondary-foreground: #e6e9f2;
+  --muted: #151926;
+  --muted-foreground: #8b92a8;
+  --accent: #221827;
+  --accent-foreground: #f0a8dd;
+  --destructive: #e06464;
+  --destructive-foreground: #14060c;
+  --border: #2c3146;
+  --input: #434c6e;
+  --ring: #f472d0;
+  --overlay: #00000080;
+
+  --brand: #f472d0;
+  --agent: #3fd8e8;
+  --agent-surface: #0f2529;
+  --bubble-self-from: #b33f92;
+  --bubble-self-to: #7256d9;
+  --bubble-self-foreground: #f6ecf5;
+  --bubble-peer: #151926;
+  --bubble-peer-foreground: #e6e9f2;
+  --presence-online: #7bd88f;
+  --presence-thinking: #3fd8e8;
+  --presence-silent: #61677d;
+  --presence-timeout: #e0b25d;
+  --presence-failed: #e06464;
+
+  --code-keyword: #f0a8dd;
+  --code-string: #8fd6a3;
+  --code-comment: #7a829d;
+  --code-number: #e0b25d;
+  --code-function: #7de3f0;
+  --code-type: #e3a2c2;
+  --code-variable: #e6e9f2;
+  --code-meta: #8b92a8;
+}
+
+/* ===== 赛博朋克形态层：字体 / 切角 / 扫描线 / 辉光 =====
+   形态语言覆盖（比色彩更深一层）：仍全部隔离在本区，
+   组件零改动；删除本段即退回基础 neon。 */
+
+/* 夜间环境光：品红/青霓虹光晕（低透明度，只做氛围不抢内容） */
+.dark[data-theme='neon'] body {
+  background:
+    radial-gradient(50rem 32rem at 82% -10%, color-mix(in srgb, var(--primary) 22%, transparent), transparent 62%),
+    radial-gradient(46rem 32rem at 2% 105%, color-mix(in srgb, var(--agent) 18%, transparent), transparent 60%),
+    var(--background);
+  background-attachment: fixed;
+}
+
+/* 终端字族：西文等宽 + 中文回退系统字体（中英混排即终端气质）。
+   .theme-scope-body：让嵌套预览（设置页/陈列室）也吃到 body 级字族效果 */
+[data-theme='neon'] body,
+[data-theme='neon'] .theme-scope-body {
+  font-family:
+    ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas,
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* 切角卡片与弹层：斜切两角取代圆角（夜间霓虹的标志性形态） */
+[data-theme='neon'] .bg-card,
+[data-theme='neon'] .bg-popover {
+  clip-path: polygon(
+    10px 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%,
+    0 10px
+  );
+}
+
+/* 夜间 CRT 扫描线：固定叠加层，pointer-events 穿透，压在一切内容之上 */
+.dark[data-theme='neon'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--foreground) 4%, transparent) 3px 4px
+  );
+}
+
+/* 夜间主行动元素霓虹辉光（徽章/按钮/选中态共用 bg-primary）；
+   辉光颜色跟随 var(--primary)，叠加配色变体时自动换色 */
+.dark[data-theme='neon'] .bg-primary {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+/* 夜间自己气泡同款辉光（from-bubble-self-from 渐变类承载） */
+.dark[data-theme='neon'] .from-bubble-self-from {
+  box-shadow: 0 0 18px color-mix(in srgb, var(--bubble-self-from) 40%, transparent);
+}
+
+/* neon · cyber（日） */
+[data-theme='neon']:not(.dark)[data-variant='cyber'] {
+  --primary: #177472;
+  --brand: #1b8b88;
+  --ring: #1b8b88;
+  --bubble-self-from: #1a8481;
+  --bubble-self-to: #158755;
+  --accent-foreground: #086764;
+  --background: #eaf3f2;
+  --card: #feffff;
+  --popover: #feffff;
+  --secondary: #e0efee;
+  --muted: #e1eeed;
+  --border: #c5cfcf;
+  --input: #9ea7a7;
+  --bubble-peer: #feffff;
+}
+
+/* neon · acid（日） */
+[data-theme='neon']:not(.dark)[data-variant='acid'] {
+  --primary: #567218;
+  --brand: #66871c;
+  --ring: #66871c;
+  --bubble-self-from: #61811b;
+  --bubble-self-to: #8f730d;
+  --accent-foreground: #49640b;
+  --background: #eff2eb;
+  --card: #fffffe;
+  --popover: #fffffe;
+  --secondary: #e8ede2;
+  --muted: #e9ede3;
+  --border: #cbcec6;
+  --input: #a3a69f;
+  --bubble-peer: #fffffe;
+}
+
+/* neon · cyber（夜） */
+.dark[data-theme='neon'][data-variant='cyber'] {
+  --primary: #00c2be;
+  --brand: #00c2be;
+  --ring: #00c2be;
+  --bubble-self-from: #0e7977;
+  --bubble-self-to: #2e7c15;
+  --accent: #072120;
+  --accent-foreground: #61d9d5;
+  --background: #060e0e;
+  --card: #091818;
+  --popover: #091e1d;
+  --secondary: #091e1d;
+  --muted: #091e1d;
+  --border: #173735;
+  --input: #215654;
+  --bubble-peer: #091e1d;
+}
+
+/* neon · acid（夜） */
+.dark[data-theme='neon'][data-variant='acid'] {
+  --primary: #94ba2a;
+  --brand: #94ba2a;
+  --ring: #94ba2a;
+  --bubble-self-from: #5c760a;
+  --bubble-self-to: #926010;
+  --accent: #191f0d;
+  --accent-foreground: #b4d07d;
+  --background: #0b0d07;
+  --card: #13170d;
+  --popover: #171c0e;
+  --secondary: #171c0e;
+  --muted: #171c0e;
+  --border: #2d341f;
+  --input: #45522e;
+  --bubble-peer: #171c0e;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .dark[data-theme='neon'] body::after {
+      display: none;
+    }
+}

@@ -1,0 +1,4 @@
+# 壳的构建产物（前端产物在 ../client/dist，由 client 自己的 .gitignore 管）
+/src-tauri/target/
+/src-tauri/gen/schemas/
+node_modules

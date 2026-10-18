@@ -1,0 +1,182 @@
+﻿/* celira-theme: 漫画格 */
+
+/* ===== 主题预设：漫画格（comic） =====
+   描边即形态：边框令牌用高饱和实色，形态层负责加粗与硬偏移投影。
+   日间墨黑描边 / 夜间暖纸描边；主行动色用漫画原色红。 */
+[data-theme='comic'] {
+  --radius: 0.5rem;
+
+  --background: #fffdf5;
+  --foreground: #1c1c1e;
+  --card: #ffffff;
+  --card-foreground: #1c1c1e;
+  --popover: #ffffff;
+  --popover-foreground: #1c1c1e;
+  --primary: #bb4031;
+  --primary-foreground: #ffffff;
+  --secondary: #f5ecd7;
+  --secondary-foreground: #1c1c1e;
+  --muted: #f5ecd7;
+  --muted-foreground: #6b6660;
+  --accent: #fdeee2;
+  --accent-foreground: #c03a2a;
+  --destructive: #cb291d;
+  --destructive-foreground: #ffffff;
+  --border: #1c1c1e;
+  --input: #1c1c1e;
+  --ring: #e94f3d;
+  --overlay: #1c1c1e66;
+
+  --brand: #e94f3d;
+  --agent: #3268c0;
+  --agent-surface: #dce9fd;
+  --bubble-self-from: #bb4031;
+  --bubble-self-to: #a45248;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #ffffff;
+  --bubble-peer-foreground: #1c1c1e;
+  --presence-online: #237946;
+  --presence-thinking: #3268c0;
+  --presence-silent: #8b867d;
+  --presence-timeout: #8b6315;
+  --presence-failed: #cb291d;
+
+  --code-keyword: #c03a2a;
+  --code-string: #2c7843;
+  --code-comment: #6e6962;
+  --code-number: #8f6108;
+  --code-function: #3268c0;
+  --code-type: #8856a1;
+  --code-variable: #1c1c1e;
+  --code-meta: #6b6660;
+}
+
+.dark[data-theme='comic'] {
+  --background: #201d1a;
+  --foreground: #f5efe2;
+  --card: #292521;
+  --card-foreground: #f5efe2;
+  --popover: #2e2a25;
+  --popover-foreground: #f5efe2;
+  --primary: #ff7a66;
+  --primary-foreground: #241612;
+  --secondary: #332e28;
+  --secondary-foreground: #f5efe2;
+  --muted: #332e28;
+  --muted-foreground: #a89f92;
+  --accent: #38332c;
+  --accent-foreground: #ff9a8a;
+  --destructive: #ff6e57;
+  --destructive-foreground: #241612;
+  --border: #f5efe2;
+  --input: #f5efe2;
+  --ring: #ff7a66;
+  --overlay: #00000080;
+
+  --brand: #ff7a66;
+  --agent: #6fa8ff;
+  --agent-surface: #26303f;
+  --bubble-self-from: #ff7a66;
+  --bubble-self-to: #ff9a8a;
+  --bubble-self-foreground: #241612;
+  --bubble-peer: #292521;
+  --bubble-peer-foreground: #f5efe2;
+  --presence-online: #5cc982;
+  --presence-thinking: #6fa8ff;
+  --presence-silent: #857c6f;
+  --presence-timeout: #f0b93f;
+  --presence-failed: #ff6e57;
+
+  --code-keyword: #ff9a8a;
+  --code-string: #8fd6a4;
+  --code-comment: #a09686;
+  --code-number: #f0b93f;
+  --code-function: #8fb8ff;
+  --code-type: #c99ade;
+  --code-variable: #f5efe2;
+  --code-meta: #a89f92;
+}
+
+/* ===== 漫画格形态层：加粗描边 + 硬偏移投影 =====
+   像漫画格子：实线粗描边 + 无模糊的同色重影。 */
+
+[data-theme='comic'] .bg-card,
+[data-theme='comic'] .bg-popover,
+[data-theme='comic'] .bg-bubble-peer,
+[data-theme='comic'] .from-bubble-self-from {
+  border-width: 2px;
+  box-shadow: 4px 4px 0 var(--border);
+}
+
+/* comic · hero（日） */
+[data-theme='comic']:not(.dark)[data-variant='hero'] {
+  --primary: #176db5;
+  --brand: #1d88e3;
+  --ring: #1d88e3;
+  --bubble-self-from: #176db5;
+  --bubble-self-to: #2e6da7;
+  --accent-foreground: #036dbc;
+  --background: #fbfdff;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #e0efff;
+  --muted: #e0efff;
+  --border: #181d22;
+  --input: #181d22;
+  --bubble-peer: #ffffff;
+}
+
+/* comic · bubblegum（日） */
+[data-theme='comic']:not(.dark)[data-variant='bubblegum'] {
+  --primary: #a94195;
+  --brand: #d151b8;
+  --ring: #d151b8;
+  --bubble-self-from: #a94195;
+  --bubble-self-to: #965389;
+  --accent-foreground: #ad3c98;
+  --background: #fffcfe;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #fae6f4;
+  --muted: #fae6f4;
+  --border: #201a1e;
+  --input: #201a1e;
+  --bubble-peer: #ffffff;
+}
+
+/* comic · hero（夜） */
+.dark[data-theme='comic'][data-variant='hero'] {
+  --primary: #5cadfd;
+  --brand: #5cadfd;
+  --ring: #5cadfd;
+  --bubble-self-from: #5cadfd;
+  --bubble-self-to: #84bffa;
+  --accent-foreground: #85bffb;
+  --background: #1a1e22;
+  --card: #21262c;
+  --popover: #262b31;
+  --secondary: #293037;
+  --muted: #2a3036;
+  --border: #e7f1fc;
+  --input: #e7f1fc;
+  --bubble-peer: #21262c;
+}
+
+/* comic · bubblegum（夜） */
+.dark[data-theme='comic'][data-variant='bubblegum'] {
+  --primary: #ea7bd2;
+  --brand: #ea7bd2;
+  --ring: #ea7bd2;
+  --bubble-self-from: #ea7bd2;
+  --bubble-self-to: #ee9bdb;
+  --accent-foreground: #ef9bda;
+  --background: #211c1f;
+  --card: #2a2428;
+  --popover: #2f292d;
+  --secondary: #342c32;
+  --muted: #342c32;
+  --border: #f8ebf4;
+  --input: #f8ebf4;
+  --bubble-peer: #2a2428;
+}
+

@@ -1,0 +1,14 @@
+{
+  "name": "celira-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Celira 桌面壳（Tauri）：一份前端构建产物 + 一个窗口，不含世界也不含执行端",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "check": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3"
+  }
+}

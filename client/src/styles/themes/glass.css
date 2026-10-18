@@ -1,0 +1,225 @@
+﻿/* celira-theme: 雾玻璃 */
+
+/* ===== 主题预设：雾玻璃（glass） =====
+   预设 = 完整一套语义令牌（日/夜双模式）+ 文末质感层。
+   选择器同时匹配 html 与嵌套预览容器（GalleryPage / 设置页预览卡），
+   .dark[data-theme] 特异性高于 .dark，深模式覆盖浅模式。 */
+[data-theme='glass'] {
+  --radius: 0.875rem;
+  /* 质感参数：表面不透明度（越低越透），夜间档略高保证可读 */
+  --glass-bg-alpha: 22%;
+  --glass-card-alpha: 42%;
+  --glass-peer-alpha: 50%;
+
+  --background: #edf0f8;
+  --foreground: #1c2030;
+  --card: #ffffff;
+  --card-foreground: #1c2030;
+  --popover: #ffffff;
+  --popover-foreground: #1c2030;
+  --primary: #5a5fbf;
+  --primary-foreground: #ffffff;
+  --secondary: #e9edf6;
+  --secondary-foreground: #3d4358;
+  --muted: #e9edf6;
+  --muted-foreground: #5d6478;
+  --accent: #e6eaf6;
+  --accent-foreground: #4a4f9e;
+  --destructive: #bb3c3c;
+  --destructive-foreground: #ffffff;
+  --border: #ccd1dc;
+  --input: #a5aab5;
+  --ring: #757dde;
+  --overlay: #1c203066;
+
+  --brand: #7d86ee;
+  --agent: #247289;
+  --agent-surface: #e0f2f8;
+  --bubble-self-from: #586dd8;
+  --bubble-self-to: #845fd9;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #ffffff;
+  --bubble-peer-foreground: #1c2030;
+  --presence-online: #277747;
+  --presence-thinking: #247289;
+  --presence-silent: #656977;
+  --presence-timeout: #886026;
+  --presence-failed: #bb3c3c;
+
+  --code-keyword: #5b61c3;
+  --code-string: #357750;
+  --code-comment: #636a80;
+  --code-number: #965e1d;
+  --code-function: #377099;
+  --code-type: #a74d70;
+  --code-variable: #384060;
+  --code-meta: #636a80;
+}
+
+.dark[data-theme='glass'] {
+  --glass-bg-alpha: 30%;
+  --glass-card-alpha: 45%;
+  --glass-peer-alpha: 55%;
+
+  --background: #10131d;
+  --foreground: #e8ebf5;
+  --card: #181c2a;
+  --card-foreground: #e8ebf5;
+  --popover: #1c2030;
+  --popover-foreground: #e8ebf5;
+  --primary: #8a90f5;
+  --primary-foreground: #10131d;
+  --secondary: #1c2030;
+  --secondary-foreground: #e8ebf5;
+  --muted: #1c2030;
+  --muted-foreground: #9aa0b8;
+  --accent: #232840;
+  --accent-foreground: #b9befb;
+  --destructive: #eb6a6a;
+  --destructive-foreground: #10131d;
+  --border: #353d56;
+  --input: #4d577f;
+  --ring: #8a90f5;
+  --overlay: #05070d80;
+
+  --brand: #8a90f5;
+  --agent: #5fd0e8;
+  --agent-surface: #16272e;
+  --bubble-self-from: #6d74e8;
+  --bubble-self-to: #8b8ff0;
+  --bubble-self-foreground: #10131d;
+  --bubble-peer: #1c2030;
+  --bubble-peer-foreground: #e8ebf5;
+  --presence-online: #7bd88f;
+  --presence-thinking: #5fd0e8;
+  --presence-silent: #6f748a;
+  --presence-timeout: #e0b25d;
+  --presence-failed: #eb6a6a;
+
+  --code-keyword: #a5aaff;
+  --code-string: #8fd6a3;
+  --code-comment: #8189a3;
+  --code-number: #e0b25d;
+  --code-function: #8ec5f2;
+  --code-type: #e3a2c2;
+  --code-variable: #e8ebf5;
+  --code-meta: #9aa0b8;
+}
+
+/* ===== 雾玻璃质感层 =====
+   只含非颜色属性与 var()/color-mix 派生（颜色事实仍在上文令牌表）。
+   未分层 CSS 优先级高于 Tailwind utilities 层，因此这里能接管
+   bg-background / bg-card 等语义类的表面表现；组件代码零改动。
+   新增主题的质感覆盖一律写在本区，禁止散落到组件。 */
+
+/* 环境光底：磨砂表面需要可透出的内容（三色极光进入视野，夜间档收敛明度） */
+[data-theme='glass'] body {
+  background:
+    radial-gradient(58rem 38rem at 78% -8%, color-mix(in srgb, var(--primary) 75%, transparent), transparent 65%),
+    radial-gradient(50rem 36rem at 4% 96%, color-mix(in srgb, var(--agent) 62%, transparent), transparent 62%),
+    radial-gradient(42rem 32rem at 92% 78%, color-mix(in srgb, var(--brand) 52%, transparent), transparent 62%),
+    var(--background);
+  background-attachment: fixed;
+}
+
+.dark[data-theme='glass'] body {
+  background:
+    radial-gradient(58rem 38rem at 78% -8%, color-mix(in srgb, var(--primary) 75%, transparent), transparent 65%),
+    radial-gradient(50rem 36rem at 4% 96%, color-mix(in srgb, var(--agent) 60%, transparent), transparent 62%),
+    radial-gradient(42rem 32rem at 92% 78%, color-mix(in srgb, var(--brand) 48%, transparent), transparent 62%),
+    var(--background);
+}
+
+/* 页面底色半透明 + 磨砂，让环境光透出（透明度由主题档位的 --glass-* 参数控制） */
+[data-theme='glass'] .bg-background {
+  background-color: color-mix(in srgb, var(--background) var(--glass-bg-alpha), transparent);
+  backdrop-filter: blur(24px) saturate(1.4);
+}
+
+/* 卡片与弹层：半透明磨砂表面 */
+[data-theme='glass'] .bg-card,
+[data-theme='glass'] .bg-popover {
+  background-color: color-mix(in srgb, var(--card) var(--glass-card-alpha), transparent);
+  backdrop-filter: blur(18px) saturate(1.25);
+}
+
+/* 对方气泡：磨砂浮在消息流上（自己气泡保持渐变不透） */
+[data-theme='glass'] .bg-bubble-peer {
+  background-color: color-mix(in srgb, var(--bubble-peer) var(--glass-peer-alpha), transparent);
+  backdrop-filter: blur(14px);
+}
+
+/* glass · aurora（日） */
+[data-theme='glass']:not(.dark)[data-variant='aurora'] {
+  --primary: #086a6c;
+  --brand: #1b9fa1;
+  --ring: #199496;
+  --bubble-self-from: #0a8385;
+  --bubble-self-to: #028388;
+  --accent-foreground: #0c6061;
+  --background: #e8f3f3;
+  --card: #feffff;
+  --popover: #feffff;
+  --secondary: #e1f1f0;
+  --muted: #e3f0f0;
+  --border: #c6d4d4;
+  --input: #9fadad;
+  --bubble-peer: #feffff;
+}
+
+/* glass · dusk（日） */
+[data-theme='glass']:not(.dark)[data-variant='dusk'] {
+  --primary: #a53e10;
+  --brand: #e2693c;
+  --ring: #d66439;
+  --bubble-self-from: #cc4c14;
+  --bubble-self-to: #b45e39;
+  --accent-foreground: #943812;
+  --background: #f7eeeb;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #f7eae5;
+  --muted: #f6eae6;
+  --border: #dbceca;
+  --input: #b4a7a3;
+  --bubble-peer: #ffffff;
+}
+
+/* glass · aurora（夜） */
+.dark[data-theme='glass'][data-variant='aurora'] {
+  --primary: #0fb1b6;
+  --brand: #0fb1b6;
+  --ring: #0fb1b6;
+  --bubble-self-from: #1f9598;
+  --bubble-self-to: #21afb7;
+  --accent: #043132;
+  --accent-foreground: #72d7da;
+  --background: #071617;
+  --card: #0b2121;
+  --popover: #0c2626;
+  --secondary: #0c2626;
+  --muted: #0c2626;
+  --border: #1e4547;
+  --input: #246364;
+  --bubble-peer: #0c2626;
+}
+
+/* glass · dusk（夜） */
+.dark[data-theme='glass'][data-variant='dusk'] {
+  --primary: #ec7849;
+  --brand: #ec7849;
+  --ring: #ec7849;
+  --bubble-self-from: #da540a;
+  --bubble-self-to: #e77a46;
+  --accent: #3f2318;
+  --accent-foreground: #f9b297;
+  --background: #1c100c;
+  --card: #281812;
+  --popover: #2e1c15;
+  --secondary: #2e1c15;
+  --muted: #2e1c15;
+  --border: #55372c;
+  --input: #7b4e3b;
+  --bubble-peer: #2e1c15;
+}
+

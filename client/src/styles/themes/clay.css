@@ -1,0 +1,193 @@
+﻿/* celira-theme: 软陶 */
+
+/* ===== 主题预设：软陶（clay） =====
+   新拟态：表面与背景同色，深度全靠双向软阴影（亮面+暗面）挤出（见文末形态层）。
+   卡片/弹层令牌 = 背景色是刻意的；border 隐形，阴影负责分层。
+   弱点是对比度，因此主行动色刻意饱和。 */
+[data-theme='clay'] {
+  --radius: 1.25rem;
+
+  --background: #e4e9f0;
+  --foreground: #43506b;
+  --card: #e4e9f0;
+  --card-foreground: #43506b;
+  --popover: #e8edf4;
+  --popover-foreground: #43506b;
+  --primary: #4960a6;
+  --primary-foreground: #ffffff;
+  --secondary: #dbe1ea;
+  --secondary-foreground: #43506b;
+  --muted: #dbe1ea;
+  --muted-foreground: #5b6473;
+  --accent: #dfe6ef;
+  --accent-foreground: #4860aa;
+  --destructive: #a14841;
+  --destructive-foreground: #ffffff;
+  --border: #c1c6cc;
+  --input: #9a9fa8;
+  --ring: #5e7bd5;
+  --overlay: #43506b66;
+
+  --brand: #6c8ef5;
+  --agent: #266e67;
+  --agent-surface: #d3eae6;
+  --bubble-self-from: #5772c6;
+  --bubble-self-to: #6275aa;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #eef2f7;
+  --bubble-peer-foreground: #43506b;
+  --presence-online: #326f53;
+  --presence-thinking: #266e67;
+  --presence-silent: #79808e;
+  --presence-timeout: #805d32;
+  --presence-failed: #a14841;
+
+  --code-keyword: #6257b2;
+  --code-string: #2d704d;
+  --code-comment: #5e646f;
+  --code-number: #965304;
+  --code-function: #38669a;
+  --code-type: #974c62;
+  --code-variable: #43506b;
+  --code-meta: #5b6473;
+}
+
+.dark[data-theme='clay'] {
+  --background: #282c33;
+  --foreground: #d3d9e3;
+  --card: #282c33;
+  --card-foreground: #d3d9e3;
+  --popover: #2d3138;
+  --popover-foreground: #d3d9e3;
+  --primary: #8ba7f8;
+  --primary-foreground: #1d2025;
+  --secondary: #31363e;
+  --secondary-foreground: #d3d9e3;
+  --muted: #31363e;
+  --muted-foreground: #99a2b3;
+  --accent: #333943;
+  --accent-foreground: #a9bdf9;
+  --destructive: #ee8378;
+  --destructive-foreground: #1d2025;
+  --border: #131519;
+  --input: #5d6674;
+  --ring: #8ba7f8;
+  --overlay: #00000080;
+
+  --brand: #8ba7f8;
+  --agent: #54c4b8;
+  --agent-surface: #243331;
+  --bubble-self-from: #8ba7f8;
+  --bubble-self-to: #a9bdf9;
+  --bubble-self-foreground: #1d2025;
+  --bubble-peer: #31363e;
+  --bubble-peer-foreground: #d3d9e3;
+  --presence-online: #6bcb8f;
+  --presence-thinking: #54c4b8;
+  --presence-silent: #788392;
+  --presence-timeout: #e5bd70;
+  --presence-failed: #ee8378;
+
+  --code-keyword: #b3a5f5;
+  --code-string: #7fd6a4;
+  --code-comment: #929fb2;
+  --code-number: #e5b567;
+  --code-function: #7fb3f0;
+  --code-type: #e08ba4;
+  --code-variable: #d3d9e3;
+  --code-meta: #969fb0;
+}
+
+/* ===== 软陶形态层：双向软阴影浮雕 =====
+   卡片/弹层与背景同色，靠「暗面 + 亮面」双向阴影挤出立体感。 */
+
+/* 日间：右下暗影 + 左上高光 */
+[data-theme='clay'] .bg-card,
+[data-theme='clay'] .bg-popover,
+[data-theme='clay'] .bg-bubble-peer {
+  box-shadow:
+    8px 8px 16px color-mix(in srgb, var(--foreground) 14%, transparent),
+    -8px -8px 16px rgb(255 255 255 / 0.85);
+}
+
+/* 夜间：暗影更深 + 微弱顶光 */
+.dark[data-theme='clay'] .bg-card,
+.dark[data-theme='clay'] .bg-popover,
+.dark[data-theme='clay'] .bg-bubble-peer {
+  box-shadow:
+    8px 8px 16px rgb(0 0 0 / 0.4),
+    -6px -6px 14px rgb(255 255 255 / 0.05);
+}
+
+/* clay · sage（日） */
+[data-theme='clay']:not(.dark)[data-variant='sage'] {
+  --primary: #29713f;
+  --brand: #3ca75c;
+  --ring: #349050;
+  --bubble-self-from: #30864a;
+  --bubble-self-to: #50815b;
+  --accent-foreground: #21723b;
+  --background: #e4ebe5;
+  --card: #e3ebe4;
+  --popover: #e7efe8;
+  --secondary: #d9e4db;
+  --muted: #dae3dc;
+  --border: #c1c7c2;
+  --input: #99a19a;
+  --bubble-peer: #ecf4ed;
+}
+
+/* clay · terracotta（日） */
+[data-theme='clay']:not(.dark)[data-variant='terracotta'] {
+  --primary: #9f4c1f;
+  --brand: #e46e2d;
+  --ring: #ca6228;
+  --bubble-self-from: #bc5b25;
+  --bubble-self-to: #a5674a;
+  --accent-foreground: #a24a16;
+  --background: #efe7e3;
+  --card: #f0e6e2;
+  --popover: #f4eae6;
+  --secondary: #eaded8;
+  --muted: #e9ded9;
+  --border: #ccc4c1;
+  --input: #a89d99;
+  --bubble-peer: #f9efeb;
+}
+
+/* clay · sage（夜） */
+.dark[data-theme='clay'][data-variant='sage'] {
+  --primary: #6ec086;
+  --brand: #6ec086;
+  --ring: #6ec086;
+  --bubble-self-from: #6ec086;
+  --bubble-self-to: #95d0a6;
+  --accent-foreground: #96cfa5;
+  --background: #272e28;
+  --card: #272e28;
+  --popover: #2c332d;
+  --secondary: #303832;
+  --muted: #303832;
+  --border: #121513;
+  --input: #5a695e;
+  --bubble-peer: #303832;
+}
+
+/* clay · terracotta（夜） */
+.dark[data-theme='clay'][data-variant='terracotta'] {
+  --primary: #f19268;
+  --brand: #f19268;
+  --ring: #f19268;
+  --bubble-self-from: #f19268;
+  --bubble-self-to: #f5b090;
+  --accent-foreground: #f6af91;
+  --background: #322a26;
+  --card: #322a26;
+  --popover: #372f2b;
+  --secondary: #3d332f;
+  --muted: #3d332f;
+  --border: #181413;
+  --input: #73625a;
+  --bubble-peer: #3d332f;
+}
+

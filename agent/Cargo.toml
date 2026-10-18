@@ -1,0 +1,20 @@
+[package]
+name = "celira-agent"
+version = "0.1.0"
+edition = "2024"
+description = "Celira Agent：最小骨架 + 最小 Provider Adapter（Core -> ModelPort -> DeepSeek Adapter -> wire）；无 OS、无 App、无持久化"
+license = "MIT"
+
+# 独立 crate：不属于根 Cargo workspace（根 members 只有 `im/server`）。
+# 空 [workspace] 表是让本 crate 成为自己的 workspace 根，从而可以独立 build / test，
+# 且不需要改动根 Cargo.toml。
+[workspace]
+
+# 这些依赖**只**被 `src/provider_adapter.rs` 的传输层与 wire 序列化使用：
+# - reqwest：HTTPS 传输；用例与配置对齐本仓库 host/ 里已验证过的组合（json + rustls）。
+# - serde / serde_json：wire 结构与决定契约的序列化。
+# Core（core.rs / foundation.rs）不得引用它们，由 tests/minimal_agent.rs 的边界守卫机械检查。
+[dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,153 @@
+﻿/* celira-theme: 高对比 */
+
+/* ===== 主题预设：高对比（contrast） =====
+   功能向主题：纯黑白底、高对比色、零圆角（--radius: 0）、形态层加粗描边。
+   目标是 WCAG AAA 级可读性，不为美观妥协；五态与 Agent 身份保持高区分度。 */
+[data-theme='contrast'] {
+  --radius: 0;
+
+  --background: #ffffff;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+  --primary: #0033cc;
+  --primary-foreground: #ffffff;
+  --secondary: #e8e8e8;
+  --secondary-foreground: #000000;
+  --muted: #e8e8e8;
+  --muted-foreground: #333333;
+  --accent: #d9e4ff;
+  --accent-foreground: #00228a;
+  --destructive: #b30000;
+  --destructive-foreground: #ffffff;
+  --border: #000000;
+  --input: #000000;
+  --ring: #0033cc;
+  --overlay: #00000099;
+
+  --brand: #0033cc;
+  --agent: #00603c;
+  --agent-surface: #d6efe0;
+  --bubble-self-from: #0033cc;
+  --bubble-self-to: #1a53e0;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #ffffff;
+  --bubble-peer-foreground: #000000;
+  --presence-online: #007029;
+  --presence-thinking: #00603c;
+  --presence-silent: #5c5c5c;
+  --presence-timeout: #855600;
+  --presence-failed: #b30000;
+
+  --code-keyword: #7a1fa2;
+  --code-string: #00603c;
+  --code-comment: #5c5c5c;
+  --code-number: #8a5a00;
+  --code-function: #0033cc;
+  --code-type: #8a2a3a;
+  --code-variable: #000000;
+  --code-meta: #5c5c5c;
+}
+
+.dark[data-theme='contrast'] {
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #000000;
+  --card-foreground: #ffffff;
+  --popover: #0a0a0a;
+  --popover-foreground: #ffffff;
+  --primary: #ffff00;
+  --primary-foreground: #000000;
+  --secondary: #1c1c1c;
+  --secondary-foreground: #ffffff;
+  --muted: #1c1c1c;
+  --muted-foreground: #cccccc;
+  --accent: #2a2a00;
+  --accent-foreground: #ffff66;
+  --destructive: #ff6b5e;
+  --destructive-foreground: #000000;
+  --border: #ffffff;
+  --input: #ffffff;
+  --ring: #ffff00;
+  --overlay: #000000b3;
+
+  --brand: #ffff00;
+  --agent: #00d8d8;
+  --agent-surface: #00282a;
+  --bubble-self-from: #ffff00;
+  --bubble-self-to: #ffff66;
+  --bubble-self-foreground: #000000;
+  --bubble-peer: #0a0a0a;
+  --bubble-peer-foreground: #ffffff;
+  --presence-online: #00e04a;
+  --presence-thinking: #00d8d8;
+  --presence-silent: #8a8a8a;
+  --presence-timeout: #ffb300;
+  --presence-failed: #ff6b5e;
+
+  --code-keyword: #e08aff;
+  --code-string: #7fffb0;
+  --code-comment: #8a8a8a;
+  --code-number: #ffb300;
+  --code-function: #66b8ff;
+  --code-type: #ff9ab0;
+  --code-variable: #ffffff;
+  --code-meta: #cccccc;
+}
+
+/* ===== 高对比形态层：2px 实线描边 =====
+   描边即分层（无阴影无渐变零圆角，全部由令牌和半径承担）。 */
+
+[data-theme='contrast'] .bg-card,
+[data-theme='contrast'] .bg-popover,
+[data-theme='contrast'] .bg-bubble-peer,
+[data-theme='contrast'] .from-bubble-self-from {
+  border-width: 2px;
+}
+
+/* contrast · amber（日） */
+[data-theme='contrast']:not(.dark)[data-variant='amber'] {
+  --primary: #6a4009;
+  --brand: #6a4009;
+  --ring: #6a4009;
+  --bubble-self-from: #6a4009;
+  --bubble-self-to: #87520a;
+  --accent: #f2dbc5;
+  --accent-foreground: #402300;
+}
+
+/* contrast · emerald（日） */
+[data-theme='contrast']:not(.dark)[data-variant='emerald'] {
+  --primary: #0b552e;
+  --brand: #0b552e;
+  --ring: #0b552e;
+  --bubble-self-from: #0b552e;
+  --bubble-self-to: #106e3d;
+  --accent: #c8e2cf;
+  --accent-foreground: #053018;
+}
+
+/* contrast · amber（夜） */
+.dark[data-theme='contrast'][data-variant='amber'] {
+  --primary: #fcb640;
+  --brand: #fcb640;
+  --ring: #fcb640;
+  --bubble-self-from: #fcb640;
+  --bubble-self-to: #fcb84b;
+  --accent: #2a1a01;
+  --accent-foreground: #fcb84a;
+}
+
+/* contrast · emerald（夜） */
+.dark[data-theme='contrast'][data-variant='emerald'] {
+  --primary: #2ef182;
+  --brand: #2ef182;
+  --ring: #2ef182;
+  --bubble-self-from: #2ef182;
+  --bubble-self-to: #68ec92;
+  --accent: #022710;
+  --accent-foreground: #66ec93;
+}
+

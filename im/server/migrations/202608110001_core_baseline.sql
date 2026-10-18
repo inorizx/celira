@@ -1,0 +1,4 @@
+-- Celira Core V1 baseline.
+-- 本切片只交付迁移机制本身：SQLx Migrator 在应用本迁移时创建并维护
+-- `_sqlx_migrations` 元数据表（版本、description、checksum、success）。
+-- 业务表（Human、Agent、Room、Message 等）不属于本切片范围。

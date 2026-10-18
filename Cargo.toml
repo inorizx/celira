@@ -1,0 +1,17 @@
+[workspace]
+# 2026-09-11 双系统目录重排；2026-09-17 旧线退役（`agent/runtime` 与 `agent/acp-supervisor` 已删，考古走 Git 历史）。
+members = ["im/server"]
+# edition 2024 成员应对齐 resolver = "3"（virtual workspace 默认 resolver = "1" 会告警）
+resolver = "3"
+
+# **版本唯一权威**（TASK_48）：发布脚本 `scripts/make_release.ps1` 拿它与 tag `v<version>` 对账，
+# 不一致就拒绝发布。成员用 `version.workspace = true` 继承；`agent/` 是**独立 crate**（不属本
+# workspace、无法继承），因此它自带一份 `version`，由同一个脚本**互相核对**——发布物里两个 crate
+# 的产物只有一个版本号，不一致就是一次内部矛盾的发布。
+[workspace.package]
+version = "0.1.0"
+
+# profile 只在 workspace 根生效（非根 package 内的 [profile] 会被 cargo 静默忽略）——
+# 重排前它在根 package（celira-core）里，上移回根以恢复 release LTO。
+[profile.release]
+lto = true

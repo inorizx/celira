@@ -1,0 +1,220 @@
+﻿/* celira-theme: 樱吹雪 */
+
+/* ===== 主题预设：樱吹雪（sakura，二次元） =====
+   圆润贴纸感：超大圆角 + 圆体字族 + 贴纸白边 + 波点纹理（见文末形态层）。
+   日间奶油樱粉，夜间暖调深梅；主色樱粉，Agent 身份用薰衣紫拉开色相。 */
+[data-theme='sakura'] {
+  --radius: 1rem;
+
+  --background: #fff5f7;
+  --foreground: #5b4a52;
+  --card: #ffffff;
+  --card-foreground: #5b4a52;
+  --popover: #ffffff;
+  --popover-foreground: #5b4a52;
+  --primary: #9f4669;
+  --primary-foreground: #ffffff;
+  --secondary: #fbe9f0;
+  --secondary-foreground: #5b4a52;
+  --muted: #fbe9f0;
+  --muted-foreground: #6f6068;
+  --accent: #ffe3ec;
+  --accent-foreground: #aa3c68;
+  --destructive: #ac3d55;
+  --destructive-foreground: #ffffff;
+  --border: #d8c0c8;
+  --input: #b09aa3;
+  --ring: #cb5a85;
+  --overlay: #5b4a5266;
+
+  --brand: #f06a9e;
+  --agent: #6156bb;
+  --agent-surface: #ece8ff;
+  --bubble-self-from: #bc537c;
+  --bubble-self-to: #a9607d;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #ffffff;
+  --bubble-peer-foreground: #5b4a52;
+  --presence-online: #356f53;
+  --presence-thinking: #6156bb;
+  --presence-silent: #897d84;
+  --presence-timeout: #825d2d;
+  --presence-failed: #ac3d55;
+
+  --code-keyword: #b64170;
+  --code-string: #3c7852;
+  --code-comment: #746970;
+  --code-number: #94611c;
+  --code-function: #685dc9;
+  --code-type: #a05471;
+  --code-variable: #5b4a52;
+  --code-meta: #786770;
+}
+
+.dark[data-theme='sakura'] {
+  --background: #251c26;
+  --foreground: #f2e9ee;
+  --card: #2e232f;
+  --card-foreground: #f2e9ee;
+  --popover: #342835;
+  --popover-foreground: #f2e9ee;
+  --primary: #f588b0;
+  --primary-foreground: #331622;
+  --secondary: #3a2c3a;
+  --secondary-foreground: #efe2ea;
+  --muted: #322632;
+  --muted-foreground: #b8a5b3;
+  --accent: #473040;
+  --accent-foreground: #ffa8c4;
+  --destructive: #fe7692;
+  --destructive-foreground: #331622;
+  --border: #4c3a47;
+  --input: #795e70;
+  --ring: #f588b0;
+  --overlay: #00000080;
+
+  --brand: #f588b0;
+  --agent: #a79bff;
+  --agent-surface: #2c2540;
+  --bubble-self-from: #f588b0;
+  --bubble-self-to: #f8a5c2;
+  --bubble-self-foreground: #331622;
+  --bubble-peer: #342733;
+  --bubble-peer-foreground: #f2e9ee;
+  --presence-online: #7bd6a5;
+  --presence-thinking: #a79bff;
+  --presence-silent: #937c89;
+  --presence-timeout: #f0bc6a;
+  --presence-failed: #fe7692;
+
+  --code-keyword: #ffa8c4;
+  --code-string: #9ed6b0;
+  --code-comment: #a58b9a;
+  --code-number: #f0bc6a;
+  --code-function: #b5a9ff;
+  --code-type: #e8a0b8;
+  --code-variable: #f2e6ec;
+  --code-meta: #a8909d;
+}
+
+/* ===== 樱吹雪形态层：圆体字族 + 贴纸白边 + 波点 =====
+   贴纸感 = 元素外圈一圈白/浅色描边 + 樱粉软影；波点纹理极淡。 */
+
+/* 圆体字族：系统圆体（Yuanti/YouYuan/丸ゴ）优先，回退普通无衬线 */
+[data-theme='sakura'] body,
+[data-theme='sakura'] .theme-scope-body {
+  font-family:
+    'Yuanti SC', 'YouYuan', 'Hiragino Maru Gothic ProN', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+}
+
+/* 波点：樱粉 5% 透明度，远看是"奶油感"而非花纹 */
+[data-theme='sakura'] body {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--primary) 5%, transparent) 2.5px,
+    transparent 2.5px
+  );
+  background-size: 30px 30px;
+}
+
+/* 贴纸白边：日间纯白外圈 + 柔粉投影 */
+[data-theme='sakura'] .bg-card,
+[data-theme='sakura'] .bg-popover,
+[data-theme='sakura'] .bg-bubble-peer {
+  box-shadow:
+    0 0 0 2.5px #ffffff,
+    0 6px 18px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+/* 夜间白边改为提亮一级的表面色：popover（随配色染色）混入 16% 主色推导，
+   不写死色值——叠加配色变体时勾边色相跟随氛围转向 */
+.dark[data-theme='sakura'] .bg-card,
+.dark[data-theme='sakura'] .bg-popover,
+.dark[data-theme='sakura'] .bg-bubble-peer {
+  box-shadow:
+    0 0 0 2.5px color-mix(in srgb, var(--primary) 16%, var(--popover)),
+    0 6px 18px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+/* sakura · matcha（日） */
+[data-theme='sakura']:not(.dark)[data-variant='matcha'] {
+  --primary: #476f1c;
+  --brand: #6ca82a;
+  --ring: #5b8e24;
+  --bubble-self-from: #558321;
+  --bubble-self-to: #617f3f;
+  --accent: #d8e5cf;
+  --accent-foreground: #446f10;
+  --background: #f5faf2;
+  --card: #fffffe;
+  --popover: #fffffe;
+  --secondary: #e9f2e3;
+  --muted: #e9f2e3;
+  --border: #becab7;
+  --input: #99a392;
+  --bubble-peer: #fffffe;
+}
+
+/* sakura · wisteria（日） */
+[data-theme='sakura']:not(.dark)[data-variant='wisteria'] {
+  --primary: #7255a5;
+  --brand: #ad82fc;
+  --ring: #916dd4;
+  --bubble-self-from: #8665c3;
+  --bubble-self-to: #7e6daa;
+  --accent: #eee8fe;
+  --accent-foreground: #7550b3;
+  --background: #f9f6ff;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #f0ecfc;
+  --muted: #f0ecfc;
+  --border: #c9c3d8;
+  --input: #a29db0;
+  --bubble-peer: #ffffff;
+}
+
+/* sakura · matcha（夜） */
+.dark[data-theme='sakura'][data-variant='matcha'] {
+  --primary: #8bc266;
+  --brand: #8bc266;
+  --ring: #8bc266;
+  --bubble-self-from: #8bc266;
+  --bubble-self-to: #a7d08c;
+  --accent: #303d27;
+  --accent-foreground: #a9d58e;
+  --background: #1b2217;
+  --card: #222a1d;
+  --popover: #273021;
+  --secondary: #2b3525;
+  --muted: #252e20;
+  --border: #394433;
+  --input: #5a6b51;
+  --bubble-peer: #262f21;
+}
+
+/* sakura · wisteria（夜） */
+.dark[data-theme='sakura'][data-variant='wisteria'] {
+  --primary: #be9afc;
+  --brand: #be9afc;
+  --ring: #be9afc;
+  --bubble-self-from: #be9afc;
+  --bubble-self-to: #cbb2fc;
+  --accent: #3c334c;
+  --accent-foreground: #cfb7fe;
+  --background: #211d29;
+  --card: #292433;
+  --popover: #2f2a39;
+  --secondary: #342e3f;
+  --muted: #2d2836;
+  --border: #433d50;
+  --input: #6b627e;
+  --bubble-peer: #2e2938;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='sakura'] body {
+      background-image: none;
+    }
+}

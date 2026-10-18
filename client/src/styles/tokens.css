@@ -1,0 +1,335 @@
+﻿@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* 日间的「色彩声音」令牌按**它实际出现的每一个表面里最难的那个**取值，
+   不是只按白卡片：`--primary` 同时是主按钮的底（白字压它）与选中态的**文字色**
+   （`ConversationItem` 选中行是 `bg-accent` ＋ `text-primary`）⇒ 解在 `--accent` 上；
+   `--agent` 解在 `--muted` 上；`--border`/`--input` 解在 `--background` 上。
+   判据与逐对读数：`node scripts/variant-lab.mjs check`（该门禁对这些对是**绝对底线**）。 */
+:root {
+  --radius: 0.625rem;
+
+  --background: #f7f6fb;
+  --foreground: #1a1826;
+  --card: #ffffff;
+  --card-foreground: #1a1826;
+  --popover: #ffffff;
+  --popover-foreground: #1a1826;
+  --primary: #6d5bc2;
+  --primary-foreground: #ffffff;
+  --secondary: #f1eef9;
+  --secondary-foreground: #3f3a52;
+  --muted: #f1eef9;
+  --muted-foreground: #6c6781;
+  --accent: #efeafa;
+  --accent-foreground: #5a48b8;
+  --destructive: #be3d3d;
+  --destructive-foreground: #ffffff;
+  --border: #d8d6e2;
+  --input: #b1adbb;
+  --ring: #9176db;
+  --overlay: #1a182666;
+
+  --brand: #a284f4;
+  --agent: #2a7198;
+  --agent-surface: #e3f4fb;
+  --bubble-self-from: #7763db;
+  --bubble-self-to: #a44dd5;
+  --bubble-self-foreground: #ffffff;
+  --bubble-peer: #ffffff;
+  --bubble-peer-foreground: #1a1826;
+  --presence-online: #2f7843;
+  --presence-thinking: #2a7198;
+  --presence-silent: #6c6879;
+  --presence-timeout: #886026;
+  --presence-failed: #be3d3d;
+
+  --code-keyword: #7556d3;
+  --code-string: #367952;
+  --code-comment: #6e6983;
+  --code-number: #98601d;
+  --code-function: #38719c;
+  --code-type: #a94e72;
+  --code-variable: #34304c;
+  --code-meta: #6e6983;
+}
+
+.dark {
+  --background: #191b22;
+  --foreground: #e9eaef;
+  --card: #20222b;
+  --card-foreground: #e9eaef;
+  --popover: #24262f;
+  --popover-foreground: #e9eaef;
+  --primary: #a284f4;
+  --primary-foreground: #14131c;
+  --secondary: #282a33;
+  --secondary-foreground: #d7d9e0;
+  --muted: #22242c;
+  --muted-foreground: #9a95ac;
+  --accent: #2b2d37;
+  --accent-foreground: #c5b8f5;
+  --destructive: #ef6b6b;
+  --destructive-foreground: #14131c;
+  --border: #3e414b;
+  --input: #585b6e;
+  --ring: #a284f4;
+  --overlay: #00000080;
+
+  --brand: #a284f4;
+  --agent: #6ec6ff;
+  --agent-surface: #1d2b33;
+  --bubble-self-from: #7f6fe0;
+  --bubble-self-to: #9a86ec;
+  --bubble-self-foreground: #14131c;
+  --bubble-peer: #262832;
+  --bubble-peer-foreground: #e9eaef;
+  --presence-online: #7bd88f;
+  --presence-thinking: #6ec6ff;
+  --presence-silent: #797390;
+  --presence-timeout: #e0b25d;
+  --presence-failed: #ef6b6b;
+
+  --code-keyword: #b39aff;
+  --code-string: #8fd6a3;
+  --code-comment: #8d87a9;
+  --code-number: #e0b25d;
+  --code-function: #8ec5f2;
+  --code-type: #e3a2c2;
+  --code-variable: #eceaf4;
+  --code-meta: #9a95ac;
+}
+
+@theme inline {
+  --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+
+  --color-brand: var(--brand);
+  --color-agent: var(--agent);
+  --color-agent-surface: var(--agent-surface);
+  --color-bubble-self-from: var(--bubble-self-from);
+  --color-bubble-self-to: var(--bubble-self-to);
+  --color-bubble-self-foreground: var(--bubble-self-foreground);
+  --color-bubble-peer: var(--bubble-peer);
+  --color-bubble-peer-foreground: var(--bubble-peer-foreground);
+  --color-presence-online: var(--presence-online);
+  --color-presence-thinking: var(--presence-thinking);
+  --color-presence-silent: var(--presence-silent);
+  --color-presence-timeout: var(--presence-timeout);
+  --color-presence-failed: var(--presence-failed);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* 语义文本标尺：独立于 @theme inline 声明，让 html[data-font-size=…]
+   只需覆盖这五个令牌即可缩放阅读文字——不改 --spacing、根字号、
+   固定/rem 组件尺寸、按钮 padding、图标、布局或触控几何。 */
+@theme {
+  --text-display: 1.25rem;
+  --text-display--line-height: 1.4;
+  --text-display--font-weight: 600;
+  --text-title: 0.9375rem;
+  --text-title--line-height: 1.5;
+  --text-title--font-weight: 500;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.625;
+  --text-body--font-weight: 400;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.4;
+  --text-caption--font-weight: 400;
+  --text-micro: 0.625rem;
+  --text-micro--line-height: 1.3;
+  --text-micro--font-weight: 500;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-literal {
+  color: var(--code-keyword);
+}
+.hljs-string,
+.hljs-attr,
+.hljs-regexp {
+  color: var(--code-string);
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--code-comment);
+}
+.hljs-number {
+  color: var(--code-number);
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--code-function);
+}
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-template-tag {
+  color: var(--code-type);
+}
+.hljs-variable,
+.hljs-params {
+  color: var(--code-variable);
+}
+.hljs-meta,
+.hljs-doctag {
+  color: var(--code-meta);
+}
+
+/* ===== 主题预设：纸张墨（paper） =====
+   反向人文极：衬线字族 + 无阴影 + 发丝边框（见文末形态层）。
+   主行动色 = 墨色（日间深墨按钮 / 夜间纸白按钮），朱砂只做品牌与焦点；
+   Agent 身份 = 青瓷青，与墨色明度分离。 */
+/* 内嵌思源宋体子集（OFL，许可见 public/fonts/NotoSerifSC-OFL.txt）：
+   GB2312 常用字 + 西文 + 标点，wght 200-900 可变字重；
+   只在 paper 主题被使用时由浏览器懒加载 */
+@font-face {
+  font-family: 'Noto Serif SC';
+  src: url('/fonts/NotoSerifSC-Subset.woff2') format('woff2');
+  font-weight: 200 900;
+  font-display: swap;
+}
+
+/* ===== 主题预设：像素风（pixel） =====
+   复古游戏机：内嵌 OFL 缝合像素字体（中西文同风格像素字形）+ 零圆角 +
+   阶梯像素描边（见文末形态层）。日间 = Game Boy 暖屏，夜间 = 街机深夜。 */
+/* 缝合像素字体子集（OFL，许可证链见 public/fonts/fusion-pixel-licenses/）：
+   GB2312 常用字 + 西文 + 标点，12px 比例版 */
+@font-face {
+  font-family: 'Fusion Pixel';
+  src: url('/fonts/FusionPixel12-Subset.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@keyframes dazzle-drift {
+  from {
+    transform: translateX(-5%);
+  }
+  to {
+    transform: translateX(5%);
+  }
+}
+/* ===== 字号档位（data-font-size，独立于主题/配色变体） =====
+   只覆盖语义文本令牌（--text-display/title/body/caption/micro）：
+   阅读/无障碍偏好，绝不缩放根字号、--spacing、按钮/图标/布局/触控几何。
+   'standard' 不写属性，沿用上方 @theme 默认字阶。
+   小档保持元信息最小可读：caption 不低于 0.75rem、micro 不低于 0.625rem。 */
+html[data-font-size='small'] {
+  --text-display: 1.125rem;
+  --text-title: 0.875rem;
+  --text-body: 0.8125rem;
+  --text-caption: 0.75rem;
+  --text-micro: 0.625rem;
+}
+html[data-font-size='large'] {
+  --text-display: 1.375rem;
+  --text-title: 1.0625rem;
+  --text-body: 1rem;
+  --text-caption: 0.875rem;
+  --text-micro: 0.75rem;
+}
+/* ===== 配色变体层 =====
+   按主题手工策展的整套配色（目录见 src/lib/themes.ts 各 preset.variants）：
+   覆盖「色彩声音」令牌（primary/brand/ring/bubble-self/accent 系），
+   并对背景/卡片/气泡等中性表面做同明度轻染色，让氛围随配色整体转向；
+   明度档位一律保持 → 对比度不劣化；agent 系、presence 五态与
+   destructive/code 语义色永不触碰；paper/contrast 表面是主题本体，不染。
+   'standard' 不写 data-variant。特异性高于主题块，日/夜各一档。
+   数值由 scripts/variant-lab.mjs gen 生成（oklch 保 l 拧 h，色域内收敛），
+   生成后必须跑 node scripts/variant-lab.mjs check 过对比度体检。 */
+
+/* celira · azure（日） */
+:root:not(.dark)[data-variant='azure'],
+[data-theme='celira']:not(.dark)[data-variant='azure'] {
+  --primary: #146db6;
+  --brand: #2d9afa;
+  --ring: #288ae1;
+  --bubble-self-from: #1379cc;
+  --bubble-self-to: #3978c1;
+  --accent-foreground: #085d9f;
+  --background: #f2f8fe;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #e8f1fb;
+  --muted: #e9f1fa;
+  --border: #d0d8e2;
+  --input: #a7b0bb;
+  --bubble-peer: #ffffff;
+}
+
+/* celira · rose（日） */
+:root:not(.dark)[data-variant='rose'],
+[data-theme='celira']:not(.dark)[data-variant='rose'] {
+  --primary: #b14082;
+  --brand: #e36aad;
+  --ring: #cf619e;
+  --bubble-self-from: #c04b8d;
+  --bubble-self-to: #b45783;
+  --accent-foreground: #a02270;
+  --background: #fcf4f8;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #f9ecf2;
+  --muted: #f8ecf2;
+  --border: #e0d4da;
+  --input: #baabb2;
+  --bubble-peer: #ffffff;
+}
+
+/* celira · azure（夜） */
+.dark[data-variant='azure'],
+.dark[data-theme='celira'][data-variant='azure'] {
+  --primary: #419ff8;
+  --brand: #419ff8;
+  --ring: #419ff8;
+  --bubble-self-from: #1d86df;
+  --bubble-self-to: #4c9bf6;
+  --accent-foreground: #95c7fb;
+  --background: #161c22;
+  --card: #1c232b;
+  --popover: #20272f;
+  --secondary: #242b33;
+  --muted: #1f252c;
+  --border: #39424b;
+  --input: #4f5e6e;
+  --bubble-peer: #222a32;
+}
+
+/* celira · rose（夜） */
+.dark[data-variant='rose'],
+.dark[data-theme='celira'][data-variant='rose'] {
+  --primary: #e76db0;
+  --brand: #e76db0;
+  --ring: #e76db0;
+  --bubble-self-from: #cd5298;
+  --bubble-self-to: #e16fa6;
+  --accent-foreground: #f2aed0;
+}

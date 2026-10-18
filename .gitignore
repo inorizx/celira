@@ -1,0 +1,63 @@
+/target
+/target-exec-f1/
+/target-exec-f2/
+/target-exec-f3/
+# 新 agent crate（agent/）是独立 workspace，构建产物目录名以 target 开头，
+# 含审计用的 target-<task>-audit；上面的 /target 锚定仓库根，管不到这里。
+/agent/target*/
+/.build/
+# 数据目录（测试/运行产物，随 cwd 生成）——不限定根层级：重排后 cargo test 的
+# cwd 是 package 目录（如 im/server/），黑盒测试的 ./data 会落在 package 下。
+data/
+/test-data
+/artifacts
+/.codegraph/
+/design-mockups/
+
+# 外部项目调查参考（pi / opencode / deepseek-harness 专题深读），本地资料不进版本控制。
+/docs/references/
+# `.workbuddy/` 是本地工作区（memory / 临时件 / 救援脚本）——**不进版本控制**；
+# 只有 `skills/` 例外：项目级技能是**团队资产**。
+# 为什么收这个口（TASK_69 收尾，2026-09-21）：那份技能被就地整体覆盖过，而它没有版本历史
+# ⇒ "覆盖即失史"。这条否定规则把技能纳入跟踪，同时**不**把 memory 之类本地件带进来。
+/.workbuddy/*
+!/.workbuddy/skills/
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# 本地工作区备份（如主题系统改造前的快照），不进版本控制。
+.backups/
+
+# Home Portability 工具（tools/home_portability.py）防御性排除：若备份/恢复
+# 在仓库内被误触发（操作者自选 --output/--destination），不进入版本控制。
+/home-portability-*/
+.home-restore-*
+.trae/
+
+# 发布打包产物（scripts/make_release.ps1 产出：发布目录、zip、清单、notes）
+/dist-release/
+
+# Python 编译缓存（tools/ 与 tools/tests/ 都是 stdlib Python）
+__pycache__/
+*.pyc
+
+# 门禁跑的原始控制台转储与桩转储（`npm run verify` / `verify:ui` 之类，落在 outputs/ 下、以 `_` 起头）。
+# 判据：**证据进 .md 报告，日志本身不进版本控制** —— 全仓今天零个 `.log` 被跟踪，保持这样。
+# 2026-10-07 补齐：这条判据当初只挡了 `.log`，而真正被跟踪的是 `.out` / `.ndjson`（236 份）
+# —— 判据没错，错的是扩展名。收口时对已被跟踪的执行 `git rm --cached`（内容留在磁盘），考古走 Git。
+/outputs/_*.log
+/outputs/_*.out
+/outputs/_*.ndjson
+# 例外：被活文档按名字引用的转储是**证据锚**，不得退出跟踪（引者清单见 outputs/README.md §1）。
+!/outputs/_knife7-move-acceptance.out
+!/outputs/_knife8-make-release.out
+!/outputs/_knife8-release-acceptance.out
+!/outputs/_knife10-make-release.out
+!/outputs/_knife10-release-acceptance.out
+!/outputs/_reply-write-acceptance.out
+!/outputs/_reply-write-evidence.out
+!/outputs/_reply-write-world.out
+!/outputs/_seal-attachment-layer-probe.out
+!/outputs/_seal-fix-lightbox-layering.out

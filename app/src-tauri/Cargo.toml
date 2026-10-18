@@ -1,0 +1,91 @@
+[package]
+name = "celira-app"
+version = "0.1.0"
+description = "Celira 桌面壳（Tauri）—— 一份前端构建产物 + 一个壳，不含世界也不含执行端"
+authors = ["inori"]
+license = "MIT"
+edition = "2021"
+# **这是事实，不是政策**（2026-10-14 按 clippy 的 `incompatible_msrv` 更正）：从前写 1.77.2，
+# 而 `local_store.rs` 那把**跨进程**文件锁用的是 `std::fs::File::try_lock`（**1.89 起稳定**）；
+# 同仓库的 `celira-agent` 是 **edition 2024**（要求 1.85+）且**早就在用**同一个 API ⇒ 这台机器上
+# 的真底线本来就 ≥1.89。写一个做不到的数，只会让"能不能编"这句话失真。
+rust-version = "1.89.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# 独立 crate：**不属于根 Cargo workspace**（根 members 只有 im/server），
+# 与本仓 agent/ 的处置同款。空 `[workspace]` 表让它成为自己 workspace 的根，
+# 从而可以独立 build / test，且不需要改动根 Cargo.toml。
+#
+# 为什么该独立而不是当成员：壳的工具链与平台矩阵跟 im 服务端完全不同
+# （Tauri CLI、WebView2、将来的 Xcode/Android SDK），塞进同一个 build 编排只会互相牵制。
+[workspace]
+
+[lib]
+name = "celira_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+# `tray-icon`：§8.2 的托盘（界面关了但 app 不退；菜单里那一项把后果写在名字里）。
+# `image-png`：读托盘那两个图标（「还有本地服务在跑」那一个是编译期内嵌的 PNG，
+#   见 `src/lib.rs` 的 `TRAY_RUNNING_ICON` 与 `icons/make-tray-running.py`）。
+tauri = { version = "2.11.2", features = ["tray-icon", "image-png"] }
+tauri-plugin-log = "2"
+
+# **凭据与世界的形状**（2026-10-03 刀：住户登记的唯一写者）：
+# - `sha2`：世界那一维的稳定摘要（`credentials.js` 的 `worldKey` 用同一支算法逐字节对齐）；
+# - `url`：世界地址的规范化（`normalizeWorld` 同款：小写主机、去尾斜杠）。
+# 两个都已经在 tauri/reqwest 的依赖树里（同一份只编一次），这里只是把它们提成直接依赖。
+sha2 = "0.10"
+url = "2"
+
+# **安家执行**（2026-09-30）：壳的 Rust 侧自己跟**本机世界**说话（loopback、
+# 免钥匙、只用既有 HTTP 面）——与前端那条 tauri-plugin-http 通道无关（这里是
+# 后台逻辑，不在 webview 里）。版本与 tauri-plugin-http 对齐（0.12）：同一份
+# reqwest 只编一次。blocking 是有意的：安家是一段有先后顺序的阻塞流程
+# （调 CLI、收一行 JSON、起进程、等报到），将来接 Tauri 命令时用
+# `tauri::async_runtime::spawn_blocking` 托底，不在命令线程里直接跑。
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking"] }
+
+# **HTTP 由 Rust 侧发**（不是 webview 的 fetch）：这是本壳存在技术理由的一半 ——
+# 浏览器的同源策略不参与，所以「app 连任意地址的世界」不需要 im 服务端开任何 CORS 面。
+# 手机壳（iOS/Android）没有这一档：那边没有"本地家"可直连，全部走绝对地址 + 家钥匙。
+#
+# **`tauri-plugin-fs`：下载落盘走它**（2026-10-08）。为什么不用 Tauri 自己的下载钩子
+# （`on_download`）：真机实测在**本壳里 WebView2 的 `DownloadStarting` 一次都不触发**
+# （插桩证据：钩子装上了、点击到达了锚点、带用户激活也不触发）⇒ 那条路在这里不可用。
+# 走 fs 插件还有个好处：**落点由 capability 的作用域强制**（只放开 `$DOWNLOAD/**`，
+# webview 根本写不到别处），而且 `writeFile` 的 promise 本身就是回执。
+# 详细账见 `app/README.md` §3.1。
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+tauri-plugin-http = "2"
+tauri-plugin-fs = "2"
+# **外链交给系统浏览器**（2026-10-08 刀）：只用它的 Rust 自由函数 `open_url`，
+# **不 `init()` 插件**（页面拿不到这个能力 ⇒ 不需要任何 capability，面最小）。
+# 判据与为什么必须有这一层见 `src/external_links.rs` 的文件头。
+tauri-plugin-opener = "2"
+# **原生通知**（2026-10-08 刀）：壳里 WebView2 的 Web 通知**用不了** —— wry 注册的权限处理器
+# 只放行剪贴板读（`wry-0.55.1/src/webview2/mod.rs:500-513`），而 WebView2 规范明写
+# `PermissionKind.Notification` 的 `Default` 一律当拒绝（真机实测：`requestPermission()`
+# 回 `denied`）⇒ 走壳自己的原生通知。页面侧只换 `api/notifications.ts` 一个模块。
+tauri-plugin-notification = "2"
+
+# **账本 pid 的身份核对**（2026-10-03 刀：生命周期）：杀/起之前先问"这个 pid 还是我们那个程序吗"
+# —— 照 `scripts/home/proc.js` 的纪律第 3 条（杀之前先验身份；**路径判据**不是名字判据）。
+# 版本与依赖树里那份一致（0.52），只是提成直接依赖。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+
+# Unix 侧那一半（Linux）：身份核对读 `/proc/<pid>/exe`，停进程发 `SIGTERM`。
+# 版本与依赖树里那份一致（0.2），只是提成直接依赖。
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

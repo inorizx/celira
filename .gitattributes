@@ -1,0 +1,29 @@
+# 提交时一律归一到 LF（2026-10-18 加）。
+#
+# **为什么加**：今天仓库是自洽的——加之前实测 `git ls-files --eol`：1267 个被跟踪文件里
+# **索引里存 CRLF 的 = 0 个**（`i/lf` 1170 · 二进制 `i/-text` 79 · 空文件 `i/none` 18），
+# 所以这不是修 bug，是**加固**：把「提交时归一到 LF」从一个**不随仓库走的本地设置**
+# （`core.autocrlf`，只活在这台机器上）搬进**仓库自己的规则**。
+# ⇒ 一个没有配 `core.autocrlf` 的 Windows 贡献者也不会把 CRLF 提交进来。
+#
+# ⚠ 一条已知的本地现象（不是缺陷，无需处理）：工作树里有 **5 个 `w/mixed`** 文件
+# （`agent/src/im_channel.rs` 与四个主题 CSS），来自 2026-10-18 那次「接手基线（原样收下）」。
+# 它们的**索引里是 LF** ⇒ 提交内容自洽；下一次提交会被本文件归一到 LF。
+
+* text=auto eol=lf
+
+# 二进制：显式声明。内容探测通常认得出来，但万一认错成文本就会被「归一」——那是**毁文件**，
+# 所以按扩展名钉死。
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.icns  binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.zip   binary
+*.exe   binary
