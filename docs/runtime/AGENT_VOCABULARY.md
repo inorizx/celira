@@ -163,7 +163,7 @@ Agent 与人的差别数得完，每条都有对应的机制。**物理不能改
 | 字 | 地基持久数据（records / pins） | `agent/src/foundation.rs` 的 `Record`（五档，见「书签」行）／`pins_board.rs`（pins）；落 `<环境根>` |
 | 合法收场 | **主体两档**（她自己结束这一段：**收场** `ended` ／ **搁下** `held`，**两档都不带值**——她是用**动词**选的，不是用参数）＋ **系统六档**（模型失败／行动失败／取消／超时／崩溃／结果不确定） | `core` 终态（2026-10-10 两次收口；**已落地**：`finish_run` / `hold_run` 都不带参数，见 `RUNTIME_TERMINAL_DECISIONS.md` §6 与 `agent/README.md` §3.59 / §3.60） |
 | `hold`（歇着） | **主体结束这一段的第二种方式**：**不收场为「干完了」、不烧轮**；有事（门铃／闹钟）**下一段**接着办。它与收场**机械上同一件事**（都结束这一段、都封存），**区别只在词**——那个词进账，下一段的开场纸条据此说「上一段是你搁下的，不是断了」。⚠ 它**不是**「一段吊着不关」：那种形状要么握着排他写资格（挡住操作者），要么与「模型配置下一次活动生效」那条承诺冲突 | `RUNTIME_TERMINAL_DECISIONS.md` §6（2026-10-10 第二次收口；**已落地**：她的动词面上有 `hold_run`） |
-| 账 | im 服务端存储。⚠ **「账本」另有四义、未裁**（见 §9.1③之补） | `im/server` 的存储（本表所列其余名字的权威都在执行端，这一格在**世界**） |
+| 账 | **世界**那一本账：im 服务端存储。⚠ **「账」是一个模式名**——只追加、可据以恢复的事实记录（判据取自 `../constitution/AGENT_CONTINUITY_CONSTITUTION.md:65` 的「账／版面」之分：**可不可重写**）；**必须带归属限定**（世界账／地基账／宿主账／经历账）。⚠ **「运行账本」不是账**（那是机器侧运行产物），见 §9.1③之补 | `im/server` 的存储（本表所列其余名字的权威都在执行端，这一格在**世界**） |
 | `Effect`（效果） | 动作的后果，**按能不能核实分档**（`ReadOnly` / `ExclusiveCreate` / `RepeatableWrite` / `UnverifiableWrite`）。⚠ **本表此前对它零覆盖**——它是三原语之一，权威在别处 | `AGENTS.md`「描述 Agent 的语言只有三个原语」／`agent/src/app_contract.rs` 的 `EffectDeclaration`（`agent/README.md` §3.11） |
 | `材料` / `Materials` | **两义，别混**：① **可读的材料**——显式授权给主体的**只读资料根**（与环境根是两件事，重叠在装配期被拒）② **认知材料**——主体在一次清醒期里产生的**模型输出** | ① `agent/README.md` §2（`--materials`）＋ `../agent/06_AGENT_RUNTIME_END_STATE.md` 的 `Materials` 行 ② `../constitution/AGENT_PHILOSOPHY.md`（「认知材料」） |
 
@@ -225,15 +225,21 @@ Agent 与人的差别数得完，每条都有对应的机制。**物理不能改
 
 **读法（判据，不是缺陷）**：这些裸字符串**只在"有调用上下文"的地方够用**（工具回执、单条读数）。一旦**聚合**——账本、诊断、`[next]`——**必须同时能问出"这是谁的失败"**。今天这条路靠 `ActionId` 已能恢复来源（`action-result` 带动作标识，标识自带归属）⇒ **满足**；新加聚合面时不许丢掉它。
 
-**③之补 · 本表登记的另三处同名**（2026-10-18，**只登记、不裁定**）
+**③之补 · 本表登记的另三处同名**（2026-10-18 登记 · **2026-10-18 已裁**）
 
-⚠ 这三处与上面那些裸字符串不同：**它们的每一义今天都在用**，所以**换哪一支都动公共语义**（`AGENTS.md`：改动影响核心领域模型时必须暂停并请求主人作最终取舍）⇒ **本表只登记，不定输赢**。**裁定之前，写文档时遇到它们必须写明是哪一支，不得默认。**
+⚠ 这三处与上面那些裸字符串不同：**它们的每一义今天都在用**，所以换哪一支都动公共语义。⇒ 已按**第一性原理 ＋ 主流授权／日志工程的通行做法**裁定，见每行第三格。
 
-| 写法 | 各义与位置 | 状态 |
+**裁定之后仍然强制一条**：**写文档时遇到它们必须带限定，不得默认。**
+
+| 写法 | 各义与位置 | 裁定（2026-10-18） |
 |---|---|---|
-| **`Grant`** | ① **配对凭据**（Pairing Grant——短期、一次性、可撤销，只能兑换为**签发者本人**的 Human Session）：`../contracts/core-v1/HOME_ACCESS.md:21`——**已建**（冻结契约）② **执行端能力授权**（`grant_id` / `subject` / `capability` / `target_scope` / `credential_ref` / `issuer` / `expiry` / `revocable`）：`terminal/RUNTIME_TERMINAL_DECISIONS.md:345-356`——⚠ **它落在「## 10. 暂不采纳的评审建议 ／ 10.1 不现在引入完整授权治理系统」里，是未采纳的提案，不是今天的义** ③ **调用者授权**（`User × Agent × Room Grant`——「决定具体调用者在 Agent/Room 中可使用的能力；**它不是安装事实**」）：`../constitution/AGENT_FOUNDATION_CONTRACT.md:283,290`——**目标架构**（它引的 `agent_tool_grants` 在 `im/server/migrations` 与 `im/server/src` 各 **0 处**）④ **`CreationGrant`**（一次活动的**文本创建授权**；「**不是通用授权平台**：没有持久授权、没有动态撤销、没有审批流、没有审计日志」）：`../../agent/src/creation_grant.rs`（51 处）——**已建，且此前未登记** ⑤ 并与 `AGENTS.md` 架构红线「**跨边界写效应需 Grant**」同词（`../agent/02_AGENT_FOUNDATION.md:27` 明写「**当前无完整 Grant 实现不解除此目标约束**」）——**目标约束** | **待裁**（2026-10-18 逐处核过：**不是 3 义**——① 凭据兑换与 ③④⑤ 能力授权是**两类**，② 是未采纳的提案） |
-| **`账本`** | **§9.1② 的 `Ledger` 行**明写 `Ledger` 与 `Trace` 是**两个东西**，而至少五处在用同一个「账本」：im 服务端存储（**§9 词表的「账」行**）／地基持久层（`../constitution/AGENT_CONTINUITY_CONSTITUTION.md:65`——「账＝地基持久层（只追加的 Trace/Fact ＋ records/pins）」）／宿主 journal（`AGENT_CORE_PRINCIPLES.md:101`——「宿主层账本（journal）＝**机械录**」）／运行账本＝pid ＋ 日志（`../../scripts/HOME_MANUAL.md:258,266`——「**账本不跟着搬**（它记的是机器上的进程）」）／经历账 `trace.ndjson`（`../../agent/README.md:133`；⚠ 本行原引 `:1747`，**那一行讲的是 `ImFailure` 六族，行号已漂**） | **待裁**（2026-10-18 逐处核过：**五义都真、都活，且跨三个平面**——世界／执行端／机器。问题不是"几义"，是**没有平面限定**） |
-| **`Materials` / `材料`** · **`Effect`** | `Materials`：① **只读资料根**（`--materials`，**显式授权**、与环境根重叠即拒）：`../../agent/README.md:177,184` ② **认知材料**（模型输出）：`../constitution/AGENT_PHILOSOPHY.md:255` ③ **终局 context 结构里的一格**（「Agent 可主动读取的材料」）：`../agent/06_AGENT_RUNTIME_END_STATE.md:56`——⚠ 词表 §9 行已登记 ①②，**③ 未登记**。`Effect`：① **外部动作及其可知结果**（`Effect` / `Receipt` / `Unknown`）：`terminal/RUNTIME_TERMINAL_ENGINEERING.md:24` ② **效果类别声明**（`EffectClass` 四档：`ReadOnly`/`ExclusiveCreate`/`RepeatableWrite`/`UnverifiableWrite`）：`../../agent/README.md:306` ③ **写效应**（Grant 的门对象）：`../agent/02_AGENT_FOUNDATION.md:27` | **已核（2026-10-18），两者结论不同**：**`Effect` 不需要裁**——① ② 是同一件事的两面（后果／它的声明），③ 是 ① 的**子集**（被门选中那一类）⇒ 词表 §9 那一行已把它们合成，**不收新义**。**`Materials` 要裁一句**——③ 是 ① 的**上位写法**（授权根 → 读得到的内容），还是第三个所指 |
+| **`Grant`** | ① **配对凭据**（Pairing Grant——短期、一次性、可撤销，只能兑换为**签发者本人**的 Human Session）：`../contracts/core-v1/HOME_ACCESS.md:21` ② **执行端能力授权**（`grant_id` / `subject` / `capability` / `target_scope` / `credential_ref` / `issuer` / `expiry` / `revocable`）：`terminal/RUNTIME_TERMINAL_DECISIONS.md:345-356` ③ **调用者授权**（`User × Agent × Room Grant`——「决定具体调用者在 Agent/Room 中可使用的能力；**它不是安装事实**」）：`../constitution/AGENT_FOUNDATION_CONTRACT.md:283,290` ④ **`CreationGrant`**（一次活动的**文本创建授权**）：`../../agent/src/creation_grant.rs` ⑤ `AGENTS.md` 架构红线「**跨边界写效应需 Grant**」（`../agent/02_AGENT_FOUNDATION.md:27`） | **不是"一词多义"，是"一个模式名"**：`Grant` 在主流授权体系里本就是**通用词**（OAuth 的 *authorization grant* 同形）——**通用词 ＋ 类型限定词**，这是通行做法。⇒ **保留通用词，强制带类型限定**（**配对 grant** ／ **创建 grant** ／ **调用者 grant**），**不改名**：① 是冻结契约词、④ 是代码标识符。**逐处状态**：①④ **已建**；③⑤ **未建**（③ 目标架构——它引的 `agent_tool_grants` 在 migration 与 `im/server/src` 各 0 处；⑤ 目标约束，原文自认"当前无完整 Grant 实现"）；② **未采纳**（落在 `RUNTIME_TERMINAL_DECISIONS.md`「## 10. 暂不采纳的评审建议」里）⇒ **不算今天的义**。 |
+| **`账本`** | ① im 服务端存储（**§9 词表的「账」行**）② 地基持久层（`../constitution/AGENT_CONTINUITY_CONSTITUTION.md:65`——「账＝地基持久层（只追加的 Trace/Fact ＋ records/pins）」）③ 宿主 journal（`AGENT_CORE_PRINCIPLES.md:101`——「宿主层账本（journal）＝**机械录**」）④ 运行账本＝pid ＋ 日志（`../../scripts/HOME_MANUAL.md:258,266`）⑤ 经历账 `trace.ndjson`（`../../agent/README.md:133`） | **也不是"多义"，是"一个模式名"**：账＝**只追加、可据以恢复的事实记录**——判据直接取自 `../constitution/AGENT_CONTINUITY_CONSTITUTION.md:65` 的「账／版面」之分（**可不可重写**）。按这条判据逐处量：**①②③⑤ 是账**（**世界账／地基账／宿主账／经历账**）；⚠ **④「运行账本」不是**——`host.pid` **可覆盖**（版面性质），`host.out` 是**可再生**的机器侧日志。⇒ **保留通用词，强制带归属限定**。⚠ ② 与 §9「账」行曾各说各的"账"——**它们不冲突，是两个平面的账**；§9 那一行已补平面限定。 |
+| **`Materials` / `材料`** · **`Effect`** | `Materials`：① **只读资料根**（`--materials`，**显式授权**、与环境根重叠即拒）：`../../agent/README.md:177,184` ② **认知材料**（模型输出）：`../constitution/AGENT_PHILOSOPHY.md:255` ③ **终局 context 结构里的一格**（「Agent 可主动读取的材料」）：`../agent/06_AGENT_RUNTIME_END_STATE.md:56`。`Effect`：① **外部动作及其可知结果**（`Effect` / `Receipt` / `Unknown`）：`terminal/RUNTIME_TERMINAL_ENGINEERING.md:24` ② **效果类别声明**（`EffectClass` 四档）：`../../agent/README.md:306` ③ **写效应**（Grant 的门对象）：`../agent/02_AGENT_FOUNDATION.md:27` | **`Materials` 保持两义**（① 可读的材料 ② 认知材料）；**③ 不是第三个所指**——它是 ① 的**上位写法**（授权根 → 读得到的内容），**归入 ①**。**`Effect` 保持一义**：① 与 ② 是**同一件事的两面**（后果／它的声明），③「写效应」是 ① 的**子集** ⇒ **不收新义**。 |
+
+**④「运行账本」的处置：登记，暂不改。** 它在**代码里 14 处**（`scripts/home/paths.js` / `residents.js` / `status.js` / `down.js` / `agent/src/**`）＋ **一条用户可见读数**（`status` 打的 `[旧账本] logs/agents/<支>/：…`）⇒ **改名不改变任何行为**，而本仓纪律是「**名字本身不是罪证，职责和依赖才是判据**」（`AGENTS.md`）。⇒ **登记为"用词不当、已知、暂不改"**。
+**触发条件**（两个之一到了就改）：下次碰那几个文件时顺手清；或它真的让人把 `logs/` 当成事实账时。
+⚠ **在它改名之前**：写文档遇到它**必须写明"那是机器侧运行产物，不是事实账"**；而且**不许只改文档**——`HOME_MANUAL.md` 与 `status` 的读数照旧用旧名，只改一处就是**与读数脱钩**。
 
 **④ 称谓**（`她`）
 
