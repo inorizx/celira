@@ -26,9 +26,16 @@
  *   `操作栏` 6 处；`进 App 读全文` 1 处），而大家实际在用的是**另外的名字**（回执 824 /
  *   上下文窗口 38 / 工具面 51）⇒ **读者按表里的名字去代码里找，找不到**。
  *   判据与行内豁免机制见下方那一段。
+ * - **判据四（`文件:行号` 引用必须解析得到）**：判据三管"条目名有没有人用"，**没有东西管
+ *   "引用指不指得到"**。2026-10-18 实测：词表 21 条引用里 **2 条是坏的**——
+ *   `agent/README.md:28` **少了 `../../`**、`agent/README.md:1747` **行号漂了**
+ *   （那一行讲的是 `ImFailure` 六族）。⇒ 读者按引用去翻，翻到的是**另一句话**。
+ *   ⚠ **射程只有词表，这是量出来的**：全仓 md 共 38 条这类引用，`agent/README.md` 的 13 条是
+ *   **裸文件名**（基准隐含在 `agent/src/`）⇒ 放大射程会立刻产生 13 条假红。见下方那一段。
  *
- * ⇒ 三条判据都是"**声明即受约束**"：一个文件自称对外入口，它就接受判据一；
- * 一份 outputs 文件被活文档点名，它就接受判据二；一个词进了 §9 主表，它就接受判据三。
+ * ⇒ 四条判据都是"**声明即受约束**"：一个文件自称对外入口，它就接受判据一；
+ * 一份 outputs 文件被活文档点名，它就接受判据二；一个词进了 §9 主表，它就接受判据三；
+ * 一条引用写进词表，它就接受判据四。
  *
  * ## 判据方向（写死，别反过来）
  *
@@ -40,16 +47,23 @@
  * 3. **§9 主表的每行主名，在词表之外至少被引用一次**。⚠ **一行只判主名**——括号里那个是
  *    **别名**，别名不要求独立引用：要求它活着等于要求"两个名字都留着"，与 §9.1① 自相矛盾。
  *    确实只在词表里用的概念名，**在那一行写「豁免判据三」并把理由写在同处**。
+ * 4. **词表里的每条 `文件:行号`：路径解析得到、行号在范围内**。⚠ **射程只有词表**——
+ *    别的文档用裸文件名（基准隐含），放大射程就是一堆假红。有意保留的坏引用，
+ *    **在那一行写「豁免判据四」并把理由写在同处**。
  *
  * ## 它量得到什么、量不到什么（如实登记）
  *
  * - 量得到：对外入口有没有**定义过**那个代词；被引用的 outputs 文件有没有**登记**；
  *   两张入口表与磁盘上的候选文档**是否恰好一一对上**（新加一个入口文档会自动要一个理由）；
- *   词表主名在**词表之外**还出不出现（"表名与实现分家"的下限探测）。
+ *   词表主名在**词表之外**还出不出现（"表名与实现分家"的下限探测）；
+ *   词表里的 `文件:行号` 引用**指不指得到**。
  * - 量**不到**：定义写得**对不对**（脚本只认"代词与『指』同现"这个形状，认不出定义写歪了）；
  *   索引里那条**该不该**是证据锚；`outputs/README.md` 的 §1 与 §2 有没有归错类；
  *   **词表之外那个同名字指的是不是同一个东西**（`includes` 只回答"这个字符串还在不在别处
- *   出现"），也量不到那个名字用得**对不对**。本脚本只做"有没有"这一层，不假装管更多。
+ *   出现"），也量不到那个名字用得**对不对**；
+ *   ⚠ **判据四量不到"行号漂移"**——路径在、行号也在范围内、只是**内容换了**的那些，它
+ *   **一声不响**（`agent/README.md:1747` 就是这一形态）。它只挡"指不到"，**挡不住"指错了"**。
+ *   本脚本只做"有没有"这一层，不假装管更多。
  *
  * ⚠ **本文件不许写出那个字**：写成转义常量 `PRONOUN_SHE`，判据与夹具都用它拼。
  *   这不是洁癖——`check-voice.mjs` 的头里记着理由：守卫要是写得出它，就会被"清一遍"的
@@ -64,7 +78,7 @@
  * 退出码：0 = 全通过；1 = 有违例（或自检没抓住故意埋的违例）。
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { join, relative, sep, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -271,6 +285,84 @@ function checkVocabLive(names, contents) {
   return problems
 }
 
+// ---------------------------------------------------------------------------
+// 判据四：词表里的 `文件:行号` 引用必须解析得到（2026-10-18 立）
+// ---------------------------------------------------------------------------
+//
+// **它补的是哪一类洞**：判据三管"条目名有没有人用"，**没有东西管"引用指不指得到"**。
+// 实测（2026-10-18）：词表 21 条 `文件:行号` 引用里 **2 条是坏的**——
+// `agent/README.md:28` **少了 `../../`**（同文其他 4 处都写了）、
+// `agent/README.md:1747` **行号漂了**（那一行讲的是 `ImFailure` 六族，真正的经历账在 `:133`）。
+// ⇒ 读者按引用去翻，翻到的是**另一句话**。
+//
+// **判据一句话**：词表里的每条 `文件:行号`，**路径要解析得到、行号要在范围内**。
+//
+// ⚠ **射程只有词表，这是量出来的、不是省事**（2026-10-18）：全仓 md 共 38 条这类引用，
+// 其中 `agent/README.md` 的 13 条是**裸文件名**（`core.rs:2672` / `agent_run.rs:95` /
+// `src/screen.rs:1`），基准是**隐含的**（`agent/src/`）——按引用者所在目录与仓根**两边都
+// 解析不到**。把射程放大到全仓，会立刻产生 13 条假红。⇒ 只判**基准明确**的那一份（词表：
+// 21 条，全部按它自己所在目录解析）。
+//
+// ⚠ **豁免写在行里**（与判据三同规）：确实指不到、但有意保留的引用，在**那一行**写
+// 「豁免判据四」并写明理由。
+//
+// **量不到什么（如实登记，这一格很重要）**：它**量不到"那一行还是不是当初那一句话"**。
+// `agent/README.md:1747` 那一条就是**行号漂移**——路径在、行号也在范围内，只是**内容换了**，
+// 本判据**一声不响**。⇒ 它只挡"指不到"，**挡不住"指错了"**；后者只有人核。
+
+/** `文件:行号` 引用：`path:NNN` / `path:NNN-MMM` / `path:NNN,MMM`。 */
+const CITE_RE = /([A-Za-z0-9_./-]+\.(?:md|rs|js|mjs|ts|tsx|py)):(\d+(?:\s*[-,]\s*\d+)*)/g
+/** 行内豁免标记（见上）。 */
+const CITE_EXEMPT = '豁免判据四'
+
+/** 把 `3-5,2` 那样的尾巴拆成行号数组。 */
+function citeNumbers(tail) {
+  return String(tail)
+    .split(/[-,]/)
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isInteger(n))
+}
+
+/**
+ * 判据四：`文件:行号` 引用必须解析得到。
+ *
+ * `probe(absPath)` 返回该文件的**行数**，文件不在返回 `null` —— 由调用方给，
+ * 于是自检可以塞一个假的进去（不必在盘上造文件）。
+ */
+function checkCitations(text, baseDir, probe) {
+  const problems = []
+  const seen = new Set()
+  let m
+  CITE_RE.lastIndex = 0
+  while ((m = CITE_RE.exec(text)) !== null) {
+    const rel = m[1]
+    const raw = m[2]
+    const key = `${rel}:${raw}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const abs = join(baseDir, rel)
+    const total = probe(abs)
+    if (total === null) {
+      problems.push(
+        `引用 \`${rel}:${raw}\`：**路径解析不到**（按本文所在目录解析为 \`${abs}\`）⇒ ` +
+          `读者按引用去翻，翻不到东西。两条出路——补全相对路径（照同文其他引用的写法），` +
+          `或在那一行写「${CITE_EXEMPT}」并写明理由。`,
+      )
+      continue
+    }
+    for (const n of citeNumbers(raw)) {
+      if (n < 1 || n > total) {
+        problems.push(
+          `引用 \`${rel}:${n}\`：**行号超出**（该文件只有 ${total} 行）⇒ ` +
+            `文件缩过或引用写错。**注意本判据查不出"行号漂移"**——` +
+            `路径在、行号也在范围内、只是内容换了的那些，它一声不响。`,
+        )
+      }
+    }
+  }
+  return problems
+}
+
 // 自检：故意埋的违例**必须**被抓到（否则这个守卫就是装饰）
 function selfCheck() {
   const missed = []
@@ -344,6 +436,26 @@ function selfCheck() {
   if (vocabMainNames('这里根本没有表') !== null)
     missed.push('判据三自检：表读不到时**必须**返回 null（不假装通过）')
 
+  // 判据四自检：坏路径与越界**必须**被抓到，解析得到的**不许**报红。
+  // ⚠ 与判据二/三不同，本判据的扫描面**只有词表**（见它那一段的段头），所以夹具写在这里
+  //   不会被自己抓到——**不需要**拼字符串（判据二为那个坑踩过两次）。
+  {
+    const okAbs = join('/base', 'ok.md')
+    const probe = (abs) => (abs === okAbs ? 5 : null)
+    const cases = [
+      ['见 `./ok.md:3`。', 0, '解析得到的引用**不许**报红'],
+      ['见 `./nope.md:1`。', 1, '路径解析不到**必须**被抓到'],
+      ['见 `./ok.md:99`。', 1, '行号越界**必须**被抓到'],
+      ['见 `./ok.md:3-9,2`。', 1, '`3-9,2` 里越界的那一个**必须**被抓到'],
+      ['见 `./ok.md:1-5`。', 0, '范围全在界内**不许**报红'],
+      ['见 `./ok.md:0`。', 1, '行号 0（越下界）**必须**被抓到'],
+    ]
+    for (const [text, want, why] of cases) {
+      const got = checkCitations(text, '/base', probe).length
+      if (got !== want) missed.push(`判据四自检：${why}（期望 ${want} 条，实得 ${got} 条）`)
+    }
+  }
+
   return missed
 }
 
@@ -406,6 +518,7 @@ function main() {
   // ⚠ 但**表在、表头读不到时要红**——那是"判据无法执行"，不是"不适用"。
   const vocabPath = join(ROOT, VOCAB_FILE)
   let vocabNames = null
+  let citeCount = 0
   if (!existsSync(vocabPath)) {
     console.log(`[check-docs] 判据三 N/A：本仓没有词表（${vocabPath}）`)
   } else {
@@ -419,6 +532,19 @@ function main() {
       const contents = files.map((rel) => [rel, readFileSync(join(ROOT, rel), 'utf8')])
       problems.push(...checkVocabLive(vocabNames, contents))
     }
+  }
+
+  // 4) 词表引用判据
+  //
+  // ⚠ 射程**只有词表**（理由与实测见判据四那一段的段头：全仓 38 条里有 13 条是裸文件名、
+  //    基准隐含，放大射程会立刻产生 13 条假红）。
+  if (vocabNames !== null) {
+    const vocabText = readFileSync(vocabPath, 'utf8')
+    const vocabDir = dirname(vocabPath)
+    citeCount = (vocabText.match(CITE_RE) || []).length
+    const probe = (abs) =>
+      existsSync(abs) ? readFileSync(abs, 'utf8').split(/\r?\n/).length : null
+    problems.push(...checkCitations(vocabText, vocabDir, probe))
   }
 
   const missed = selfCheck()
@@ -435,8 +561,9 @@ function main() {
         : '判据二 N/A（本仓没有证据库）') +
       ' · ' +
       (vocabNames
-        ? `词表 ${vocabNames.length} 条主名都在词表之外活着（判据三）`
-        : '判据三 N/A（本仓没有词表）') +
+        ? `词表 ${vocabNames.length} 条主名都在词表之外活着（判据三）· ` +
+          `${citeCount} 条 \`文件:行号\` 引用都解析得到（判据四）`
+        : '判据三／四 N/A（本仓没有词表）') +
       ' · 自检全过',
   )
 }
