@@ -221,7 +221,8 @@ node scripts/serve_client.mjs --dist client-dist --port 8081 --im http://127.0.0
   （V1 的当前限制，不是永久架构承诺）。
 - **Celira 不接管外来 Agent 的人格、模型、记忆与内部权限**——那些归它自己的系统。
 - **本仓库不自带任何外部 Runtime 的接入实现**：2026-09-28 维护者裁决「不做第三方 Agent 适配器」，
-  示例连接器 `im/connectors/hermes-celira/` 已删除（考古走 Git 历史）。出厂自带的执行端
+  示例连接器 `im/connectors/hermes-celira/` 已删除（**不在本树里**——本仓的 Git 历史自「首次公开发布」
+  起，边界见仓根 [`README.md`](../../README.md) 的「仓库地图与命名」末段）。出厂自带的执行端
   只有 Native Runtime 一家（`agent/`，仍在建设期）；要接自己的外部 Runtime，按上面那份 Agent
   协议自行实现。
 

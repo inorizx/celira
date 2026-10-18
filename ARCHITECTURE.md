@@ -1,6 +1,6 @@
 # Celira Architecture
 
-> 状态：唯一 C4 Level 1–2 系统地图。本文同时陈述**当前实现**与**目标架构**，并清楚标注差距；不表示所有目标节点已经实现。当前实现事实以本文与各组件的活文档（`im/server/README.md`、`client/README.md`、`agent/README.md`）和版本化契约为准（`docs/client/LOCAL_CLIENT_HOST.md` 是**退役存档**，不作为当前实现事实的来源）；Native Runtime 的旧线实现已于 2026-09-17 退役（`agent/runtime/` 与 `agent/acp-supervisor/` 已从工作树删除，考古走 Git 历史）；接替者是新线 `agent/`（仍在建设期，未部署）。**Local Client Host 线（`host/` crate 与前端 Host 模块）已于 2026-09-20 随 Host 全托管路径退役并从工作树整体删除**（考古走 Git 历史）——本文 §3、§5、§6 中凡把它写成当前容器/当前连接/当前部署的地方已就地标注为**已退役并删除**；**本机编排现在是根目录 `home.js`（`node home.js up`），浏览器进登录页直连 im 服务端**。产品方向见 `docs/constitution/PRODUCT_VISION.md`。
+> 状态：唯一 C4 Level 1–2 系统地图。本文同时陈述**当前实现**与**目标架构**，并清楚标注差距；不表示所有目标节点已经实现。当前实现事实以本文与各组件的活文档（`im/server/README.md`、`client/README.md`、`agent/README.md`）和版本化契约为准（`docs/client/LOCAL_CLIENT_HOST.md` 是**退役存档**，不作为当前实现事实的来源）；Native Runtime 的旧线实现已于 2026-09-17 退役（`agent/runtime/` 与 `agent/acp-supervisor/` 已从工作树删除，考古走 Git 历史）；接替者是新线 `agent/`（仍在建设期，未部署）。**Local Client Host 线（`host/` crate 与前端 Host 模块）已于 2026-09-20 随 Host 全托管路径退役并从工作树整体删除**（考古走 Git 历史）——本文 §3、§5、§6 中凡把它写成当前容器/当前连接/当前部署的地方已就地标注为**已退役并删除**；**本机编排现在是根目录 `home.js`（`node home.js up`），浏览器进登录页直连 im 服务端**。产品方向见 `docs/constitution/PRODUCT_VISION.md`。⚠ **本文凡写「考古走 Git 历史」处，指的都是维护者那份仓库的历史**——本仓的 Git 历史自「首次公开发布」那一次提交起，上面那些退役物**不在本仓内**（边界声明见 `README.md`「仓库地图与命名」末段；这个词的登记见 `docs/runtime/AGENT_VOCABULARY.md` §11）。
 
 ## 1. 目标与原理
 

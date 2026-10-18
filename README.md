@@ -273,7 +273,7 @@ The repository is grouped by system:
   points);
 - `agent/` — the agent system: the current line is the **standalone crate** `agent/` (not part of
   the root workspace); the old lines `agent/runtime/` and `agent/acp-supervisor/` were retired on
-  2026-09-17 (archaeology goes through Git history);
+  2026-09-17 (not in this tree — see the boundary note at the end of this section);
 - `client/` — the whole product's presentation face (top level);
 - `app/` — the desktop shell (Tauri + Rust): **the source of `celira-app.exe`**, the thing path
   **A** above asks you to double-click. It is a **wrapping layer** around the three containers,
@@ -289,10 +289,19 @@ The repository is grouped by system:
 
 One directory you will see named below but **not** in this tree: `host/` — the Local Client Host
 crate (local all-in-one orchestration + narrow BFF) was **removed on 2026-09-20**, and its source
-is gone from the worktree (archaeology goes through Git history; the design record is kept in
+is gone from the worktree (not in this tree; the design record is kept in
 [`docs/client/LOCAL_CLIENT_HOST.md`](./docs/client/LOCAL_CLIENT_HOST.md)). The *Host* role still
 appears in the responsibility vocabulary of `AGENTS.md` / `ARCHITECTURE.md`, but no longer as a
 component here; local process orchestration is `home.js` (see `scripts/`).
+
+⚠ **A boundary about this repository's history.** **This repository's Git history begins at the
+initial public commit** — so retired code (`agent/runtime/`, `agent/acp-supervisor/`, `host/`,
+`im/connectors/`) **is not in this repository's history** and cannot be recovered here; it exists
+only in the maintainer's own repository. For the same reason, the `outputs/…` references you will
+meet in maintainer-facing documents point at **the maintainer's ruling records and measurement
+reports — that whole directory is not published with this repository**. Read such a reference as
+**a provenance note, not as a path you can open** (it is registered in
+[`docs/runtime/AGENT_VOCABULARY.md`](./docs/runtime/AGENT_VOCABULARY.md) §11).
 
 Naming map (dual-system layout, 2026-09-11): **Core v1 = the im server v1 contract** (file names and
 the words "Core v1" are kept as historical version names); crates, binaries and environment-variable

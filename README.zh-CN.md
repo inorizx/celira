@@ -230,7 +230,7 @@ Linux 的那几步（布置家、如实报缺什么）正是 `node home.js up` �
 - `im/` —— IM 系统：`im/server`，它就是世界本身。**`im/connectors/` 今天不存在**：
   那一个示例连接器已于 2026-09-28 退役并删除（见「两个扩展位」）；
 - `agent/` —— Agent 系统：当前线是**独立 crate** `agent/`（不属根 workspace），
-  旧线 `agent/runtime/` 与 `agent/acp-supervisor/` 已于 2026-09-17 退役（考古走 Git 历史）；
+  旧线 `agent/runtime/` 与 `agent/acp-supervisor/` 已于 2026-09-17 退役（**不在本树里**——见本节末那条边界）；
 - `client/` —— 整个产品的呈现面（顶层）；
 - `app/` —— 桌面壳（Tauri + Rust）：**`celira-app.exe` 就是从它编出来的**，也就是上面 A 路
   让你双击的那个东西。它是包着三个容器的一层**包装层**，不是第四个容器；
@@ -243,10 +243,17 @@ Linux 的那几步（布置家、如实报缺什么）正是 `node home.js up` �
 - `docs/` —— 宪法级文档与冻结契约。
 
 还有一个**下面会被提到、但不在本工作树里**的目录：`host/` —— Local Client Host
-（本机全托管编排 + 窄 BFF）**已于 2026-09-20 删除**，源码已从工作树移除（考古走 Git 历史；
+（本机全托管编排 + 窄 BFF）**已于 2026-09-20 删除**，源码已从工作树移除（**不在本树里**；
 设计记录保留在 [`docs/client/LOCAL_CLIENT_HOST.md`](./docs/client/LOCAL_CLIENT_HOST.md)）。
 *Host* 这个角色仍留在 `AGENTS.md` / `ARCHITECTURE.md` 的职责词汇里，但不再是本仓库的一个组件；
 本机进程编排现在是 `home.js`（见 `scripts/`）。
+
+⚠ **一条关于本仓历史的边界**：**本仓的 Git 历史从「首次公开发布」那一次提交开始**——所以
+**已退役的代码**（`agent/runtime/`、`agent/acp-supervisor/`、`host/`、`im/connectors/`）
+**不在本仓的历史里**，在这里翻不到；它们只在维护者自己那份仓库里。同理，门后文档里那些
+`outputs/…` 引用指的是**维护者那一侧的裁决材料与实测报告——那个目录整份不随本仓发表**。
+读到这样的引用，把它读成**一条出处，不是一条你能打开的路径**（这一格登记在
+[`docs/runtime/AGENT_VOCABULARY.md`](./docs/runtime/AGENT_VOCABULARY.md) §11）。
 
 命名映射（2026-09-11 双系统重排）：**Core v1 = im 服务端 v1 契约**（冻结契约里的文件名与
 「Core v1」字样保留为历史版本名）；crate / 二进制 / 环境变量键族也在同一次变更里更名为 `celira-im` 与
