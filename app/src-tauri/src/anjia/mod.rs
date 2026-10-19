@@ -307,8 +307,14 @@ pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
             ));
             let env_root = match &at {
                 HomedAt::ShellRoot(path) | HomedAt::HomeEnv(path) => Some(path.clone()),
-                // 只有住户登记对得上时，它该住的地方是 home.js 那个环境根（可能还没建完）。
-                HomedAt::HomeConf => Some(home_dir.join("env")),
+                // 只有住户登记对得上时，它该住的地方是**今天**的环境根（`<家>/agents/<支>/`，
+                // 可能还没建完）。
+                //
+                // ⚠ **2026-10-18 更正**：原写 `home_dir.join("env")` —— 那是 **2026-09-30 以前
+                // 的老家形状**（`scripts/home/paths.js` 明写它只是迁移输入），与壳**自己的**
+                // `agent_env_root`（`home_facts.rs`）自相矛盾 ⇒ 这一格是**给前端显示的读数**，
+                // 会显示一个**不存在、也不会被创建**的路径。⇒ **委托给那一份权威**，不手搓路径。
+                HomedAt::HomeConf => Some(home::agent_env_root(&home_dir, &agent_id)),
             };
             return report(
                 &agent_id,
@@ -1248,6 +1254,34 @@ mod tests {
         assert_eq!(report.outcome, AnjiaOutcome::RefusedPrecondition);
         assert_eq!(report.refusal, Some(RefusalReason::BadIdShape));
         assert!(report.env_root.is_none() && report.log_file.is_none() && report.pid.is_none());
+        cleanup(&[&home, &repo]);
+    }
+
+    /// ★ 「已经安家」时报出的**环境根**：只有 `home.conf` 的住户登记对得上时，她住的地方是
+    /// **今天**的环境根（`<家>/agents/<id>/`），**不是** `<家>/env`（那是 2026-09-30 以前的
+    /// 老家形状、只是迁移输入）。
+    ///
+    /// ⚠ **2026-10-18 加**：这一格此前**没有任何测试**——`home_facts.rs` 的 ③ 只断言
+    /// `Plan::Already { .. }`、**不看路径** ⇒ 那条路径一直写着老家形状而没人发现。
+    /// 判据一句话：**读数说"她住哪"，就必须是她真的住哪**（那是给用户看的）。
+    #[test]
+    fn already_homed_by_conf_reports_todays_env_root_not_the_old_shape() {
+        let home = temp_dir("already-conf-home");
+        // 只有住户登记：没有 `agents/<id>/identity.json`，也没有 `env/identity.json`。
+        fs::write(
+            home.join("home.conf"),
+            "human_id=hum-not-real\nagent_id=resident\n",
+        )
+        .unwrap();
+        let repo = temp_dir("already-conf-repo");
+        fake_executables(&repo);
+        let report = run(&home, &repo, "resident");
+        assert_eq!(report.outcome, AnjiaOutcome::AlreadyHomed);
+        assert_eq!(
+            report.env_root,
+            Some(home.join("agents").join("resident")),
+            "住户登记那一路报出的环境根必须是**今天**的形状（<家>/agents/<id>/）"
+        );
         cleanup(&[&home, &repo]);
     }
 
