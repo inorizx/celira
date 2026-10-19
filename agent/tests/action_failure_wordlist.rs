@@ -94,13 +94,15 @@ const WORDLISTS: [Wordlist; 9] = [
     },
 ];
 
-/// **三条豁免**，每条都写明理由。两类：
+/// **四条豁免**，每条都写明理由。两类：
 ///
 /// **甲、单值解码不成立**（标记装不下那一格的全部）：
 /// - `FileViewFailure` 是**信封**：它有两个变体把内层词表包在里面（`Materials(FailureClass)`、
 ///   `CreationTargetUnusable(FailureClass)`），单值解码重建不出内层那一个；
 /// - `SelfConceptWriteFailure` 是**带载荷的分类**：`self_concept-too-large` 那一格的 `wanted` / `current`
-///   两个字节数在标记里**没有落脚处**，硬解码就会**编造两个 0**。
+///   两个字节数在标记里**没有落脚处**，硬解码就会**编造两个 0**；
+/// - `HandoffWriteFailure` 与上一条**同一形状**（交接那一份事实的写失败）：`handoff-too-large`
+///   那一格同样带着"想写多大 / 旧的现在多大"两个字节数，标记里装不下它们。
 ///
 /// **乙、根本不属于行动面**：
 /// - `MachineFailure` 是**装配/路由**那一层的失败（`composition::machine_refused` ⇒
@@ -108,7 +110,7 @@ const WORDLISTS: [Wordlist; 9] = [
 ///   抓到了它，这里如实说明它不是这一族。
 ///
 /// ⇒ 甲类的解码端是"**读到哪一类**（标记）+ **那一类的读数另取**"，不是 `Option<Self>`。
-const EXCUSED: [(&str, &str); 3] = [
+const EXCUSED: [(&str, &str); 4] = [
     (
         "FileViewFailure",
         "信封：两个变体的标记来自内层词表，单值解码重建不出内层那一格",
@@ -116,6 +118,10 @@ const EXCUSED: [(&str, &str); 3] = [
     (
         "SelfConceptWriteFailure",
         "带载荷：`self_concept-too-large` 的字节数不在标记里，硬解码会编造两个 0",
+    ),
+    (
+        "HandoffWriteFailure",
+        "带载荷：`handoff-too-large` 的字节数不在标记里，硬解码会编造两个 0（与自识同形）",
     ),
     (
         "MachineFailure",

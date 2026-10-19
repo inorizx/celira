@@ -149,7 +149,7 @@ fn a_real_app_declares_one_class_per_capability() {
 
 /// OS 自己的五个动词**不归任何 App**，但它们在表里，而且都是 `system`。
 ///
-/// 这一条防的是"系统自己的动作来源不知道"：那五个动词是主体能点的，回执进主体的视野。
+/// 这一条防的是"系统自己的动作来源不知道"：那六个动词是主体能点的，回执进主体的视野。
 #[test]
 fn the_os_own_verbs_are_declared_by_the_os_itself() {
     let sandbox = Sandbox::new("os-owned");
@@ -162,6 +162,7 @@ fn the_os_own_verbs_are_declared_by_the_os_itself() {
         "pin_action",
         "unpin_action",
         "write_self_concept",
+        "write_handoff",
     ] {
         assert_eq!(
             sources.class_if_assembled(action),

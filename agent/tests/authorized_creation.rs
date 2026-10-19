@@ -1,4 +1,4 @@
-﻿//! TASK_05 验收：**受限文本创建与跨 Run 自主留存**。
+//! TASK_05 验收：**受限文本创建与跨 Run 自主留存**。
 //!
 //! 证据分三类，各自只说自己那一层：
 //!
@@ -61,8 +61,8 @@ fn without_a_grant_there_is_no_creation_capability_and_a_forged_request_is_refus
         .collect();
     assert_eq!(
         ids.len(),
-        5,
-        "没展开之前只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写自识）: {ids:?}"
+        6,
+        "没展开之前只有 OS 自己的六项能力（展开 / 看详情 / 钉 / 摘 / 写自识 / 写交接）: {ids:?}"
     );
 
     // 展开之后仍然只有读侧两项：创建能力不存在（不是"存在但会被拒绝"）。

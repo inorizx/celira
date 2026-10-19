@@ -388,7 +388,7 @@ fn the_activity_opens_with_one_reading_and_restates_it_before_every_turn() {
             );
             // TASK_69（真机四证补上的一格）：**免查的动作必须"免学"**。
             //
-            // OS 自己那五件在准入面**直接放行**（`admit` 的 early-return）⇒ 调用之前
+            // OS 自己那六件在准入面**直接放行**（`admit` 的 early-return）⇒ 调用之前
             // **没有别的地方**能知道它们的参数名：目录原本只给"名字 | 一句话"，而要看详情卡
             // 又得先知道 `inspect_action` 的参数名——一个自举死结。
             // 真机实测（2026-09-21）：模型对 `open_app` 的参数名连试三次都错（`name` / `app`），
@@ -406,6 +406,7 @@ fn the_activity_opens_with_one_reading_and_restates_it_before_every_turn() {
                 ("pin_action", "action"),
                 ("unpin_action", "action"),
                 ("write_self_concept", "text"),
+                ("write_handoff", "text"),
             ] {
                 assert!(
                     blocks[1].1.lines().any(|line| line.starts_with(' ')
@@ -570,7 +571,7 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
         }
     }
 
-    // 门之外那组：恰好 OS 自有那五件，一个不多一个不少。
+    // 门之外那组：恰好 OS 自有那六件，一个不多一个不少。
     let system_verbs: Vec<&str> = sections[0].1.iter().map(|line| verb_of(line)).collect();
     assert_eq!(
         system_verbs,
@@ -579,9 +580,10 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
             "inspect_action",
             "pin_action",
             "unpin_action",
-            "write_self_concept"
+            "write_self_concept",
+            "write_handoff"
         ],
-        "门之外那组 = OS 自有那五件（不归任何 App）: {directory}"
+        "门之外那组 = OS 自有那六件（不归任何 App）: {directory}"
     );
 
     // 门内动词**归属正确**：notes 那 13 条落在【notes】门里、web 那 2 条落在【web】门里。

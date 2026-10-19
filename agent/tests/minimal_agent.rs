@@ -4683,33 +4683,43 @@ const SELF_CONCEPT_WRITE_OWNER: &str = "pub fn write_from_subject";
 /// （装配／准入／执行三面都问 `OS_OWNED_ACTIONS`）。
 const SELF_CONCEPT_WRITE_VERB: &str = "CAPABILITY_SELF_CONCEPT_WRITE";
 
+/// **交接**那一份的三个同款常量（`<环境根>/handoff`，与自识**同族、不同一件事**）。
+const HANDOFF_WRITE_CALL: &str = "incept(environment_root, text)";
+const HANDOFF_WRITE_OWNER: &str = "pub fn write_from_subject";
+const HANDOFF_WRITE_VERB: &str = "CAPABILITY_HANDOFF_WRITE";
+
 /// **路由层只许拥有"能不能调"，不许拥有"事实是什么"**（2026-10-08 主人确认）。
 ///
 /// 起因：`os` 是**路由层**（发现 / 展开 / 派发），而它原来同时住着约 180 行**域规则**——
 /// 格位上限、空自识要拒、超限读数、以及三句回执的措辞。那些是**主体自持物**的事实，
-/// 它们的所有者是 `pinned_actions` / `self_concept` 两个模块（搬回之后，那两个模块各自是那一份事实的
-/// **唯一写者**）。判据一句话：**域分类与域措辞只许在所有者里拼。**
+/// 它们的所有者是 `pinned_actions` / `self_concept` / `handoff` 三个模块（搬回之后，那三个模块
+/// 各自是那一份事实的**唯一写者**）。判据一句话：**域分类与域措辞只许在所有者里拼。**
 ///
 /// 判法是**逐个字面量**：下面这些字符串一旦在 `os.rs` 里出现，就是"路由层又在替别人说话"。
-/// 它们今天各自只在所有者里出现一次（`os` 用 `as_str()` 去引，不抄字面量）。
+/// 它们今天各自只在所有者里出现一次（`os` 用 `as_str()` / 常量去引，不抄字面量）。
 ///
-/// ⚠ **历史包袱**：`MAX_PINS` / `MAX_SELF_CONCEPT_BYTES` 这两个**数字**仍然出现在 `os` 的**动作说明**里
-/// ——那是"这扇门怎么用"的门面话，说的是"上限是几"，由所有者导出（`{MAX_PINS}`）、`os` 只是引用。
-/// 真正不许抄的是**分类串**与**回执措辞**：抄了就会出现第二份真相。
+/// ⚠ **历史包袱**：`MAX_PINS` / `MAX_SELF_CONCEPT_BYTES` / `MAX_HANDOFF_BYTES` 这几个**数字**
+/// 仍然出现在 `os` 的**动作说明**里——那是"这扇门怎么用"的门面话，说的是"上限是几"，
+/// 由所有者导出（`{MAX_PINS}` 这类）、`os` 只是引用。真正不许抄的是**分类串**与**回执措辞**：
+/// 抄了就会出现第二份真相。
 #[test]
 fn the_router_owns_no_domain_words() {
-    const DOMAIN_WORDS: [&str; 9] = [
+    const DOMAIN_WORDS: [&str; 13] = [
         // 域分类（各自属于一个所有者）
         "pinned-limit-reached",
         "pinned-actions-unreadable",
         "pinned-actions-unwritable",
         "self_concept-too-large",
         "self_concept-unwritable",
+        "handoff-too-large",
+        "handoff-unwritable",
         // 域回执的措辞（谁是主语、什么时候生效，都由所有者自己说）
         "你现在自己钉着",
         "出厂格位不因摘除而消失",
         "自识已写下",
         "旧的 self_concept 原样保留",
+        "交接已写下",
+        "旧的 handoff 原样保留",
     ];
 
     let sources = core_sources();
@@ -4722,7 +4732,7 @@ fn the_router_owns_no_domain_words() {
         assert!(
             !os_source.contains(word),
             "`os` 是路由层，出现了域分类或域回执的措辞「{word}」：\
-             它们只许在那一份事实的所有者里拼（`pinned_actions` / `self_concept`），\
+             它们只许在那一份事实的所有者里拼（`pinned_actions` / `self_concept` / `handoff`），\
              `os` 要用就引它导出的 `as_str()`。"
         );
     }
@@ -4733,6 +4743,8 @@ fn the_router_owns_no_domain_words() {
         ("pinned_actions.rs", "你现在自己钉着"),
         ("self_concept.rs", "self_concept-too-large"),
         ("self_concept.rs", "自识已写下"),
+        ("handoff.rs", "handoff-too-large"),
+        ("handoff.rs", "交接已写下"),
     ] {
         let source = sources
             .iter()
@@ -4746,36 +4758,45 @@ fn the_router_owns_no_domain_words() {
     }
 }
 
-/// **自识只许自己的动词写**（TASK_70）。
+/// **只许自己的动词写**那一条判据的**唯一实现**：自识与交接各调一次。
 ///
-/// 判三件事：
-/// 1. 那一次写（[`SELF_CONCEPT_WRITE_CALL`]）在**全部核心源码里恰好出现一次**，而且落在
-///    [`SELF_CONCEPT_WRITE_OWNER`] 的函数体里（多一次、或落到别的函数里 = 多了一条改自识的路）；
-/// 2. 主体的动词 [`SELF_CONCEPT_WRITE_VERB`] **真的在那份唯一的动词名单里**——装配／准入／执行三面都问
+/// 判三件事（两件自持物逐条同款，因此**只写一遍**——复制两份迟早分叉）：
+///
+/// 1. 那一次写（`call`）**在 `module` 里恰好出现一次**，而且落在 `owner` 的函数体里
+///    （多一次、或落到别的函数里 = 多了一条改那一份的路）；
+/// 2. 主体的动词（`verb`）**真的在那份唯一的动词名单里**——装配／准入／执行三面都问
 ///    `OS_OWNED_ACTIONS`，所以"在名单里"就等于三面都认得它；漏一面就是「目录里有、路由里没有」；
-/// 3. `self_concept.rs` 的**模块级公开面**只有两个函数：写（`write_from_subject`）与读（`read`）。
-///    谁加了 `set_self_concept` / `edit_self_concept` 这类名字、或者把里子 `incept` 又公开出去，这条就红。
-#[test]
-fn the_self_concept_can_only_be_written_by_her_own_verb() {
+/// 3. `module` 的**模块级公开面**只有两个函数：写（`write_from_subject`）与读（`read`）。
+///    谁加了 `set_…` / `edit_…` 这类名字、或者把里子 `incept` 又公开出去，这条就红。
+///
+/// ⚠ **这条判据的形状变过两次，值得记下**：裁决之前它是"只许创建流程调用"（名单＝入口那一处）；
+/// 主人 2026-09-21 裁决「写权归自己」之后，同一条纪律换成**判主体的动词面**——因为
+/// "没有编辑入口"这句话的语义本来就不是"全 crate 只有一次写入"，而是"**只有自己**能写"。
+/// **2026-10-08** 收口那一刀把域规则与回执措辞搬回它们的所有者，于是写路径不再经过 `os`：
+/// **同一条判据，落点换了文件**。而且新形状**更强**——从"某个文件里出现过"收紧成
+/// "**恰好一次，且在那一个函数体里**"。⇒ **判据跟着语义走，不是跟着上一次的写法走。**
+/// **2026-10-19**：交接落地时照抄了同一行调用 ⇒ 按"词表守卫应识别真实引用"把判据收窄到各自
+/// 模块（`incept` 是私有函数，别的文件里的同名调用写的是**它自己**那一份）。
+fn assert_written_only_by_her_own_verb(module: &str, call: &str, owner: &str, verb: &str) {
     let sources = core_sources();
 
     // 判据 1：写路径**恰好一次**，且在那一个函数体里。
     let mut total = 0usize;
     let mut owners: Vec<String> = Vec::new();
     for (name, text) in &sources {
-        // ⚠ **只看 `self_concept.rs`**（2026-10-19 收紧）：`incept` 是那个模块的**私有**函数，
-        // 别的文件里出现同一行调用写的是**它自己**那一份（如 `handoff.rs` 的交接）。
-        // 照旧实现会按**裸子串**命中 ⇒ 把一份写得完全正确的模块判成"多了一条改自识的路"。
-        if name.as_str() != "self_concept.rs" {
+        // ⚠ **只看 `module` 自己**：`incept` 是那个模块的**私有**函数，别的文件里出现同一行调用
+        // 写的是**它自己**那一份（自识 / 交接各有一份）。照旧实现会按**裸子串**命中 ⇒ 把一份
+        // 写得完全正确的模块判成"多了一条改那一份的路"。
+        if name.as_str() != module {
             continue;
         }
-        let hits = text.matches(SELF_CONCEPT_WRITE_CALL).count();
+        let hits = text.matches(call).count();
         if hits == 0 {
             continue;
         }
         total += hits;
-        let at = text.find(SELF_CONCEPT_WRITE_CALL).unwrap_or_default();
-        let owner_at = text.find(SELF_CONCEPT_WRITE_OWNER).unwrap_or(usize::MAX);
+        let at = text.find(call).unwrap_or_default();
+        let owner_at = text.find(owner).unwrap_or(usize::MAX);
         // 那一次调用必须排在它的所有者之后，且中间不再出现一个"顶格 `}` 收尾"的函数结尾。
         let between = &text[owner_at..at];
         if owner_at < at && !between.contains("\n}\n") {
@@ -4784,12 +4805,12 @@ fn the_self_concept_can_only_be_written_by_her_own_verb() {
     }
     assert_eq!(
         total, 1,
-        "写自识的落点全 crate 只许有一处：多一处就是多一条改 self_concept 的路"
+        "{module}：那一份的写落点全 crate 只许有一处：多一处就是多一条改它的路"
     );
     assert_eq!(
         owners,
-        vec!["self_concept.rs".to_string()],
-        "那唯一一次写必须落在 `{SELF_CONCEPT_WRITE_OWNER}` 的函数体里"
+        vec![module.to_string()],
+        "那唯一一次写必须落在 `{owner}` 的函数体里"
     );
 
     // 判据 2：主体的动词在**那份唯一的名单**里（装配／准入／执行三面都问它）。
@@ -4799,18 +4820,18 @@ fn the_self_concept_can_only_be_written_by_her_own_verb() {
         .map(|(_, text)| text.clone())
         .expect("os.rs 应当在 src/ 下");
     assert!(
-        os_source.contains(SELF_CONCEPT_WRITE_VERB),
-        "写自识的动词必须在 OS 自有动词名单里——漏一面就是「目录里有、路由里没有」"
+        os_source.contains(verb),
+        "{verb} 必须在 OS 自有动词名单里——漏一面就是「目录里有、路由里没有」"
     );
 
-    // 判据 3：`self_concept.rs` 的模块级公开面（**顶格**的 `pub fn`）。
+    // 判据 3：模块级公开面（**顶格**的 `pub fn`）。
     // 按**排序**比，不依赖源码里的书写顺序（今天 read 写在前面、明天写写在前面，都该绿）。
-    let self_concept_source = sources
+    let module_source = sources
         .iter()
-        .find(|(name, _)| name == "self_concept.rs")
+        .find(|(name, _)| name == module)
         .map(|(_, text)| text.clone())
-        .expect("self_concept.rs 应当在 src/ 下");
-    let mut module_exports: Vec<String> = self_concept_source
+        .unwrap_or_else(|| panic!("{module} 应当在 src/ 下"));
+    let mut module_exports: Vec<String> = module_source
         .lines()
         .filter_map(|line| line.strip_prefix("pub fn "))
         .map(|rest| {
@@ -4825,12 +4846,34 @@ fn the_self_concept_can_only_be_written_by_her_own_verb() {
     assert_eq!(
         module_exports,
         vec!["read".to_string(), "write_from_subject".to_string()],
-        "self_concept 模块只许导出写（write_from_subject）与读（read）——\
-         多出来的名字意味着多了一条改自识的路"
+        "{module} 只许导出写（write_from_subject）与读（read）——\
+         多出来的名字意味着多了一条改那一份的路"
     );
     assert!(
-        !self_concept_source.contains("\npub fn incept"),
-        "`incept` 是那一次写的里子，不许再公开：公开面每多一个名字，就多一条改自识的路"
+        !module_source.contains("\npub fn incept"),
+        "`incept` 是那一次写的里子，不许再公开：公开面每多一个名字，就多一条改那一份的路"
+    );
+}
+
+/// **自识只许自己的动词写**（TASK_70）。
+#[test]
+fn the_self_concept_can_only_be_written_by_her_own_verb() {
+    assert_written_only_by_her_own_verb(
+        "self_concept.rs",
+        SELF_CONCEPT_WRITE_CALL,
+        SELF_CONCEPT_WRITE_OWNER,
+        SELF_CONCEPT_WRITE_VERB,
+    );
+}
+
+/// **交接只许自己的动词写**（与自识同族、同一条判据、不同一件事）。
+#[test]
+fn the_handoff_can_only_be_written_by_her_own_verb() {
+    assert_written_only_by_her_own_verb(
+        "handoff.rs",
+        HANDOFF_WRITE_CALL,
+        HANDOFF_WRITE_OWNER,
+        HANDOFF_WRITE_VERB,
     );
 }
 

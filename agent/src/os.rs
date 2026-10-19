@@ -80,16 +80,25 @@ const CAPABILITY_UNPIN: &str = "unpin_action";
 /// 所以名字带 `self_concept` 而不复用 `pin`——`pin_action` 管的是 `pinned_actions`，**不碰** self_concept。
 const CAPABILITY_SELF_CONCEPT_WRITE: &str = "write_self_concept";
 
+/// 写下 / 改写主体的**交接**（`<环境根>/handoff`）：给**下一次开场**的自己留下
+/// "这一段干到哪、下一段接着做什么"。
+///
+/// 与 `write_self_concept` 同族（OS 自己的动词、常驻在场、改的是主体的**自持物**、写权归自己），
+/// 但两件事**不一样**：自识回答「我是谁」（常驻、跨段为真），交接回答「这一段我干到哪、
+/// 下一段接着做什么」——它**有确定的交付时刻**（紧邻的下一次开场），摆过一次就不再摆。
+const CAPABILITY_HANDOFF_WRITE: &str = "write_handoff";
+
 /// **OS 自己的动词**：它们不归任何 App，因此**免归属索引**（它们由本模块自己分派）。
 ///
 /// ⚠️ 这份名单是**一份**：装配面（撞名检查两处）、准入面（`admit` 的放行）、执行面（`execute`
 /// 的分派）都必须问它——**分散写三遍就是三条"目录里有、路由里没有"的缝**。
-const OS_OWNED_ACTIONS: [&str; 5] = [
+const OS_OWNED_ACTIONS: [&str; 6] = [
     CAPABILITY_EXPAND,
     CAPABILITY_INSPECT,
     CAPABILITY_PIN,
     CAPABILITY_UNPIN,
     CAPABILITY_SELF_CONCEPT_WRITE,
+    CAPABILITY_HANDOFF_WRITE,
 ];
 
 /// 看详情时要给的那一个参数名（动作标识）。
@@ -428,12 +437,12 @@ impl MinimalOs {
         // 装配期已经保证每条声明都落在拥有者自己的能力里（上面那一轮立刻拒绝）、写类别都配了
         // 复核、**每个能力都被声明到了来源档**，因此这里只是**收集**，不重复校验。
         let mut sources = SourceTable::of(&apps);
-        // OS 自己的五个动词**不归任何 App**，因此不由任何 App 声明。它们的唯一来源清单就是
+        // OS 自己的六个动词**不归任何 App**，因此不由任何 App 声明。它们的唯一来源清单就是
         // 上面那份 `OS_OWNED_ACTIONS`——把它一并登记进来源表，免得主体的视野里出现
         // "系统自己的动作来源不知道"这种荒谬读数。
         //
-        // 五个都是 `system`：展开 / 看详情 / 钉 / 摘 交回的是**系统渲染的读数**（能力骨架、
-        // 格位现状），写自识交回的是**系统对这次动作的确认**——五段回执里都没有外来字。
+        // 六个都是 `system`：展开 / 看详情 / 钉 / 摘 交回的是**系统渲染的读数**（能力骨架、
+        // 格位现状），写自识与写交接交回的是**系统对这次动作的确认**——六段回执里都没有外来字。
         for action in OS_OWNED_ACTIONS {
             sources.declare_os_owned(action, SourceClass::System);
         }
@@ -917,7 +926,7 @@ impl RunScope<'_> {
             )
             .exempt_from_inspection()
             .with_details(format!(
-                "只摘掉「你钉过的那一份」：出厂默认（预装 App 的动词，以及 OS 自己那五件）\
+                "只摘掉「你钉过的那一份」：出厂默认（预装 App 的动词，以及 OS 自己那六件）\
                  **不会因此消失**——它不落盘、也不归你管。摘一个本来就没钉的名字是明确的成功结果\
                  （不报错）。与 `{CAPABILITY_PIN}` 一样，**下一次开场生效**。"
             )),
@@ -933,6 +942,23 @@ impl RunScope<'_> {
                  这一样是**关于你自己的一篇**——你什么时候想写就写，没写过就没有。\
                  空正文会被拒绝——「没有自识」应当根本没有这一份，而不是留一个空洞。",
             ),
+            Capability::new(
+                ActionId::new(CAPABILITY_HANDOFF_WRITE),
+                "写下 / 改写你的交接：给下一次开场的自己留下「这一段干到哪、下一段接着做什么」。它只在下一次开场摆一次",
+                vec![ParamSpec::new(PARAM_TEXT, true, "你的交接正文")],
+            )
+            .exempt_from_inspection()
+            .with_details(format!(
+                "写下之后，下一次开场它摆出一次（原文，前后不加东西），摆过就不再摆\
+                 ——所以没改的话，它不会每一段都重播。它与「标上 `pinned` 的笔记」和\
+                 「钉住的动作格位」是三件事：那两样每一段开场都在，这一样只交付一次。\
+                 没写过就没有（开场一个字都不提）；空正文会被拒绝——「没有交接」应当根本没有那一份，\
+                 而不是留一个空洞。\
+                 上限 {max} 字节：写不下会被明确拒绝（`{too_large}`），旧的那一份原样不动\
+                 （不截断、也不落半个文件）。",
+                max = crate::handoff::MAX_HANDOFF_BYTES,
+                too_large = crate::handoff::HANDOFF_TOO_LARGE,
+            )),
         ])
     }
 
@@ -1209,6 +1235,12 @@ impl ActionPort for RunScope<'_> {
             return self.write_self_concept(action);
         }
 
+        // 写下 / 改写主体的**交接**：与自识同族（写权归自己、要写盘 ⇒ 需要环境根），
+        // 但它的读者是**下一次开场**的自己——摆过一次就不再摆。
+        if id == CAPABILITY_HANDOFF_WRITE {
+            return self.write_handoff(action);
+        }
+
         // 能力目录与分派用的是**同一张归属索引**：行动标识只有一个拥有者。
         let Some(index) = self.os.owners.get(id).copied() else {
             // 其余一律未知动作（包括已经移除的旧动作，不做隐藏兼容入口）。
@@ -1460,6 +1492,37 @@ impl RunScope<'_> {
             return ActionOutcome::failure("no-environment-root");
         };
         match crate::self_concept::write_from_subject(root, text) {
+            Ok(block) => ActionOutcome::success(vec![block]),
+            Err(failure) => match failure.reading() {
+                Some(reading) => {
+                    ActionOutcome::failure_with_content(failure.as_str(), vec![reading])
+                }
+                None => ActionOutcome::failure(failure.as_str()),
+            },
+        }
+    }
+
+    /// 写下 / 改写主体的**交接**：改的是**主体自己的自持物**，读者是**下一次开场**的自己。
+    ///
+    /// **本函数只做路由判定**（与 `write_self_concept` 同款、同一条纪律）——两件都是"能不能调"：
+    /// - **参数形状**：`require_params`；**空正文明确拒绝**（`invalid-argument`，与"缺参数 /
+    ///   参数形状不对"同族——"没有交接"应当是根本没有那一份，而不是留一个空洞）；
+    /// - **有没有环境根**：没声明 ⇒ **fail-closed**，不写也不假装写了。
+    ///
+    /// ⚠ **域规则与回执措辞不在这里**：超限拒绝、不写不截断、那一块回执与拒绝读数长什么样，
+    /// 全归 [`crate::handoff::write_from_subject`]——那一份事实的**唯一写者**。
+    fn write_handoff(&self, action: &Action) -> ActionOutcome {
+        if let Err(shape) = Self::require_params(action.params(), &[PARAM_TEXT]) {
+            return shape.outcome();
+        }
+        let text = action.params().get(PARAM_TEXT).unwrap_or_default();
+        if text.trim().is_empty() {
+            return ActionOutcome::failure(crate::core::INVALID_ARGUMENT);
+        }
+        let Some(root) = self.os.environment_root() else {
+            return ActionOutcome::failure("no-environment-root");
+        };
+        match crate::handoff::write_from_subject(root, text) {
             Ok(block) => ActionOutcome::success(vec![block]),
             Err(failure) => match failure.reading() {
                 Some(reading) => {

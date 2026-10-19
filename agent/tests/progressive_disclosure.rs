@@ -224,8 +224,8 @@ fn the_entry_only_announces_the_app_and_never_expands_itself() {
     let available = scope.capabilities(&agent, &run_id);
     assert_eq!(
         available.len(),
-        5,
-        "入口提供两项：展开 + 看详情（TASK_39：详情是尾部那一半，与展开同层常驻）"
+        6,
+        "入口只有 OS 自己那六件（展开 / 看详情 / 钉 / 摘 / 写自识 / 写交接）"
     );
     let expand = available.find(&ActionId::new(EXPAND)).expect("展开在场");
     assert_eq!(expand.id().as_str(), EXPAND);
@@ -261,7 +261,7 @@ fn the_entry_only_announces_the_app_and_never_expands_itself() {
     assert!(run.observed().is_empty(), "没有发生任何行动");
     assert_eq!(
         scope.capabilities(&agent, &run_id).len(),
-        5,
+        6,
         "Finish 之后仍然只有入口能力，系统没有自动展开"
     );
     assert!(!format!("{:?}", ledger.records()).contains(marker));
@@ -293,16 +293,17 @@ fn the_model_expands_from_what_it_sees_and_expansion_reads_nothing() {
             "pin_action".to_string(),
             "unpin_action".to_string(),
             "write_self_concept".to_string(),
+            "write_handoff".to_string(),
         ]
     );
-    // TASK_69：展开之前**没有任何业务经历**——那 5 条是主体开场"先看格式"的结果
+    // TASK_69：展开之前**没有任何业务经历**——那 6 条是主体开场"先看格式"的结果
     // （入场能力的逐条查阅，一轮整批落下），不是任何 App 干出来的事。
     assert_eq!(
         model.inner().seen[0].1,
-        5,
-        "展开之前只有'先看格式'那 5 条，没有任何业务经历"
+        6,
+        "展开之前只有'先看格式'那 6 条，没有任何业务经历"
     );
-    // 那 5 条只有能力卡片，**没有正文**：展开之前沙盒里的东西一个字都没露出来。
+    // 那 6 条只有能力卡片，**没有正文**：展开之前沙盒里的东西一个字都没露出来。
     assert!(
         model.inner().seen[0]
             .2
@@ -629,8 +630,8 @@ fn expansion_lives_in_one_run_scope_and_never_leaks() {
                 .state(),
             ResultState::Success
         );
-        // 入口 4 项（展开 / 看详情 / 钉 / 摘）+ 展开后文件视图自己的 3 项只读动作（`files_list` / `files_read` / `files_grep`）。
-        assert_eq!(scope.capabilities(&agent_a, &run_1).len(), 8);
+        // 入口 6 项（展开 / 看详情 / 钉 / 摘 / 写自识 / 写交接）+ 展开后文件视图自己的 3 项只读动作（`files_list` / `files_read` / `files_grep`）。
+        assert_eq!(scope.capabilities(&agent_a, &run_1).len(), 9);
 
         // 同一个作用域里，别的 Agent / 别的 Run 都不共享这份展开状态。
         assert_eq!(
@@ -666,7 +667,7 @@ fn expansion_lives_in_one_run_scope_and_never_leaks() {
     let mut fresh = os.scope(&mut expansion4);
     assert_eq!(
         fresh.capabilities(&agent_a, &run_2).len(),
-        5,
+        6,
         "上一次活动的展开状态不得被继承"
     );
     assert_eq!(
@@ -677,7 +678,7 @@ fn expansion_lives_in_one_run_scope_and_never_leaks() {
     );
     assert_eq!(
         fresh.capabilities(&agent_a, &run_2).len(),
-        5,
+        6,
         "被拒绝的调用不得改变这个作用域的能力集合"
     );
 
@@ -793,8 +794,8 @@ fn reusing_one_os_always_starts_unexpanded() {
         // 每次开始：只有入口能力。
         assert_eq!(
             scope.capabilities(&agent, &run_id).len(),
-            5,
-            "第 {index} 次活动开始时必须只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写自识）"
+            6,
+            "第 {index} 次活动开始时必须只有 OS 自己的六项能力（展开 / 看详情 / 钉 / 摘 / 写自识 / 写交接）"
         );
 
         let run = run_activity(
@@ -894,7 +895,7 @@ fn every_existing_failure_path_still_starts_the_next_run_unexpanded() {
     let run_id = RunId::new("run-next");
     let mut expansion10 = RunExpansion::new(agent.clone(), run_id.clone());
     let mut scope = os.scope(&mut expansion10);
-    assert_eq!(scope.capabilities(&agent, &run_id).len(), 5);
+    assert_eq!(scope.capabilities(&agent, &run_id).len(), 6);
     assert_eq!(
         scope
             .execute(&agent, &operation("run-next"), &list())
@@ -1032,22 +1033,22 @@ fn a_new_scope_never_inherits_a_previous_expansion() {
         let run_id = RunId::new("run-1");
         let mut expansion13 = RunExpansion::new(agent.clone(), run_id.clone());
         let mut scope = os.scope(&mut expansion13);
-        assert_eq!(scope.capabilities(&agent, &run_id).len(), 5);
+        assert_eq!(scope.capabilities(&agent, &run_id).len(), 6);
         assert_eq!(
             scope
                 .execute(&agent, &operation("run-1"), &expand(FILE_APP_ID))
                 .state(),
             ResultState::Success
         );
-        // 入口 4 项（展开 / 看详情 / 钉 / 摘）+ 展开后文件视图自己的 3 项只读动作（`files_list` / `files_read` / `files_grep`）。
-        assert_eq!(scope.capabilities(&agent, &run_id).len(), 8);
+        // 入口 6 项（展开 / 看详情 / 钉 / 摘 / 写自识 / 写交接）+ 展开后文件视图自己的 3 项只读动作（`files_list` / `files_read` / `files_grep`）。
+        assert_eq!(scope.capabilities(&agent, &run_id).len(), 9);
     }
 
     // 前一个作用域已销毁：同一个 OS 上的新作用域没有继承任何展开状态。
     let run_id = RunId::new("run-2");
     let mut expansion14 = RunExpansion::new(agent.clone(), run_id.clone());
     let mut scope = os.scope(&mut expansion14);
-    assert_eq!(scope.capabilities(&agent, &run_id).len(), 5);
+    assert_eq!(scope.capabilities(&agent, &run_id).len(), 6);
     assert_eq!(
         scope
             .execute(&agent, &operation("run-2"), &list())

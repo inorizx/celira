@@ -701,8 +701,8 @@ fn an_unexpanded_view_dispatches_nothing() {
     let capabilities: Capabilities = scope.capabilities(&agent, &run);
     assert_eq!(
         capabilities.len(),
-        5,
-        "入口只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写自识）"
+        6,
+        "入口只有 OS 自己的六项能力（展开 / 看详情 / 钉 / 摘 / 写自识 / 写交接）"
     );
     assert!(capabilities.find(&ActionId::new(LIST)).is_none());
 

@@ -19,10 +19,12 @@ use celira_agent::clock::ClockHandle;
 use celira_agent::composition::{RunSession, SessionDeclarations, SessionRequest};
 use celira_agent::context_reading::ContextReading;
 use celira_agent::core::{
-    InjectionStage, Limits, ModelError, ModelOutput, ModelPort, RunInput, TraceEntry, View,
+    Action, ActionId, ActionParams, ActionPort, InjectionStage, Limits, ModelError, ModelOutput,
+    ModelPort, RunInput, TraceEntry, View,
 };
-use celira_agent::foundation::{AgentId, RunId};
-use celira_agent::handoff::{HANDOFF_FILE, HANDOFF_LABEL};
+use celira_agent::foundation::{AgentId, OperationId, ResultState, RunId, Turn};
+use celira_agent::handoff::{HANDOFF_FILE, HANDOFF_LABEL, MAX_HANDOFF_BYTES};
+use celira_agent::os::{MinimalOs, RunExpansion};
 use celira_agent::pins_board::PINS_BOARD_LABEL;
 use celira_agent::store::{Environment, TracePayload};
 
@@ -198,6 +200,45 @@ fn handoff_blocks(blocks: &[Block]) -> Vec<Block> {
         .collect()
 }
 
+/// 她的**交接写入动作**：参数名就是她在目录里看到的那个 `text`（写权归自己，见 §3.38 的分工）。
+fn handoff_write(text: &str) -> Action {
+    Action::with_params(
+        ActionId::new("write_handoff"),
+        ActionParams::none().with("text", text),
+    )
+}
+
+/// 直接驱动 OS 用的操作身份（真实流程里由 Core 产生；这里只用它携带 Run 身份）。
+fn operation(run: &str) -> OperationId {
+    OperationId::new(RunId::new(run), Turn::FIRST)
+}
+
+/// 轨迹里**某一次行动的观察**（按动作名找最后一条）。
+fn observation_of<'a>(
+    run: &'a RunSession<'_>,
+    action: &str,
+) -> &'a celira_agent::core::Observation {
+    run.trace()
+        .iter()
+        .rev()
+        .find_map(|entry| match entry {
+            TraceEntry::Observation(observation) if observation.action().as_str() == action => {
+                Some(observation)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("轨迹里没有 {action} 的结果: {:#?}", run.trace()))
+}
+
+/// 一次结果/回执的**正文**（各块拼起来）。
+fn receipt_text(outcome: &celira_agent::core::ActionOutcome) -> String {
+    outcome
+        .content()
+        .iter()
+        .map(|block| block.text().to_string())
+        .collect()
+}
+
 /// 一段活动开场那一拍的块（第 0 条注入就是开场那一拍）。
 fn opening_blocks(injections: &[Injection]) -> &[Block] {
     let (stage, turn, blocks) = &injections[0];
@@ -223,6 +264,9 @@ fn env_root_entries(root: &Path) -> Vec<String> {
 
 /// **写了 ⇒ 下一段开场摆出来（原文，一个字不加）⇒ 再下一段不摆。**
 ///
+/// 写走的是**她自己的动词**（`write_handoff`，本刀接的那一个）——因此这一条是**整条闭环**：
+/// 她用动词写下 ⇒ 回执说清"下一次开场交付一次" ⇒ 下一段摆出来 ⇒ 再下一段不摆。
+///
 /// 同时钉住三件事：① 没写过 ⇒ 开场**一个字都不说、连标签都不出现**；② 摆出来的就是原文；
 /// ③ 它**只在开场那一拍**（之后每一轮都不重摆——与组件区其它块同款）。
 #[test]
@@ -231,17 +275,37 @@ fn a_handoff_written_in_one_activity_is_shown_once_at_the_next_opening() {
     let mut environment = dir.environment();
     let text = "我干到第三步：正在等对面回话。下一段接着问。";
 
-    // **第一段**：开场里还没有交接（她还没写过）——写发生在这一段**里面**。
+    // **第一段**：开场里还没有交接（她还没写过）——写发生在这一段**里面**，走她自己的动词。
     {
         let mut session = open(&dir, &mut environment, RUN_ONE);
-        drive_once(&mut session);
+        let mut model = ScriptedModel::new(vec![
+            ModelOutput::act(handoff_write(text)),
+            ModelOutput::say("等"),
+        ]);
+        assert!(session.drive(&mut model).expect("驱动").is_unsettled());
+
         let openings = injections(&session);
         assert!(
             handoff_blocks(opening_blocks(&openings)).is_empty(),
             "还没写过 ⇒ 一个字都不说、连标签都不出现: {openings:#?}"
         );
-        // 她在这一段里写下交接（写动词是另一刀，这里走那一件的公开面）。
-        celira_agent::handoff::write_from_subject(&dir.env_root(), text).expect("写下交接");
+        // **回执**：这一份已经落盘，而且它自己就说清了"下一次开场交付一次"。
+        let written = observation_of(&session, "write_handoff");
+        assert_eq!(written.state(), ResultState::Success, "{written:#?}");
+        let receipt = receipt_text(written.outcome());
+        assert!(
+            receipt.contains(&format!("handoff = {} B", text.len())),
+            "回执要给账单: {receipt}"
+        );
+        assert!(
+            receipt.contains("下一次开场交付一次"),
+            "回执要说清交付时刻: {receipt}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.env_root().join(HANDOFF_FILE)).expect("读那一份"),
+            text,
+            "盘上逐字节就是她写的那一份"
+        );
     }
 
     // **第二段**：开场摆出原文；此后每一轮都不再摆。
@@ -293,19 +357,30 @@ fn a_rewritten_handoff_is_shown_again_at_the_next_opening() {
     // 第一段：写下第一份。
     {
         let mut session = open(&dir, &mut environment, RUN_ONE);
-        drive_once(&mut session);
-        celira_agent::handoff::write_from_subject(&dir.env_root(), first).expect("写第一份");
+        let mut model = ScriptedModel::new(vec![
+            ModelOutput::act(handoff_write(first)),
+            ModelOutput::say("等"),
+        ]);
+        assert!(session.drive(&mut model).expect("驱动").is_unsettled());
     }
 
-    // 第二段：开场摆出第一份；她在这一段里改写成第二份。
+    // 第二段：开场摆出第一份；她在这一段里（开场之后）改写成第二份。
     {
         let mut session = open(&dir, &mut environment, RUN_TWO);
-        drive_once(&mut session);
+        let mut model = ScriptedModel::new(vec![
+            ModelOutput::act(handoff_write(second)),
+            ModelOutput::say("等"),
+        ]);
+        assert!(session.drive(&mut model).expect("驱动").is_unsettled());
         let openings = injections(&session);
         let found = handoff_blocks(opening_blocks(&openings));
         assert_eq!(found.len(), 1, "第一份摆出来: {openings:#?}");
         assert_eq!(found[0].1, first);
-        celira_agent::handoff::write_from_subject(&dir.env_root(), second).expect("改写");
+        assert_eq!(
+            observation_of(&session, "write_handoff").state(),
+            ResultState::Success,
+            "改写走的是同一个动词"
+        );
     }
 
     // 第三段：**新的那一份照样摆**（不是"已经交付过 ⇒ 什么都不摆"）。
@@ -489,4 +564,92 @@ fn an_opening_that_is_sealed_away_is_repeated_rather_than_skipped() {
         assert_eq!(found.len(), 1, "看不见就重播，不静默跳过: {openings:#?}");
         assert_eq!(found[0].1, text, "重播的是同一份原文");
     }
+}
+
+// ---------------------------------------------------------------------------
+// 她的写动词 `write_handoff`：写权归自己，域规则归那一份事实的所有者
+// ---------------------------------------------------------------------------
+
+/// **上限是硬墙、账单贴在写入杠杆处**（与 `write_self_concept` 同款、同一条纪律）。
+///
+/// 判错即红：上限只写在文档里而不在代码里 ⇒ 超限那条会写进去；拒绝不带读数 ⇒ 红；
+/// 空正文那条被顺手改掉 ⇒ 红；没有环境根时静默写到别处 ⇒ 红。
+#[test]
+fn the_write_verb_is_a_hard_wall_and_the_receipt_carries_the_bill() {
+    let dir = TempDir::new("write-verb");
+    let root = dir.env_root();
+    std::fs::create_dir_all(&root).expect("建环境根");
+    let agent = agent_id();
+    let run = RunId::new("run-handoff-verb");
+    let mut os = MinimalOs::open(&root)
+        .expect("可以装配")
+        .with_environment_root(&root);
+    let mut expansion = RunExpansion::new(agent.clone(), run.clone());
+    let mut scope = os.scope(&mut expansion);
+    let op = operation("run-handoff-verb");
+
+    // 上限是个**产品决定**：钉在常量上——改数字要过这条断言，不会悄悄跟着实现变。
+    assert_eq!(MAX_HANDOFF_BYTES, 2 * 1024);
+
+    // ① 写得下 ⇒ 回执带账单（现值 / 上限）＋ 交付时刻；盘上逐字节就是她写的那一份。
+    let text = "我干到第三步：正在等对面回话。";
+    let written = scope.execute(&agent, &op, &handoff_write(text));
+    assert_eq!(written.state(), ResultState::Success, "{written:?}");
+    let receipt = receipt_text(&written);
+    assert!(
+        receipt.contains(&format!("handoff = {} B", text.len())),
+        "账单要给现值: {receipt}"
+    );
+    assert!(
+        receipt.contains(&format!("上限 {MAX_HANDOFF_BYTES} B")),
+        "账单要给上限: {receipt}"
+    );
+    assert!(
+        receipt.contains("下一次开场交付一次"),
+        "回执要说清交付时刻: {receipt}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join(HANDOFF_FILE)).expect("读那一份"),
+        text
+    );
+
+    // ② 超限 ⇒ **明确拒绝**（稳定分类），读数里三件事一次说清，旧的一份原样保留。
+    let too_long = "长".repeat(MAX_HANDOFF_BYTES); // 每字 3 字节 ⇒ 必超
+    let refused = scope.execute(&agent, &op, &handoff_write(&too_long));
+    assert_eq!(refused.state(), ResultState::Failure, "{refused:?}");
+    assert_eq!(refused.failure_class(), Some("handoff-too-large"));
+    let refusal = receipt_text(&refused);
+    assert!(
+        refusal.contains(&format!("handoff = {} B", too_long.len())),
+        "拒绝要说清她想写的多大: {refusal}"
+    );
+    assert!(
+        refusal.contains(&format!("上限 = {MAX_HANDOFF_BYTES} B")),
+        "{refusal}"
+    );
+    assert!(refusal.contains("原样保留"), "{refusal}");
+    assert_eq!(
+        std::fs::read_to_string(root.join(HANDOFF_FILE)).expect("读那一份"),
+        text,
+        "拒绝之后旧的那一份逐字节不变（不截断、不落半个文件）"
+    );
+
+    // ③ **空正文**：路由事实（`invalid-argument`，与"缺参数 / 形状不对"同族）——
+    //    「没有交接」应当根本没有那一份，而不是留一个空洞。
+    let empty = scope.execute(&agent, &op, &handoff_write("   \n"));
+    assert_eq!(empty.state(), ResultState::Failure, "{empty:?}");
+    assert_eq!(empty.failure_class(), Some("invalid-argument"));
+
+    // ④ **没有声明环境根** ⇒ fail-closed：不写、也不假装写了（与自识那一条同款）。
+    let mut bare = MinimalOs::open(&root).expect("可以装配");
+    let mut expansion2 = RunExpansion::new(agent.clone(), run.clone());
+    let mut bare_scope = bare.scope(&mut expansion2);
+    let nowhere = bare_scope.execute(&agent, &op, &handoff_write("这一份不该落盘"));
+    assert_eq!(nowhere.state(), ResultState::Failure, "{nowhere:?}");
+    assert_eq!(nowhere.failure_class(), Some("no-environment-root"));
+    assert_eq!(
+        std::fs::read_to_string(root.join(HANDOFF_FILE)).expect("读那一份"),
+        text,
+        "没有环境根 ⇒ 一个字都不写"
+    );
 }

@@ -1237,7 +1237,7 @@ fn the_first_request_of_a_real_session_already_carries_her_own_verbs() {
     );
     // TASK_68 P2：骨架不再进**工具声明**（头部恒两件）——它改由**注入的动作目录**露面
     // （首轮一份，标签 `available-actions`）；**要走"先看格式"那条路的**动作，参数靠自己去看
-    // （`inspect_action`）；**声明方标了"免查"的**那几条（OS 自己那五件）目录行自带参数名。
+    // （`inspect_action`）；**声明方标了"免查"的**那几条（OS 自己那六件）目录行自带参数名。
     assert!(
         first.contains("available-actions"),
         "首轮的目录必须在: {}",
