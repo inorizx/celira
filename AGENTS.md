@@ -206,6 +206,7 @@ Core v1 公共契约已封板冻结（身份、房间、成员、权限、消息
 | 任何 client 改动 | `npm run verify`（源码级；不需要任何服务） |
 | **任一侧端点面**（客户端 / 执行端：新增·改名·换方法·换调用点）或**壳命令面**（`invoke('…')`） | `scripts/check-boundary.mjs`（随 `npm run verify` 跑） |
 | **文档**（`*.md`：对外入口的**称谓零代词**、不引用门后的具体路径、`outputs/README.md` 的证据锚索引） | `scripts/check-docs.mjs`（随 `npm run verify` 跑） |
+| **文档链接**（每一份 md 的**相对链接**与**同文件锚点**指不指得到） | `scripts/check-doc-links.mjs`（随 CI 跑；只认"文件在不在"与"那一节还在不在"） |
 | **公开卫生**（跟踪集里的**凭据形状**、私钥头、误提交的大文件） | `scripts/check-public-hygiene.mjs`（随 CI 跑；判据是"凭据形状的串**必须自称是假的**"，不是豁免名单） |
 | **改 `agent/README.md` 的 §3.x 正文**（改写/压缩/搬内容） | `scripts/check-doc-honesty.mjs`（随 `npm run verify` 跑）：拿 `HEAD` 当基线，**某节少了一整类诚实声明就红**（未覆盖/未裁/如实登记/触发条件/不假装…）。⚠ 它**量不到**不带标记的事实被删——那一格只有人核 |
 | 执行端端点面（路径、方法、响应解析、失败分类） | `probe-agent-im.js` |

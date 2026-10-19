@@ -58,6 +58,8 @@ jobs:
       # 五条判据：对外入口的称谓零代词 · 证据锚索引 · 词表主名在词表之外活着 ·
       # `文件:行号` 引用解析得到 · 对外入口不引用门后的具体路径（`outputs/X.md`）
       - run: node scripts/check-docs.mjs
+      # 文档链接：跟踪集里每份 md 的相对链接与同文件锚点都必须指得到
+      - run: node scripts/check-doc-links.mjs
       # 公开卫生：凭据形状的串必须自称是假的 · 没有私钥头 · 没有 > 5 MB 的跟踪文件
       - run: node scripts/check-public-hygiene.mjs
 
