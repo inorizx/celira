@@ -398,44 +398,46 @@ fn unknown_and_out_of_bounds_addressing_never_looks_empty() {
     }
 }
 
-/// **她自己写下的天性有一条现读的路**（2026-10-13）。
+/// **她自己写下的自识有一条现读的路**（2026-10-13）。
 ///
 /// 与上一条**不冲突，而且是它的另一半**：环境**内部记录**（身份 / 两份存储 / 写锁）一律不可读；
-/// 而她**自己的自持物**里，天性从前是唯一一个"写完读不回来"的——笔记有 `notes_read`、格位有
-/// `pins_board`、约的时刻有 `timer_list`，只有天性要等下一场开场才看得见（她自己列的第②条缺陷）。
+/// 而她**自己的自持物**里，自识从前是唯一一个"写完读不回来"的——笔记有 `notes_read`、格位有
+/// `pins_board`、约的时刻有 `timer_list`，只有自识要等下一场开场才看得见（她自己列的第②条缺陷）。
 ///
-/// 判据落在那条路的**每一步**上：在场时列得出来、读得到、`write_soul` 写进去的**同一段里**读得到
+/// 判据落在那条路的**每一步**上：在场时列得出来、读得到、`write_self_concept` 写进去的**同一段里**读得到
 /// 新内容（不缓存）；不在场时是"没有这个地址"（不是空文件）；它不是目录、也不在查找面内。
 #[test]
-fn her_own_soul_is_readable_at_its_reserved_address() {
-    use celira_agent::soul::SOUL_FILE;
+fn her_own_self_concept_is_readable_at_its_reserved_address() {
+    use celira_agent::self_concept::SELF_CONCEPT_FILE;
 
-    let fixture = Fixture::new("soul-address");
+    let fixture = Fixture::new("self_concept-address");
     fixture.write_material("alpha.txt", "资料正文");
-    // 天性**不在**时：地址缺席（缺席 ≠ 空文件，也 ≠ 读不到）。
+    // 自识**不在**时：地址缺席（缺席 ≠ 空文件，也 ≠ 读不到）。
     let _env = fixture.environment(&[("run-a", complete_run("经历", "note"))]);
 
     let agent = Fixture::agent();
-    let run = RunId::new("run-soul");
+    let run = RunId::new("run-self_concept");
     let mut os = fixture.machine();
     let mut expansion = RunExpansion::new(agent.clone(), run.clone());
     let mut scope = expanded_scope(&mut os, &mut expansion, &agent, &run);
-    let op = operation("run-soul");
+    let op = operation("run-self_concept");
 
     let mut listing = text_of(&scope.execute(&agent, &op, &list("")));
     assert!(
-        !listing.contains(SOUL_FILE),
-        "还没写过天性 ⇒ 地址缺席，根列表里也不该有它: {listing}"
+        !listing.contains(SELF_CONCEPT_FILE),
+        "还没写过自识 ⇒ 地址缺席，根列表里也不该有它: {listing}"
     );
     assert_eq!(
-        scope.execute(&agent, &op, &read(SOUL_FILE)).failure_class(),
+        scope
+            .execute(&agent, &op, &read(SELF_CONCEPT_FILE))
+            .failure_class(),
         Some("not-found"),
         "地址不在 ⇒ 没有这个路径（不是空文件）"
     );
 
-    // 她写下一段天性（写入口就是 `write_soul` 那份存储；这里直接落盘，等价于她刚写完那一刻）。
+    // 她写下一段自识（写入口就是 `write_self_concept` 那份存储；这里直接落盘，等价于她刚写完那一刻）。
     let written = "我是这样一个人：写得慢，但写完的会一直算数。";
-    std::fs::write(fixture.environment_root().join(SOUL_FILE), written).expect("写下天性");
+    std::fs::write(fixture.environment_root().join(SELF_CONCEPT_FILE), written).expect("写下自识");
 
     // **装配期拍一次**：地址在不在是那一刻的事实 ⇒ 重新装配一次视图（真机上"写完立刻读"发生在
     // 同一段里，靠的是**读的时候现读**，见下面那条）。
@@ -444,10 +446,10 @@ fn her_own_soul_is_readable_at_its_reserved_address() {
     let mut scope = expanded_scope(&mut os, &mut expansion, &agent, &run);
     listing = text_of(&scope.execute(&agent, &op, &list("")));
     assert!(
-        listing.contains(SOUL_FILE),
+        listing.contains(SELF_CONCEPT_FILE),
         "写过之后地址要在根列表里: {listing}"
     );
-    let read_back = scope.execute(&agent, &op, &read(SOUL_FILE));
+    let read_back = scope.execute(&agent, &op, &read(SELF_CONCEPT_FILE));
     assert_eq!(
         read_back.state(),
         ResultState::Success,
@@ -458,12 +460,14 @@ fn her_own_soul_is_readable_at_its_reserved_address() {
     // 它是**一份文件**：底下没有子路径；也不在查找面内（能整份读的东西不需要查）。
     assert_eq!(
         scope
-            .execute(&agent, &op, &read(&format!("{SOUL_FILE}/x")))
+            .execute(&agent, &op, &read(&format!("{SELF_CONCEPT_FILE}/x")))
             .failure_class(),
         Some("wrong-kind")
     );
     assert_eq!(
-        scope.execute(&agent, &op, &list(SOUL_FILE)).failure_class(),
+        scope
+            .execute(&agent, &op, &list(SELF_CONCEPT_FILE))
+            .failure_class(),
         Some("wrong-kind"),
         "对它列目录是类型不对"
     );
@@ -471,7 +475,7 @@ fn her_own_soul_is_readable_at_its_reserved_address() {
         ActionId::new("files_grep"),
         ActionParams::none()
             .with("pattern", "算数")
-            .with("path", SOUL_FILE),
+            .with("path", SELF_CONCEPT_FILE),
     );
     assert_eq!(
         scope.execute(&agent, &op, &found).failure_class(),
@@ -698,7 +702,7 @@ fn an_unexpanded_view_dispatches_nothing() {
     assert_eq!(
         capabilities.len(),
         5,
-        "入口只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写天性）"
+        "入口只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写自识）"
     );
     assert!(capabilities.find(&ActionId::new(LIST)).is_none());
 

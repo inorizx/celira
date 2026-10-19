@@ -2003,7 +2003,7 @@ const BOUNDARY_MODULES: [&str; 46] = [
     "previous_activity",
     "sandbox",
     "skills_desktop",
-    "soul",
+    "self_concept",
     "timer_app",
     "wake",
     // **2026-10-18 补齐两项**：`every_module_is_accounted_for_in_the_layering_ledger` 当场抓出的
@@ -2164,16 +2164,16 @@ const FILE_SYSTEM_SOURCES: [&str; 18] = [
     // 标识）——与纸条板同款：读的是主体自持物，不需要授权、不写任何东西（读失败 ⇒ `None`
     // ⇒ 如实渲染 `unknown`）。因此照样进这条封闭名单。
     "pinned_actions.rs",
-    // TASK_70：**天性**（`<环境根>/soul`）与它同层、同款——Agent 的自持物，装配期读回、注入开场。
-    // ⚠️ 与上面那个**不同**的一点：这一份**会被自己写**（`write_soul`，OS 自有动词），
+    // TASK_70：**自识**（`<环境根>/self_concept`）与它同层、同款——Agent 的自持物，装配期读回、注入开场。
+    // ⚠️ 与上面那个**不同**的一点：这一份**会被自己写**（`write_self_concept`，OS 自有动词），
     // 而那一次的写路径落在 `os.rs` 里（通过本模块的 `incept`），不在这里直接开文件写。
     // 它仍然碰文件系统（读回 + 落盘），因此照样进这条封闭名单。
-    "soul.rs",
+    "self_concept.rs",
     // TASK_77：**模型配置门**读环境根下的 `<环境根>/model_source.json`（**只读**，不写任何
     // 东西）。它在装配期判"这一次听谁的"（文件 / 进程侧），因此照样进这条封闭名单。
     "model_source.rs",
     // TASK_79：**出厂说明与手册**（`<环境根>/orientation.md` 与 `<环境根>/manual.md`）——
-    // 读回由装配做（与天性同款），而**写**只在创建那一次（`orientation::place`，从显式初始化
+    // 读回由装配做（与自识同款），而**写**只在创建那一次（`orientation::place`，从显式初始化
     // 调过来）。它读的是自己的地盘、不需要授权，因此照样进这条封闭名单。
     "orientation.rs",
     // **机器处境**那一刀：这一件读的**不是环境根、也不是主体的自持物**，而是**机器自己的报告**
@@ -2981,7 +2981,7 @@ fn a_display_area_never_knows_an_app() {
         "pinned_actions",
         "skills_desktop",
         "event_cards",
-        "soul",
+        "self_concept",
         "holdings",
         "machine",
         "previous_activity",
@@ -3693,7 +3693,7 @@ fn no_two_operator_readings_are_the_same() {
 ///
 /// **2026-10-18 扩族那一刀**（同一天改掉的那几处）：`terminal 那只手` ×4
 /// （`file_view.rs` 的作品面详情、`orientation.rs` 手册三处）⇒ **`terminal` 档在场 / 不在**；
-/// `你的地盘`（`soul.rs` 的"读不到天性"那一句）⇒ **你的环境根**；
+/// `你的地盘`（`self_concept.rs` 的"读不到自识"那一句）⇒ **你的环境根**；
 /// `宿主授权的地界`（`web_app.rs` 门牌）⇒ **宿主授权的资料目录**。
 /// `身体` 那三处**没动**——它待裁（见 `METAPHOR_WORDS` 的例外段）。
 #[test]
@@ -3719,7 +3719,7 @@ fn her_visible_words_carry_no_new_metaphor() {
         "pins_board.rs",
         "previous_activity.rs",
         "skills_desktop.rs",
-        "soul.rs",
+        "self_concept.rs",
         "status_bar.rs",
         "terminal_app.rs",
         "timer_app.rs",
@@ -3779,7 +3779,7 @@ fn her_visible_words_carry_no_new_metaphor() {
     // **不误伤那一半**：裸 `手` 不进表，所以这三个合法词一个都不许命中。
     assert_eq!(
         metaphor_hits(
-            "let text = \"手册在 files 视野的 manual.md 里；天性是主体的手笔；助手不是名字\";",
+            "let text = \"手册在 files 视野的 manual.md 里；自识是主体的手笔；助手不是名字\";",
             &METAPHOR_WORDS
         ),
         0,
@@ -4652,40 +4652,40 @@ fn scripted_model_failure() -> ModelError {
 }
 
 // ---------------------------------------------------------------------------
-// TASK_70：天性（soul）的**写路径**——只许自己的动词写
+// TASK_70：自识（self_concept）的**写路径**——只许自己的动词写
 // ---------------------------------------------------------------------------
 
-/// **写天性的封闭名单**：`soul.rs` 里那一次写是 crate 里唯一能改天性的地方，而它**只许由主体的
-/// 动词**（`write_soul`，OS 自有动作，见 `os.rs` 的 `OS_OWNED_ACTIONS`）经
-/// `soul::write_from_subject` 走到。
+/// **写自识的封闭名单**：`self_concept.rs` 里那一次写是 crate 里唯一能改自识的地方，而它**只许由主体的
+/// 动词**（`write_self_concept`，OS 自有动作，见 `os.rs` 的 `OS_OWNED_ACTIONS`）经
+/// `self_concept::write_from_subject` 走到。
 ///
 /// ⚠️ 这条判据的形状**变过两次**，值得记下：裁决之前它是"只许创建流程调用"（名单＝入口那一处）；
 /// 主人 2026-09-21 裁决「写权归自己」之后，同一条纪律换成**判主体的动词面**——因为
 /// "没有编辑入口"这句话的语义本来就不是"全 crate 只有一次写入"，而是"**只有自己**能写"。
-/// **2026-10-08** 收口那一刀把域规则与回执措辞搬回它们的所有者（`soul.rs`），于是写路径不再
+/// **2026-10-08** 收口那一刀把域规则与回执措辞搬回它们的所有者（`self_concept.rs`），于是写路径不再
 /// 经过 `os`：**同一条判据，落点换了文件**。而且新形状**更强**——从"某个文件里出现过"
 /// 收紧成"**恰好一次，且在那一个函数体里**"。
 /// ⇒ **判据跟着语义走，不是跟着上一次的写法走。**
-const SOUL_WRITE_CALL: &str = "incept(environment_root, text)";
+const SELF_CONCEPT_WRITE_CALL: &str = "incept(environment_root, text)";
 
 /// 那唯一一次写必须落在**这个函数体**里（顶格函数）。
-const SOUL_WRITE_OWNER: &str = "pub fn write_from_subject";
+const SELF_CONCEPT_WRITE_OWNER: &str = "pub fn write_from_subject";
 
 /// 主体的那个动词在源码里的名字：必须在那份**唯一的动词名单**里被认出来
 /// （装配／准入／执行三面都问 `OS_OWNED_ACTIONS`）。
-const SOUL_WRITE_VERB: &str = "CAPABILITY_SOUL_WRITE";
+const SELF_CONCEPT_WRITE_VERB: &str = "CAPABILITY_SELF_CONCEPT_WRITE";
 
 /// **路由层只许拥有"能不能调"，不许拥有"事实是什么"**（2026-10-08 主人确认）。
 ///
 /// 起因：`os` 是**路由层**（发现 / 展开 / 派发），而它原来同时住着约 180 行**域规则**——
-/// 格位上限、空天性要拒、超限读数、以及三句回执的措辞。那些是**主体自持物**的事实，
-/// 它们的所有者是 `pinned_actions` / `soul` 两个模块（搬回之后，那两个模块各自是那一份事实的
+/// 格位上限、空自识要拒、超限读数、以及三句回执的措辞。那些是**主体自持物**的事实，
+/// 它们的所有者是 `pinned_actions` / `self_concept` 两个模块（搬回之后，那两个模块各自是那一份事实的
 /// **唯一写者**）。判据一句话：**域分类与域措辞只许在所有者里拼。**
 ///
 /// 判法是**逐个字面量**：下面这些字符串一旦在 `os.rs` 里出现，就是"路由层又在替别人说话"。
 /// 它们今天各自只在所有者里出现一次（`os` 用 `as_str()` 去引，不抄字面量）。
 ///
-/// ⚠ **历史包袱**：`MAX_PINS` / `MAX_SOUL_BYTES` 这两个**数字**仍然出现在 `os` 的**动作说明**里
+/// ⚠ **历史包袱**：`MAX_PINS` / `MAX_SELF_CONCEPT_BYTES` 这两个**数字**仍然出现在 `os` 的**动作说明**里
 /// ——那是"这扇门怎么用"的门面话，说的是"上限是几"，由所有者导出（`{MAX_PINS}`）、`os` 只是引用。
 /// 真正不许抄的是**分类串**与**回执措辞**：抄了就会出现第二份真相。
 #[test]
@@ -4695,13 +4695,13 @@ fn the_router_owns_no_domain_words() {
         "pinned-limit-reached",
         "pinned-actions-unreadable",
         "pinned-actions-unwritable",
-        "soul-too-large",
-        "soul-unwritable",
+        "self_concept-too-large",
+        "self_concept-unwritable",
         // 域回执的措辞（谁是主语、什么时候生效，都由所有者自己说）
         "你现在自己钉着",
         "出厂格位不因摘除而消失",
-        "天性已写下",
-        "旧的 soul 原样保留",
+        "自识已写下",
+        "旧的 self_concept 原样保留",
     ];
 
     let sources = core_sources();
@@ -4714,7 +4714,7 @@ fn the_router_owns_no_domain_words() {
         assert!(
             !os_source.contains(word),
             "`os` 是路由层，出现了域分类或域回执的措辞「{word}」：\
-             它们只许在那一份事实的所有者里拼（`pinned_actions` / `soul`），\
+             它们只许在那一份事实的所有者里拼（`pinned_actions` / `self_concept`），\
              `os` 要用就引它导出的 `as_str()`。"
         );
     }
@@ -4723,8 +4723,8 @@ fn the_router_owns_no_domain_words() {
     for (owner, word) in [
         ("pinned_actions.rs", "pinned-limit-reached"),
         ("pinned_actions.rs", "你现在自己钉着"),
-        ("soul.rs", "soul-too-large"),
-        ("soul.rs", "天性已写下"),
+        ("self_concept.rs", "self_concept-too-large"),
+        ("self_concept.rs", "自识已写下"),
     ] {
         let source = sources
             .iter()
@@ -4738,30 +4738,30 @@ fn the_router_owns_no_domain_words() {
     }
 }
 
-/// **天性只许自己的动词写**（TASK_70）。
+/// **自识只许自己的动词写**（TASK_70）。
 ///
 /// 判三件事：
-/// 1. 那一次写（[`SOUL_WRITE_CALL`]）在**全部核心源码里恰好出现一次**，而且落在
-///    [`SOUL_WRITE_OWNER`] 的函数体里（多一次、或落到别的函数里 = 多了一条改天性的路）；
-/// 2. 主体的动词 [`SOUL_WRITE_VERB`] **真的在那份唯一的动词名单里**——装配／准入／执行三面都问
+/// 1. 那一次写（[`SELF_CONCEPT_WRITE_CALL`]）在**全部核心源码里恰好出现一次**，而且落在
+///    [`SELF_CONCEPT_WRITE_OWNER`] 的函数体里（多一次、或落到别的函数里 = 多了一条改自识的路）；
+/// 2. 主体的动词 [`SELF_CONCEPT_WRITE_VERB`] **真的在那份唯一的动词名单里**——装配／准入／执行三面都问
 ///    `OS_OWNED_ACTIONS`，所以"在名单里"就等于三面都认得它；漏一面就是「目录里有、路由里没有」；
-/// 3. `soul.rs` 的**模块级公开面**只有两个函数：写（`write_from_subject`）与读（`read`）。
-///    谁加了 `set_soul` / `edit_soul` 这类名字、或者把里子 `incept` 又公开出去，这条就红。
+/// 3. `self_concept.rs` 的**模块级公开面**只有两个函数：写（`write_from_subject`）与读（`read`）。
+///    谁加了 `set_self_concept` / `edit_self_concept` 这类名字、或者把里子 `incept` 又公开出去，这条就红。
 #[test]
-fn the_soul_can_only_be_written_by_her_own_verb() {
+fn the_self_concept_can_only_be_written_by_her_own_verb() {
     let sources = core_sources();
 
     // 判据 1：写路径**恰好一次**，且在那一个函数体里。
     let mut total = 0usize;
     let mut owners: Vec<String> = Vec::new();
     for (name, text) in &sources {
-        let hits = text.matches(SOUL_WRITE_CALL).count();
+        let hits = text.matches(SELF_CONCEPT_WRITE_CALL).count();
         if hits == 0 {
             continue;
         }
         total += hits;
-        let at = text.find(SOUL_WRITE_CALL).unwrap_or_default();
-        let owner_at = text.find(SOUL_WRITE_OWNER).unwrap_or(usize::MAX);
+        let at = text.find(SELF_CONCEPT_WRITE_CALL).unwrap_or_default();
+        let owner_at = text.find(SELF_CONCEPT_WRITE_OWNER).unwrap_or(usize::MAX);
         // 那一次调用必须排在它的所有者之后，且中间不再出现一个"顶格 `}` 收尾"的函数结尾。
         let between = &text[owner_at..at];
         if owner_at < at && !between.contains("\n}\n") {
@@ -4770,12 +4770,12 @@ fn the_soul_can_only_be_written_by_her_own_verb() {
     }
     assert_eq!(
         total, 1,
-        "写天性的落点全 crate 只许有一处：多一处就是多一条改 soul 的路"
+        "写自识的落点全 crate 只许有一处：多一处就是多一条改 self_concept 的路"
     );
     assert_eq!(
         owners,
-        vec!["soul.rs".to_string()],
-        "那唯一一次写必须落在 `{SOUL_WRITE_OWNER}` 的函数体里"
+        vec!["self_concept.rs".to_string()],
+        "那唯一一次写必须落在 `{SELF_CONCEPT_WRITE_OWNER}` 的函数体里"
     );
 
     // 判据 2：主体的动词在**那份唯一的名单**里（装配／准入／执行三面都问它）。
@@ -4785,18 +4785,18 @@ fn the_soul_can_only_be_written_by_her_own_verb() {
         .map(|(_, text)| text.clone())
         .expect("os.rs 应当在 src/ 下");
     assert!(
-        os_source.contains(SOUL_WRITE_VERB),
-        "写天性的动词必须在 OS 自有动词名单里——漏一面就是「目录里有、路由里没有」"
+        os_source.contains(SELF_CONCEPT_WRITE_VERB),
+        "写自识的动词必须在 OS 自有动词名单里——漏一面就是「目录里有、路由里没有」"
     );
 
-    // 判据 3：`soul.rs` 的模块级公开面（**顶格**的 `pub fn`）。
+    // 判据 3：`self_concept.rs` 的模块级公开面（**顶格**的 `pub fn`）。
     // 按**排序**比，不依赖源码里的书写顺序（今天 read 写在前面、明天写写在前面，都该绿）。
-    let soul_source = sources
+    let self_concept_source = sources
         .iter()
-        .find(|(name, _)| name == "soul.rs")
+        .find(|(name, _)| name == "self_concept.rs")
         .map(|(_, text)| text.clone())
-        .expect("soul.rs 应当在 src/ 下");
-    let mut module_exports: Vec<String> = soul_source
+        .expect("self_concept.rs 应当在 src/ 下");
+    let mut module_exports: Vec<String> = self_concept_source
         .lines()
         .filter_map(|line| line.strip_prefix("pub fn "))
         .map(|rest| {
@@ -4811,12 +4811,12 @@ fn the_soul_can_only_be_written_by_her_own_verb() {
     assert_eq!(
         module_exports,
         vec!["read".to_string(), "write_from_subject".to_string()],
-        "soul 模块只许导出写（write_from_subject）与读（read）——\
-         多出来的名字意味着多了一条改天性的路"
+        "self_concept 模块只许导出写（write_from_subject）与读（read）——\
+         多出来的名字意味着多了一条改自识的路"
     );
     assert!(
-        !soul_source.contains("\npub fn incept"),
-        "`incept` 是那一次写的里子，不许再公开：公开面每多一个名字，就多一条改天性的路"
+        !self_concept_source.contains("\npub fn incept"),
+        "`incept` 是那一次写的里子，不许再公开：公开面每多一个名字，就多一条改自识的路"
     );
 }
 

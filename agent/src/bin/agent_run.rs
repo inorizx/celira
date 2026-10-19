@@ -56,7 +56,7 @@ use celira_agent::provider_adapter::{
     self, DEFAULT_MODEL, DeepSeekModel, ENDPOINT, nominal_context_window,
 };
 use celira_agent::responses_adapter::{self, ResponsesModel};
-use celira_agent::soul::IdentityClaim;
+use celira_agent::self_concept::IdentityClaim;
 use celira_agent::terminal_app::{TerminalAccess, TerminalTier};
 use celira_agent::web_app::{SearchAccess, WebTier};
 

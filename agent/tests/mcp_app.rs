@@ -1302,7 +1302,7 @@ impl ModelPort for ScriptedModel {
 /// 1. 那个值在**调用之前**一个字节都没进过主体的视野（含处境注入与能力面）；
 /// 2. 主体读到的值**就是**声明里那一个（独立核对）；
 /// 3. 子进程**真的起过**（标记文件），而且只在主体展开那一下之后。
-struct SoulModel {
+struct SelfConceptModel {
     secret: String,
     called: bool,
     answered: String,
@@ -1310,7 +1310,7 @@ struct SoulModel {
     calls: usize,
 }
 
-impl SoulModel {
+impl SelfConceptModel {
     fn new(secret: &str) -> Self {
         Self {
             secret: secret.to_string(),
@@ -1331,7 +1331,7 @@ impl SoulModel {
     }
 }
 
-impl ModelPort for SoulModel {
+impl ModelPort for SelfConceptModel {
     fn complete(&mut self, view: &View) -> Result<ModelOutput, ModelError> {
         self.calls += 1;
         if !self.called && Self::everything_in_sight(view).contains(&self.secret) {
@@ -1376,7 +1376,7 @@ impl ModelPort for SoulModel {
 #[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn the_value_she_answers_can_only_come_from_a_real_call() {
-    let sandbox = Sandbox::new("soul");
+    let sandbox = Sandbox::new("self_concept");
     let marker = sandbox.path().join("child-started.txt");
     // 只有那台 server 知道的一个值：它不在主体的任何别处（不是文件、不是记忆、不是配置）。
     let secret = format!(
@@ -1396,7 +1396,7 @@ fn the_value_she_answers_can_only_come_from_a_real_call() {
     let run = RunId::new("run-1");
     let mut expansion = RunExpansion::new(agent.clone(), run.clone());
     let mut scope = os.scope(&mut expansion);
-    let mut model = InspectsFirst::new(SoulModel::new(&secret));
+    let mut model = InspectsFirst::new(SelfConceptModel::new(&secret));
     let mut state = Agent::new(agent.clone());
     let mut ledger = Ledger::new(agent.clone());
     let run = run_activity(

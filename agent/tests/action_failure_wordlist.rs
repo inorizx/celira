@@ -99,7 +99,7 @@ const WORDLISTS: [Wordlist; 9] = [
 /// **甲、单值解码不成立**（标记装不下那一格的全部）：
 /// - `FileViewFailure` 是**信封**：它有两个变体把内层词表包在里面（`Materials(FailureClass)`、
 ///   `CreationTargetUnusable(FailureClass)`），单值解码重建不出内层那一个；
-/// - `SoulWriteFailure` 是**带载荷的分类**：`soul-too-large` 那一格的 `wanted` / `current`
+/// - `SelfConceptWriteFailure` 是**带载荷的分类**：`self_concept-too-large` 那一格的 `wanted` / `current`
 ///   两个字节数在标记里**没有落脚处**，硬解码就会**编造两个 0**。
 ///
 /// **乙、根本不属于行动面**：
@@ -114,8 +114,8 @@ const EXCUSED: [(&str, &str); 3] = [
         "信封：两个变体的标记来自内层词表，单值解码重建不出内层那一格",
     ),
     (
-        "SoulWriteFailure",
-        "带载荷：`soul-too-large` 的字节数不在标记里，硬解码会编造两个 0",
+        "SelfConceptWriteFailure",
+        "带载荷：`self_concept-too-large` 的字节数不在标记里，硬解码会编造两个 0",
     ),
     (
         "MachineFailure",

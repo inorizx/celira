@@ -292,7 +292,7 @@ fn the_model_expands_from_what_it_sees_and_expansion_reads_nothing() {
             "inspect_action".to_string(),
             "pin_action".to_string(),
             "unpin_action".to_string(),
-            "write_soul".to_string(),
+            "write_self_concept".to_string(),
         ]
     );
     // TASK_69：展开之前**没有任何业务经历**——那 5 条是主体开场"先看格式"的结果
@@ -794,7 +794,7 @@ fn reusing_one_os_always_starts_unexpanded() {
         assert_eq!(
             scope.capabilities(&agent, &run_id).len(),
             5,
-            "第 {index} 次活动开始时必须只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写天性）"
+            "第 {index} 次活动开始时必须只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写自识）"
         );
 
         let run = run_activity(
@@ -1330,7 +1330,7 @@ fn the_pin_limit_refuses_the_eighth_and_evicts_nothing_on_its_own() {
         "inspect_action",
         "pin_action",
         "unpin_action",
-        "write_soul",
+        "write_self_concept",
         "files_list",
         "files_read",
         "files_grep",
@@ -1494,13 +1494,13 @@ fn every_writing_verb_goes_back_to_the_inspect_first_path_until_she_pins_it() {
 }
 
 // ---------------------------------------------------------------------------
-// TASK_76（A）：soul 账单 ＋ 上限——拒绝在**写入杠杆**处，不在注入闸兜底
+// TASK_76（A）：self_concept 账单 ＋ 上限——拒绝在**写入杠杆**处，不在注入闸兜底
 // ---------------------------------------------------------------------------
 
-/// 一个 `write_soul` 动作（OS 自有动词；参数名就是主体看到的那个 `text`）。
-fn soul_write(text: &str) -> Action {
+/// 一个 `write_self_concept` 动作（OS 自有动词；参数名就是主体看到的那个 `text`）。
+fn self_concept_write(text: &str) -> Action {
     Action::with_params(
-        ActionId::new("write_soul"),
+        ActionId::new("write_self_concept"),
         ActionParams::none().with("text", text),
     )
 }
@@ -1511,23 +1511,23 @@ fn soul_write(text: &str) -> Action {
 /// 判错即红：上限只写在文档里而不在代码里 ⇒ 超限那条会写进去（文件变了）；拒绝不带读数 ⇒ 红；
 /// 空正文那条既有拒绝被顺手改掉 ⇒ 红。
 #[test]
-fn the_soul_bill_rides_on_the_write_lever_and_the_limit_is_a_hard_wall() {
-    let sandbox = Sandbox::new("soul-bill");
-    let agent = AgentId::new("soul-agent");
-    let run_id = RunId::new("run-soul-bill");
+fn the_self_concept_bill_rides_on_the_write_lever_and_the_limit_is_a_hard_wall() {
+    let sandbox = Sandbox::new("self_concept-bill");
+    let agent = AgentId::new("self_concept-agent");
+    let run_id = RunId::new("run-self_concept-bill");
     let mut os = MinimalOs::open(sandbox.path())
         .expect("可以装配")
         .with_environment_root(sandbox.path());
     let mut expansion = RunExpansion::new(agent.clone(), run_id.clone());
     let mut scope = os.scope(&mut expansion);
-    let op = operation("run-soul-bill");
+    let op = operation("run-self_concept-bill");
 
     // 上限是个**产品决定**：钉在常量上——改数字要过这条断言，不会悄悄跟着实现变。
-    assert_eq!(celira_agent::soul::MAX_SOUL_BYTES, 4 * 1024);
+    assert_eq!(celira_agent::self_concept::MAX_SELF_CONCEPT_BYTES, 4 * 1024);
 
     // ① 写得下 ⇒ 回执带**账单**（现在多大 / 上限多大），而且只在回执里。
     let text = "我是阿默：先看事实，再说话。\n";
-    let written = scope.execute(&agent, &op, &soul_write(text));
+    let written = scope.execute(&agent, &op, &self_concept_write(text));
     assert_eq!(written.state(), ResultState::Success, "{written:?}");
     let receipt: String = written
         .content()
@@ -1535,48 +1535,54 @@ fn the_soul_bill_rides_on_the_write_lever_and_the_limit_is_a_hard_wall() {
         .map(|block| block.text().to_string())
         .collect();
     assert!(
-        receipt.contains(&format!("soul = {} B", text.len())),
+        receipt.contains(&format!("self_concept = {} B", text.len())),
         "账单要给现值: {receipt}"
     );
     assert!(
-        receipt.contains(&format!("上限 {} B", celira_agent::soul::MAX_SOUL_BYTES)),
+        receipt.contains(&format!(
+            "上限 {} B",
+            celira_agent::self_concept::MAX_SELF_CONCEPT_BYTES
+        )),
         "账单要给上限: {receipt}"
     );
 
     // ② 账单**不落盘**：盘上逐字节就是主体写的那一份（开场注入因此一个字节都没变——
     //    "开场 = 文件原文"由 `status_bar.rs` 的 TASK_70 用例继续钉着）。
     assert_eq!(
-        std::fs::read_to_string(sandbox.path().join("soul")).expect("读回天性"),
+        std::fs::read_to_string(sandbox.path().join("self_concept")).expect("读回自识"),
         text,
     );
 
     // ③ 超限 ⇒ **明确拒绝**（稳定分类），读数里三件事一次说清，旧的一份原样保留。
-    let too_long = "长".repeat(celira_agent::soul::MAX_SOUL_BYTES); // 每字 3 字节 ⇒ 必超
-    let refused = scope.execute(&agent, &op, &soul_write(&too_long));
+    let too_long = "长".repeat(celira_agent::self_concept::MAX_SELF_CONCEPT_BYTES); // 每字 3 字节 ⇒ 必超
+    let refused = scope.execute(&agent, &op, &self_concept_write(&too_long));
     assert_eq!(refused.state(), ResultState::Failure, "{refused:?}");
-    assert_eq!(refused.failure_class(), Some("soul-too-large"));
+    assert_eq!(refused.failure_class(), Some("self_concept-too-large"));
     let refusal: String = refused
         .content()
         .iter()
         .map(|block| block.text().to_string())
         .collect();
     assert!(
-        refusal.contains(&format!("soul = {} B", too_long.len())),
+        refusal.contains(&format!("self_concept = {} B", too_long.len())),
         "拒绝要说清主体想写的多大: {refusal}"
     );
     assert!(
-        refusal.contains(&format!("上限 = {} B", celira_agent::soul::MAX_SOUL_BYTES)),
+        refusal.contains(&format!(
+            "上限 = {} B",
+            celira_agent::self_concept::MAX_SELF_CONCEPT_BYTES
+        )),
         "{refusal}"
     );
     assert!(refusal.contains("原样保留"), "{refusal}");
     assert_eq!(
-        std::fs::read_to_string(sandbox.path().join("soul")).expect("读回天性"),
+        std::fs::read_to_string(sandbox.path().join("self_concept")).expect("读回自识"),
         text,
         "拒绝之后旧的那一份逐字节不变（不截断、不落盘）"
     );
 
     // ④ **既有的空正文拒绝**不受影响（仍是 `invalid-argument`，不是新分类）。
-    let empty = scope.execute(&agent, &op, &soul_write("   \n"));
+    let empty = scope.execute(&agent, &op, &self_concept_write("   \n"));
     assert_eq!(empty.state(), ResultState::Failure, "{empty:?}");
     assert_eq!(empty.failure_class(), Some("invalid-argument"));
 }

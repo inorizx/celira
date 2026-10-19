@@ -33,7 +33,7 @@ use celira_agent::core::{
     RunInput, TraceEntry, View,
 };
 use celira_agent::foundation::{AgentId, RunId, SubjectEnding};
-use celira_agent::soul::{IdentityClaim, SOUL_FILE, SOUL_LABEL};
+use celira_agent::self_concept::{IdentityClaim, SELF_CONCEPT_FILE, SELF_CONCEPT_LABEL};
 use celira_agent::status_bar::{READING_GUIDE, READING_GUIDE_LABEL, STATUS_BAR_LABEL, StatusBar};
 use celira_agent::store::Environment;
 
@@ -291,7 +291,7 @@ fn the_activity_opens_with_one_reading_and_restates_it_before_every_turn() {
         "七处批次 ＋ 说明书都递交（说明书写在最外，紧挨它解释的那一行）: {blocks:?}"
     );
     assert_eq!(blocks[0].0, "activity-origin", "最内层在前");
-    // 机器处境紧贴"我是谁"外面一圈（这个舞台没声明身份、也没写过天性 ⇒ 那两块都不出场），
+    // 机器处境紧贴"我是谁"外面一圈（这个舞台没声明身份、也没写过自识 ⇒ 那两块都不出场），
     // 因此它是起源之后的**第一个**块：主体先知道"这次为什么醒"，再立刻知道"我在哪台机器上"。
     assert_eq!(
         blocks[1].0, "machine",
@@ -405,7 +405,7 @@ fn the_activity_opens_with_one_reading_and_restates_it_before_every_turn() {
                 ("inspect_action", "action"),
                 ("pin_action", "action"),
                 ("unpin_action", "action"),
-                ("write_soul", "text"),
+                ("write_self_concept", "text"),
             ] {
                 assert!(
                     blocks[1].1.lines().any(|line| line.starts_with(' ')
@@ -579,7 +579,7 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
             "inspect_action",
             "pin_action",
             "unpin_action",
-            "write_soul"
+            "write_self_concept"
         ],
         "门之外那组 = OS 自有那五件（不归任何 App）: {directory}"
     );
@@ -1320,14 +1320,14 @@ fn the_reading_guide_lands_once_at_the_opening_and_never_repeats() {
     assert_eq!(text, READING_GUIDE, "说明书就是那一份常量（逐字节）");
 }
 
-/// **天性**（TASK_70）：`<环境根>/soul` 里那一篇，开场**原文**摆出来。
+/// **自识**（TASK_70）：`<环境根>/self_concept` 里那一篇，开场**原文**摆出来。
 /// 判错即红：写进去的没进开场 ⇒ 红；正文被加料/裁剪 ⇒ 红。
 #[test]
-fn the_soul_stands_in_the_opening_exactly_as_written() {
-    let dir = TempDir::new("soul-opening");
+fn the_self_concept_stands_in_the_opening_exactly_as_written() {
+    let dir = TempDir::new("self_concept-opening");
     let mut environment = dir.environment();
     let text = "我是阿默：先看事实，再说话。\n";
-    std::fs::write(dir.env_root().join(SOUL_FILE), text).expect("写下天性");
+    std::fs::write(dir.env_root().join(SELF_CONCEPT_FILE), text).expect("写下自识");
 
     let mut session = open(&dir, &mut environment, 4);
     let mut model = ScriptedModel::new(vec![ModelOutput::say("等")]);
@@ -1337,15 +1337,15 @@ fn the_soul_stands_in_the_opening_exactly_as_written() {
     let (_, _, blocks) = &injections[0];
     let found = blocks
         .iter()
-        .find(|(label, _)| label == SOUL_LABEL)
-        .expect("天性那一块应当在开场");
+        .find(|(label, _)| label == SELF_CONCEPT_LABEL)
+        .expect("自识那一块应当在开场");
     assert_eq!(found.1, text, "原文摆出——一个字都不加、一个字都不减");
 }
 
-/// **没有天性**（新生儿）：开场**优雅跳过**——不注入空壳、连标签都不出现。
+/// **没有自识**（新生儿）：开场**优雅跳过**——不注入空壳、连标签都不出现。
 #[test]
-fn an_environment_without_a_soul_says_nothing_at_all() {
-    let dir = TempDir::new("soul-absent");
+fn an_environment_without_a_self_concept_says_nothing_at_all() {
+    let dir = TempDir::new("self_concept-absent");
     let mut environment = dir.environment();
 
     let mut session = open(&dir, &mut environment, 4);
@@ -1355,17 +1355,17 @@ fn an_environment_without_a_soul_says_nothing_at_all() {
     let injections = injections(&session);
     let (_, _, blocks) = &injections[0];
     assert!(
-        blocks.iter().all(|(label, _)| label != SOUL_LABEL),
+        blocks.iter().all(|(label, _)| label != SELF_CONCEPT_LABEL),
         "没有那一份就一个字都不说（不注入空壳）: {blocks:?}"
     );
 }
 
-/// **身份行**（TASK_70）：宿主声明的两个值原样摆出来，**紧跟天性**。
+/// **身份行**（TASK_70）：宿主声明的两个值原样摆出来，**紧跟自识**。
 #[test]
-fn the_identity_line_stands_after_the_soul_in_the_opening() {
+fn the_identity_line_stands_after_the_self_concept_in_the_opening() {
     let dir = TempDir::new("identity-opening");
     let mut environment = dir.environment();
-    std::fs::write(dir.env_root().join(SOUL_FILE), "我是阿默。\n").expect("写下天性");
+    std::fs::write(dir.env_root().join(SELF_CONCEPT_FILE), "我是阿默。\n").expect("写下自识");
 
     let mut session = open_with_identity(
         &dir,
@@ -1382,15 +1382,19 @@ fn the_identity_line_stands_after_the_soul_in_the_opening() {
     let injections = injections(&session);
     let (_, _, blocks) = &injections[0];
     let names: Vec<&str> = blocks.iter().map(|(label, _)| label.as_str()).collect();
-    let soul_at = names
+    let self_concept_at = names
         .iter()
-        .position(|n| *n == SOUL_LABEL)
-        .expect("天性在场");
+        .position(|n| *n == SELF_CONCEPT_LABEL)
+        .expect("自识在场");
     let identity_at = names
         .iter()
         .position(|n| *n == "identity")
         .expect("身份行在场");
-    assert_eq!(identity_at, soul_at + 1, "身份行紧跟在天性之后: {names:?}");
+    assert_eq!(
+        identity_at,
+        self_concept_at + 1,
+        "身份行紧跟在自识之后: {names:?}"
+    );
     assert_eq!(
         blocks[identity_at].1, "你是 core-1，在此世界名为 小满",
         "两个值**原样**摆出来（不是本机身份、也不经过任何改写）"

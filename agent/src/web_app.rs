@@ -111,7 +111,7 @@ pub enum WebFailure {
     /// **这台机器没有配**这一格凭据（宿主没声明）⇒ 一次出网请求都不发。
     ///
     /// 与 `CredentialRejected` 的区别就是"**没有**"与"**被拒**"的区别——与
-    /// `Soul::Absent` / `Soul::Unreadable` 同一条三态纪律。**动词照旧在场**：缺的是这一格，
+    /// `SelfConcept::Absent` / `SelfConcept::Unreadable` 同一条三态纪律。**动词照旧在场**：缺的是这一格，
     /// 不是这个能力。
     CredentialAbsent,
     /// 参数不合法（空查询、超长、地址读不懂、协议不在允许的两种里）。

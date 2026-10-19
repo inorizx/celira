@@ -22,7 +22,7 @@
 | `src/foundation.rs` | 内存 Ledger，按 Agent 隔离、稳定事实键去重；可累计多个 Run，但 `recover` 仍按单 Run 解释，不接受混合活动事实 |
 | `src/core.rs` | 有限 Run/Turn、初始输入、单一内存 Trace、Run/Turn ContextSource、ModelPort/ActionPort、CommitSeam（失败带中立阶段）；**中立响应** `ModelOutput`（正文 + `Option<ProtocolData>` + 单个 `Decision`：`Act` / `Finish` / `Yield`）与轨迹记录单元 `ModelResponse`；驱动出口 `DriveOutcome::{Ending, Waiting}`；唯一循环 `drive_run` / `continue_activity` / `run_activity_with`；**行动面的共用机械类别只有一处权威**（`UNKNOWN_CAPABILITY` / `INVALID_ARGUMENT`——不属于任何 App 的业务词汇，是装配/路由/形状校验的判断结果；2026-10-06 立，见 §3.16） |
 | `src/app_contract.rs` | App 面向 OS 的窄接入契约（标识、说明、行动归属、执行入口）与装配冲突分类；**效果声明** `declared_effects()` → `EffectDeclaration`（`EffectClass` = `ReadOnly` / `ExclusiveCreate` / `RepeatableWrite` / **`UnverifiableWrite`**（TASK_36：确实是写，但**没有同参只读复核可配**——比如执行一条命令）+ 可选复核能力），装配期三条机械拒绝（声明落在自己能力里、**要复核的那两类写**必须配复核（`UnverifiableWrite` 按定义豁免）、复核也要在自己能力里）；不导入 OS 骨干、具体 App 或存储 |
-| `src/os.rs` | `MinimalOs` 显式装配多个 App 并按**唯一归属**索引路由（装配期拒绝重复标识 / 冲突行动标识，也拒绝**预装了一个没装配的 App**），另持装配期收集的**来源声明表** `SourceTable`（只读，装配期不授予任何东西；**有生产读者**：详情卡那一行 `receipt-source`，见 §3.45）；今天只剩各 App 自己的 `declared_effects()` ＋ 装配期 `check_declarations` 自洽检查（见 §3.11）；**预装常开**（`assemble_preinstalled`）：装配期可以声明若干 App 从第一轮起就在场（`is_open` 是「在场」的**唯一判据**，能力目录 / 展开答复 / 准入 / 分派四处共用）。首轮那张「门」清单是 `composition.rs` 的**装配投影**，由 **`AppDoor::preinstalled`**（装配期事实：首轮那一刻「开着的」**恰好**就是常开的那几个）决定，那条前提有守卫钉着；`RunScope` 按 Agent+Run 借用**调用方自有**的 `RunExpansion`（无 `unsafe`）；起源事实**不在本件**（在 `src/activity_origin.rs`，见下一行）；**OS 自有动作五个**（一份来源 `OS_OWNED_ACTIONS`：`open_app` / `inspect_action` / `pin_action` / `unpin_action` / `write_soul`——不归任何 App、常驻在场；五件各自在构造时标了「**免查**」（`Capability::exempt_from_inspection()`；装配期由 `composition.rs` 读 `is_exempt_from_inspection()`，**免查必须同时免学** ⇒ 参数名随动作目录给出））；**桌面一层**（`MinimalOs::desktop()` → `Desktop`：门之外那一组 ＋ 每一扇门；**装配期事实**，调用它不读盘、不看展开状态）。见 §3.11 / §3.44 |
+| `src/os.rs` | `MinimalOs` 显式装配多个 App 并按**唯一归属**索引路由（装配期拒绝重复标识 / 冲突行动标识，也拒绝**预装了一个没装配的 App**），另持装配期收集的**来源声明表** `SourceTable`（只读，装配期不授予任何东西；**有生产读者**：详情卡那一行 `receipt-source`，见 §3.45）；今天只剩各 App 自己的 `declared_effects()` ＋ 装配期 `check_declarations` 自洽检查（见 §3.11）；**预装常开**（`assemble_preinstalled`）：装配期可以声明若干 App 从第一轮起就在场（`is_open` 是「在场」的**唯一判据**，能力目录 / 展开答复 / 准入 / 分派四处共用）。首轮那张「门」清单是 `composition.rs` 的**装配投影**，由 **`AppDoor::preinstalled`**（装配期事实：首轮那一刻「开着的」**恰好**就是常开的那几个）决定，那条前提有守卫钉着；`RunScope` 按 Agent+Run 借用**调用方自有**的 `RunExpansion`（无 `unsafe`）；起源事实**不在本件**（在 `src/activity_origin.rs`，见下一行）；**OS 自有动作五个**（一份来源 `OS_OWNED_ACTIONS`：`open_app` / `inspect_action` / `pin_action` / `unpin_action` / `write_self_concept`——不归任何 App、常驻在场；五件各自在构造时标了「**免查**」（`Capability::exempt_from_inspection()`；装配期由 `composition.rs` 读 `is_exempt_from_inspection()`，**免查必须同时免学** ⇒ 参数名随动作目录给出））；**桌面一层**（`MinimalOs::desktop()` → `Desktop`：门之外那一组 ＋ 每一扇门；**装配期事实**，调用它不读盘、不看展开状态）。见 §3.11 / §3.44 |
 | `src/activity_origin.rs` | **起源事实**（起源那一刀从 `os.rs` 搬出，原名 ~~`ManualEnvironment`~~——名不副实，它照样承载门铃与钟源的起源）：五个起源文案（手动 / 通道接上 / 通道报变化 / **旧账** / 钟源——通道那一档 2026-10-13 拆成两态，见 §3.74）＋ 那个最小的处境来源 `ActivityOrigin`——`new()` = 宿主手动发起（既有默认值），`with_origin(…)` = 调用方声明，因此「谁把主体叫醒的」不会被记成同一句话（见 §3.18）。它**不在循环层里**：存储的词表值与显示区那句话**互不认识**，由装配层把两边接起来（`store → os` 那条反向边因此归零，见 §4） |
 | `src/file_app.rs` | 显式授权目录内只读 `files_list` / `files_read` / `files_grep`：列目录（≤100 项，可选 `after` 续列）、读文本（≤64 KiB，可选 `offset` / `limit` 续读）、按子串查找（≤100 条候选、最多扫 500 个文件）；有创建授权时另加两件写：`files_create`（**只创建、不覆盖**）与 `files_edit`（把 `old_text` **唯一的一处**换成 `new_text`，不改名/不删除/不追加），两件都是类别 `exclusive-create`，各配一件**现在时、只读**的复核（`files_verify_text` / `files_verify_edit`）；向视图层提供同一条目录读取、路径形状校验与列表分页渲染 |
 | `src/file_view.rs` | 只读文件视图 App（`files`）：授权资料目录 + **两个保留逻辑地址**（`history/` 派生经历分段；`manual.md` 派生单文件——环境根里那份手册，TASK_79 刀五），三处共用通用 `files_list` / `files_read`；查找（`files_grep`）只在资料面；装配期拒绝覆盖环境根的资料根与**现存**保留地址的同名真实条目 |
@@ -60,7 +60,7 @@
 | `src/platform.rs` | **平台缝**（Linux 臂那一刀）：terminal 与 MCP **共用的一份平台知识**——默认 shell 名（`powershell.exe` / `cmd.exe` / `bash`）、怎么拼命令行（`bash -c`、`cmd.exe /C`，含各自的启动卫生：Windows 的 `-NoProfile`、Linux 摘掉 `BASH_ENV` / `ENV` 两个 `bash -c` 的 profile 缝）、怎么**击杀整棵进程树**（Windows＝`taskkill /T /F`；Linux＝子进程 `process_group(0)` 自持一组、按组 `SIGKILL`，手写 FFI、零新依赖）、以及**凭据洗**（系统自有前缀 `CELIRA_` ＋ 宿主点名的键名；**先清空再交**——只 `envs()` 是假墙；只报洗掉几个/洗不掉的点名，**取值一个字节都不落**）。形状与第五刀同一份：**契约唯一、实现多份**——墙只写一份（在各自的消费者里），**臂只留四件**，本件只做其中三件＋凭据洗（**非 UTF-8 怎么解**留在各自的臂里）。它**不认识任何消费者**（守卫：不许引用 `crate::terminal_app` / `crate::mcp`），不读环境根、不落盘；没有臂的平台上是 fail-closed（入口拒绝开启，本件不留近似实现）。见 §3.25 / §3.29 |
 | `src/mcp/`（`mod.rs` / `app.rs` / `stdio.rs`） | **外部来源的第一台 App**（TASK_42；Linux 臂那一刀补 bash 臂）：市面上的 MCP server 在这里就是**一台被授权的 App**——宿主开机声明一次（`--mcp <名>=stdio:<命令>[,read-only][,timeout=<秒>]`，可重复），主体要用的时候再展开；它与出厂内置件走**同一份窄契约**（`AppPort`），因此 **OS 一行不用认识 MCP**。三条正交事实：授权面归宿主（**装配期**，装 / 卸要重启宿主）、通道归宿主级（**懒**：声明 ≠ 起进程）、动词面归那一次活动的展开状态。效果档两档（默认 `unverifiable-write`；`,read-only` = 宿主显式背书"这台不改外面的世界"）；四堵墙（转发窗口 / 回执有界 / 词表封闭 / **凭据洗**——判据与实现在 `platform.rs` 只有一份）；没有臂的平台入口**拒绝开启**（不静默换近似行为）。见 §3.29 |
 | `src/skills_desktop.rs` | **系统服务层第五个件**（TASK_41；2026-09-22 **降级为一行读数**）：**技能桌面**——只报材料区 `<材料根>/skills/` 的**一级条目数**（＝直接**子目录**数：散 skill 与包都算一项，散**文件**不算）：`skills: N 项（要翻看用 files_list，路径 skills/）`；**只读、纯投影、零正文、零存储**（逐条名字与说明**不再进场**——它们本来就在 `files_list` / `files_read` 的地盘）；`skills/` 不存在 ⇒ **整块不出场**（不是空标题，也不是 `0 项`），存在但空 ⇒ 如实说「技能区为空」。见 §3.28 |
-| `src/soul.rs` | **天性（soul）**（TASK_70）：主体**出生那天写就**、此后由自己改写的那一篇自述——存储 `<环境根>/soul`（自持物，与 `pinned_actions` 同层）；装配期读回、开场注入（`soul` 那一块，另摆 `identity` 身份行），**Run 中途不变**；写权归自己（`write_soul` 是 OS 自己的动词）；**三态不许压成两态**：`Absent`（文件不在、或只有一个空文件 ⇒ 开场**优雅跳过**，不注入空壳）／`Present`／`Unreadable`（**这一次没读到** ⇒ 如实标出，**不冒充"主体没有天性"**）；字节上限 `MAX_SOUL_BYTES = 4 KiB`（超限在**写入那一侧**被拒，TASK_76）；产品**不预装任何标准人格文本**（那是替所有用户的世界定"官方人格"） |
+| `src/self_concept.rs` | **自识（self_concept）**（TASK_70）：主体**从自己的经历里提炼出来的**、关于自己是个什么样的一篇——存储 `<环境根>/self_concept`（自持物，与 `pinned_actions` 同层）；装配期读回、开场注入（`self_concept` 那一块，另摆 `identity` 身份行），**Run 中途不变**；写权归自己（`write_self_concept` 是 OS 自己的动词）；**三态不许压成两态**：`Absent`（文件不在、或只有一个空文件 ⇒ 开场**优雅跳过**，不注入空壳）／`Present`／`Unreadable`（**这一次没读到** ⇒ 如实标出，**不冒充"主体没有自识"**）；字节上限 `MAX_SELF_CONCEPT_BYTES = 4 KiB`（超限在**写入那一侧**被拒，TASK_76）；产品**不预装任何标准人格文本**（那是替所有用户的世界定"官方人格"） |
 | `src/orientation.rs` | **环境根里的两份出厂文档**（TASK_79）：**出厂说明**（`<环境根>/orientation.md`——装配开场拍读一次、Run 内携带，做系统消息的**静态头**；四态：不在/空 ⇒ 缺席、读不出来 ⇒ 如实标出、**超过 4 KiB ⇒ 如实标出 `orientation-too-large` 且不截断**——上限在**读侧**）与**手册**（`<环境根>/manual.md`——**零注入**，自己读；它在只读视图里有一个保留逻辑地址，见 `file_view` 与 §3.32）；创建那一次由 `orientation::place` 一并摆上，此后系统一个字都不写（生命周期归主体）；只陈述事实、不给建议（两条装配不变量见 §3.32） |
 | `src/timer_app.rs` | **timer**（TASK_75）：主体的**自持物第三件**——「过一会儿再来看」（前两件是 `notes` 的**记**与 `pinned_actions` / `pins_board` 的**钉**，缺的是**时间**）——存储 `<环境根>/timers`（一行一条 JSON：`id` = `t-<序号>`、`when` = unix 毫秒（与状态行 `since` **同一个格式化点**，可原样抄）、`label`（**可选**，≤60 字节、超限如实截断）、`state` = `pending` → `fired`）；三条动词 `timer_set` / `timer_list` / `timer_cancel`（**取消是除名**，Agent 的自持物主体做主）；它是**普通 App**（**展开之后才在场**，不是 OS 常驻动词；拔掉它全场照跑）；三条不许越的线：**不预建**（repeat / snooze / modify / 必填标签 / 长备注）、**不替主体判断**（`when` 落在过去照收、到点就响、**不漏报**）、**不声明写效应**（自持物写不需要授权）；到点的唤醒走**本地钟源**（见 `src/wake.rs`）。⚠️ 它还**往显示区交素材**：`holdings_material()` 把表填进 `holdings::HoldingRow`（方向 `app → 显示区`，见 §3.34）——**装配层因此不再翻它的账本** |
 | `src/doorbell.rs` | **门铃**（内部代称；机制的名字是**唤醒通道**）：im 服务端那条唤醒长连接的宿主侧客户端。**连接建立即一次唤醒**（覆盖重连与订阅间隙）——⚠ **2026-10-13**：它就是那条流的**首帧**（`Signal::Opened`），此后每一帧是 `Signal::Changed`；`serve` 从前**另发**一个铃 ⇒ 每次连接可能响两次（容量 1 通常吞掉第二个，宿主手快时它会变成多出来的一次空醒），已收掉（见 §3.74）；只认一个事件名、保活注释与任何内容字段一律不看（**零事实**、不落任何东西）；没答复（连不上 / 断开 / 读超时）⇒ **有界退避**重连（起点 1 秒、**上限 30 秒**——它是这一格里唯一与花费相关的数字，因为每次重连都换来一次完整 Run；活过一个空闲窗口、或送到过铃的连接断掉即复位，见 `DoorbellPolicy::next_reconnect_delay`）；有答复但不合用（凭据级被拒 / 超限 / 别的非 2xx / 回错媒体类型）⇒ 举着分类交回宿主，**不自动换凭据、不无限重试**；另有一个**可选的铃回调**（`open_with_ring_sink`：连接与每一次铃都叫它一次）——宿主在跑活动时用它拉一次增量（TASK_34，见 §3.18 / §3.23）；还交出一格**读数** `DoorbellReading`（重连几次 / 当前退避 / 连着没有；读柄 `reading_handle()`，**写者只有读手线程**），宿主把它打进 `[run]` 那一块——**健康基线不打印** |
@@ -129,7 +129,7 @@
   - **读法由证据决定，不由入口挑**：`TailPolicy`（写者要求文件自洽 / 读者读已确认前缀）由 `reading_tail(root)` 从**写资格那条证据**推出来——**有写者在写** ⇒ 最后一段没换行是它此刻写到一半的那一行，丢掉它、读前一条已确认的记录；**没有写者** ⇒ 那一段是没人收尾的残留（崩在半路），照旧**明确失败**（`corrupt-tail`），不许报告成一份更短的健康历史。同一条判据也用在按目录读的公开入口（`read_trace_at` / `list_runs_at` / `read_run_at`，`file_view` 走它们）。探测方式是**拿一下锁就放**（读者不占资格，也不挡后来的写者）；拿不到锁（含任何错误）一律当作"有写者"——那一边只是丢掉一段没写完的尾部，猜错另一边的代价是把崩溃残留读成健康历史。
   - ⚠ **内容校验两种读法完全一样**：完整的一行读不出来、语义不合法、序号不前进，一律拒绝。放宽的只有"最后一段没写完"这一格，因为那一段**从来不是已确认的事实**。
 - **`create` 拒绝在"身份不在、历史却在"的位置上创建**（2026-10-06 防静默销毁那一刀）：身份记录**不在**、而两份存储（`trace.ndjson` / `facts.ndjson`）**在场** ⇒ 明确拒绝 `history-without-identity`，**一个字节都不动**。为什么要有这一步：身份丢了（误删 / 半途拷走 / 写一半断电）而两份存储还在时，从前那条路会把历史 `truncate` 掉——**同一个损坏形状，`open` 是拒绝（`identity-missing`）、`create` 却是销毁**。
-  - **判据只覆盖它自己的写集**（两份存储）：那正是 `create` 唯一会清空的东西。别的既有内容（家侧的 `agent.conf`、主体的 `notes/` / `soul` / `timers`…）**不构成**拒绝的理由——`create` 不会动它们。⚠ **这条边界是拿真机门禁换来的**：第一版写成"这个位置里**有任何东西**就拒绝"，`probe-loop` 当场报"那个家起不来"——因为家侧按设计就把 `agent.conf` 写在环境根里（`provision.js` 第 5 步先写配置、第 6 步才 init），那条规则会让**每一个新家**都装不起来，也会把一个半成品家永久锁死。判据贴着操作自己的写集之后，半成品家照常能被 init 补上。
+  - **判据只覆盖它自己的写集**（两份存储）：那正是 `create` 唯一会清空的东西。别的既有内容（家侧的 `agent.conf`、主体的 `notes/` / `self_concept` / `timers`…）**不构成**拒绝的理由——`create` 不会动它们。⚠ **这条边界是拿真机门禁换来的**：第一版写成"这个位置里**有任何东西**就拒绝"，`probe-loop` 当场报"那个家起不来"——因为家侧按设计就把 `agent.conf` 写在环境根里（`provision.js` 第 5 步先写配置、第 6 步才 init），那条规则会让**每一个新家**都装不起来，也会把一个半成品家永久锁死。判据贴着操作自己的写集之后，半成品家照常能被 init 补上。
 - `trace.ndjson` 存经历，`facts.ndjson` 存操作/结果事实；追加后各自 `sync_all`，不假定两份存储原子。每次已成功返回的追加才推进内存序号；**不承诺掉电零损失或目录项耐久**（Windows 上目录同步被跳过，`sync_all` 也不证明存储设备自身的写缓存扛得住掉电），可承诺的只有"已确认前缀"。
 - 环境提交覆盖 Run 开始、输入、注入、动作选择/准备、派发、结果、结束及封存。输入在首轮模型前提交；动作派发事实在 ActionPort 调用前写入，因此它是保守的可能派发边界，不证明外部效果已发生。
 - **空批次零新增、零提交**：注入与观察都提交"本次真正新增的那一条"，不按"轨迹当前最后一条"判断，因此空 Turn 批次不会把上一条注入重复落盘。
@@ -1487,13 +1487,13 @@ JSON 文本"而不说里面有什么键，读的人只能猜、只能试。**
   部署要人来做；那不属于你的身体"。它是**能力事实**（与"这台机器上有没有那只手"同族），不是建议、
   不是任务；放**手册**而不是出厂说明，是因为它不占每一轮上下文。为什么要有它：她有整机全权却
   **修不了自己**，不说清就会变成"明明有命令行却修不好"的困惑。
-- **三态不许压成两态**（与 §3.15 的天性同款）：文件不在 / 读到空白 ⇒ 静态头**缺席**（Agent 摘了说明书，
+- **三态不许压成两态**（与 §3.15 的自识同款）：文件不在 / 读到空白 ⇒ 静态头**缺席**（Agent 摘了说明书，
   合法——那一条消息**逐字节**等于从前的五字段）；**读不出来** ⇒ 如实标出一句
   （`ORIENTATION_UNREADABLE`），**不冒充"主体没有那一份"**，而且不拦活动。
 - **生命周期归主体**：两份都是环境根里的文件，可删、可改、可迁移；系统只在**创建**那一次摆上
   （`agent_run init` → `manual_entry::create_environment` → `orientation::place`），此后一个字都不写。
-  ⚠️ 创建**不替主体写天性**：`soul` 那份由自己写（主人 2026-09-21 裁决，守卫
-  `the_soul_can_only_be_written_by_her_own_verb` 钉着它）——施工单里"创建时落三个文件"的 `soul`
+  ⚠️ 创建**不替主体写自识**：`self_concept` 那份由自己写（主人 2026-09-21 裁决，守卫
+  `the_self_concept_can_only_be_written_by_her_own_verb` 钉着它）——施工单里"创建时落三个文件"的 `self_concept`
   那一项，在**今天的产品里就是不产出**（如实登记，不假装它产出过）。
 - **装订口**：装配把静态头推给模型（`ModelPort::declare_static_head`）——Core 只持有这条中立接缝，
   **不解释它的内容**（谁读盘、什么时候拍、怎么渲染都在装配与适配层）；替身有**默认空实现**（不发
@@ -1501,13 +1501,13 @@ JSON 文本"而不说里面有什么键，读的人只能猜、只能试。**
   ——同一台宿主跨活动复用同一个模型，漏推一次就会让上一个 Run 的头留在那里。取的是**装配期拍读的
   那一份**，所以在 Run 里改那个文件**不改**本次活动的请求，下一次活动的开场才变。
 - **命名**：`orientation.md` / `manual.md`——它们是**写给主体读的文档**，与材料区的技能文档同族；
-  `soul` 那种无扩展名的自持物风格不改。手册的名字只有一个权威位置（`MANUAL_FILE`）：它既是环境根里
+  `self_concept` 那种无扩展名的自持物风格不改。手册的名字只有一个权威位置（`MANUAL_FILE`）：它既是环境根里
   那份文件的文件名，**也是**只读视图里的保留逻辑地址（`file_view::MANUAL_ADDRESS` 由它派生）。
 - **两种命运**：出厂说明走**注入**（每次清醒第一眼就有），手册走**派生读**（自己用
   `files_list` / `files_read` 去拉）。**一个走注入的东西必须自释**（不变量 1），而手册不必承担
   这个义务——它是**主体主动去读**的一份文档。
 - **刀五补正（2026-09-23）**：上面曾登记的缺口里，三项已落地、一项已定案——
-  **② 上限有了**：`MAX_ORIENTATION_BYTES` = 4 KiB（与天性同款的量级），**落在读侧**——主体能在自己
+  **② 上限有了**：`MAX_ORIENTATION_BYTES` = 4 KiB（与自识同款的量级），**落在读侧**——主体能在自己
   地盘上写多大是主体的自由，系统决定的是"这一次要不要整条摆进视野"；超限 ⇒ 那条消息是
   `orientation-too-large` ＋ 机械事实，**不截断**（半截说明书比没有更坏）、**不拦活动**；
   **③ 跨进程恢复重新拍读已定为故意**（不是偶然）：主体是**环境家具**不是 Run 状态，Run 状态的家在
@@ -1682,7 +1682,7 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
 |---|---|---|---|---|---|---|
 | 1 | 起源那句（这次为什么醒） | Run 级插槽 | 一 Run 一次 | ≤160 B 档 | 系统摆 | ❌ 只有措辞 |
 | 2 | 上一段怎么了 | Run 级插槽 | 一次 | ≤160 B 档（缺席 = 零字节） | 系统摆 | ❌ 只有措辞 |
-| 3 | 我是谁 · 天性 | Run 级插槽 | 一次 | ≤4 KiB 上限 | **她写**（`write_soul`） | ❌ 三态有、措辞无 |
+| 3 | 我是谁 · 自识 | Run 级插槽 | 一次 | ≤4 KiB 上限 | **她写**（`write_self_concept`） | ❌ 三态有、措辞无 |
 | 4 | 我是谁 · 身份行 | Run 级插槽 | 一次 | 一行 | 系统摆（世界现问，不落盘） | ✅ |
 | 5 | 我在哪台机器上 | Run 级插槽 | 一次 | ≤160 B 档 | 系统摆 | ❌ 映射有测试、措辞无 |
 | 6 | 我等着什么（持有物） | Run 级插槽（时钟 App 交素材） | 一次 | 上限 20 行 | **她约的** | ❌ 年龄三分有测试、措辞无 |
@@ -1724,11 +1724,11 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
 
 **2026-10-18 扩族：封的是比喻，不是词**。原表只封了**复合写法**，同一个比喻换个写法就漏过去——
 她眼前实测漏掉三处：`手脚` 在表里而 `terminal 那只手` 不在（×4：`file_view.rs` 的作品面详情 ＋
-`orientation.rs` 手册三处）、`自留地` 在表里而 `你的地盘` 不在（`soul.rs` 的"读不到天性"那一句）、
+`orientation.rs` 手册三处）、`自留地` 在表里而 `你的地盘` 不在（`self_concept.rs` 的"读不到自识"那一句）、
 `地界` 一个写法都不在（`web_app.rs` 门牌）。⇒ 表按**比喻族**补到 **16 个词**
 （＋`那只手` / `这只手` / `地盘` / `地界`），裸 `手` **不进表**（`手册` / `手笔` / `助手` 都是合法词，
 **反例自检钉着这一条**——判据是"误伤一次，人就学会绕开守卫"）；她眼前那几处同一天换成机械说法——
-**你的环境根**（`soul.rs` 的"读不到天性"那一句）与**宿主授权的资料目录**（`web_app.rs` 门牌）
+**你的环境根**（`self_concept.rs` 的"读不到自识"那一句）与**宿主授权的资料目录**（`web_app.rs` 门牌）
 **在这一笔里**；**`terminal` 档在场 / 不在**那两处（`file_view.rs` 作品面详情 ＋ `orientation.rs` 手册三处）
 叠在**未提交的 2026-10-14 作品面那一批**上（那一批与 `file_app.rs` 互相依赖，单独拆不开），
 仍在工作树里——见 §3.106。
@@ -1753,7 +1753,7 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
 ### 3.38 路由层只许拥有「能不能调」
 
 **症状**：`os` 是**路由层**（发现 / 展开 / 派发），而它同时住着约 180 行**域规则**——格位上限、
-空天性要拒、超限读数、以及三句回执的措辞。同族的 `timer_set` / `notes_*` 都住在各自 App 里，
+空自识要拒、超限读数、以及三句回执的措辞。同族的 `timer_set` / `notes_*` 都住在各自 App 里，
 只有这三件住在循环那一层。
 
 **判据**（主人 2026-10-08 确认）：**删掉它，"首屏 / 账 / 身份"哪一件会破？** 这一件破的是
@@ -1764,11 +1764,11 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
 | 搬到哪 | 搬了什么 |
 |---|---|
 | `pinned_actions::set_pinned(root, name, pinned) -> Result<ContentBlock, PinFailure>` | 读自持物 · `MAX_PINS` 判定（**不自动淘汰**）· 写 · **那一块回执的措辞** |
-| `soul::write_from_subject(root, text) -> Result<ContentBlock, SoulWriteFailure>` | 超限拒绝（不写、不截断）· 三段读数 · 回执措辞 |
+| `self_concept::write_from_subject(root, text) -> Result<ContentBlock, SelfConceptWriteFailure>` | 超限拒绝（不写、不截断）· 三段读数 · 回执措辞 |
 | **留在 `os`（路由事实）** | 参数形状 · 空正文（`invalid-argument`，与"缺参数 / 形状不对"同族）· **在场判定** · **有没有环境根**（`no-environment-root`） |
 
-两件附带的收口：① `soul::incept` **不再公开**（它只是那一次写的里子）⇒ 模块公开面仍然只有
-**两个**名字：写（`write_from_subject`）与读（`read`）——"多一个名字就多一条改天性的路"；
+两件附带的收口：① `self_concept::incept` **不再公开**（它只是那一次写的里子）⇒ 模块公开面仍然只有
+**两个**名字：写（`write_from_subject`）与读（`read`）——"多一个名字就多一条改自识的路"；
 ② `pin_action` 门牌里的那个分类串改成引 `PinFailure::LimitReached.as_str()`
 （**分类串只有一个权威**，与第 3 档读者那条纪律同源）。
 
@@ -1776,12 +1776,12 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
 就红，并附"这些字面量**确实**在所有者里"的自检（防守卫守空气）；**已证伪**（往 `os.rs` 的一条
 注释里塞 `pinned-limit-reached` ⇒ 红）。
 
-⚠ **这一刀撞红过一条既有守卫，而它是对的**：`the_soul_can_only_be_written_by_her_own_verb`
-原来钉"`soul::incept` 的调用点恰好是 `os.rs`"；收口之后写路径落在 `soul.rs` ⇒ **同一条判据换了
+⚠ **这一刀撞红过一条既有守卫，而它是对的**：`the_self_concept_can_only_be_written_by_her_own_verb`
+原来钉"`self_concept::incept` 的调用点恰好是 `os.rs`"；收口之后写路径落在 `self_concept.rs` ⇒ **同一条判据换了
 落点**。按"判据跟着语义走，不跟着上一次的写法走"，它的形状**加强**了（从"某个文件里出现过"
 收紧成"**恰好一次，且在那一个函数体里**"），判据 3 的公开面名单同步改成
-`read` / `write_from_subject`，并加一条"`incept` 不许再公开"；**已证伪**（临时加一个 `edit_soul`
-去调 `incept` ⇒ 报出"写天性的落点全 crate 只许有一处"）。
+`read` / `write_from_subject`，并加一条"`incept` 不许再公开"；**已证伪**（临时加一个 `edit_self_concept`
+去调 `incept` ⇒ 报出"写自识的落点全 crate 只许有一处"）。
 
 ### 3.39 行动面词表的解码端
 
@@ -1805,7 +1805,7 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
   同一格）· **对称**（解码端与编码端的标记集合**相等**，多一个少一个都红）· **封闭**（认不出
   ⇒ `None`，不猜、不就近映射）。
 - **三条豁免，每条写明理由**：`FileViewFailure`（**信封**——两个变体把内层词表包在里面，
-  单值解码重建不出内层那一格）· `SoulWriteFailure`（**带载荷**——`soul-too-large` 的字节数
+  单值解码重建不出内层那一格）· `SelfConceptWriteFailure`（**带载荷**——`self_concept-too-large` 的字节数
   不在标记里，硬解码会**编造两个 0**）· `MachineFailure`（**不属于行动面**——装配/路由那一层
   的失败，进 `CompositionError`）。
 
@@ -2434,8 +2434,8 @@ JS 新用例 `scripts/home/tests/model-sources-binding.test.js` **4/4** ✓。
 ① 新建一个可执行入口 ⇒ 红并点名"一张都没出现（新入口逃过射程）"；
 ② 在 `bin/agent_run.rs` 里放两条假循环（一条方法调用、一条完全限定）⇒ 红并**两条都点名**；
 ③ 把 `cost` 从豁免账搬回名单 ⇒ 红在 `core.rs 引用了边界模块 cost`；
-④ 塞一条用不着的豁免 ⇒ 红在"豁免「soul」今天不再需要了"；
-⑤ 在 `core.rs` 加一条**代码形态**的引用（`use crate::soul as _;`）⇒ 红在 `core.rs 引用了边界模块 soul`（证明收窄到代码行之后**真引用照旧被抓**；同一刀顺带把 `the_source_dependency_graph_has_no_cycles` 也打红了，那条守卫是好的）。
+④ 塞一条用不着的豁免 ⇒ 红在"豁免「self_concept」今天不再需要了"；
+⑤ 在 `core.rs` 加一条**代码形态**的引用（`use crate::self_concept as _;`）⇒ 红在 `core.rs 引用了边界模块 self_concept`（证明收窄到代码行之后**真引用照旧被抓**；同一刀顺带把 `the_source_dependency_graph_has_no_cycles` 也打红了，那条守卫是好的）。
 
 **验证**：`cargo test --offline --test minimal_agent` **51/51**（新增 1 条用例，0 failed / 0 ignored）。
 
@@ -3294,41 +3294,41 @@ segment" 或把 hold 说明改回 "this segment"，用例立刻红。
 **负空间**：不动"自持物不需要授权"（一个字没动）· 不动 notes 那边的类别与复核 · 不动准入面其余
 分支 · 不碰 im 服务端与任何冻结契约。
 
-### 3.78 天性有一条现读的路：`soul` 派生地址
+### 3.78 自识有一条现读的路：`self_concept` 派生地址
 
-**起因**（主体自己列的第②条缺陷：「soul 写完不能核实」）：`write_soul` 是**全库唯一一个写完读不回来
-的自持物**——笔记有 `notes_read`、格位有 `pins_board`、约的时刻有 `timer_list`，而天性只有
+**起因**（主体自己列的第②条缺陷：「self_concept 写完不能核实」）：`write_self_concept` 是**全库唯一一个写完读不回来
+的自持物**——笔记有 `notes_read`、格位有 `pins_board`、约的时刻有 `timer_list`，而自识只有
 "下一场开场再读"。她自己的原话是「**我连自己的内心都读不回来**，我的『自我知识』全是文本中介的」
 ——后半段是这个产品的性质（记忆靠文本），**前半段不是**，它是缺的一条路。
 
 **判据**：视图的白名单本来只有两个派生地址（`history/` 与 `manual.md`），而环境根**永远不被当作
-普通文件根** ⇒ 天性（`<环境根>/soul`）在视图里**根本不存在**。修法照 `manual.md` 的先例：**再加
+普通文件根** ⇒ 自识（`<环境根>/self_concept`）在视图里**根本不存在**。修法照 `manual.md` 的先例：**再加
 一个派生单文件地址**——**不新增动词**（`files_read` 已经在手上）。
 
 **改了什么**：
 
-- `SOUL_ADDRESS = crate::soul::SOUL_FILE`（名字不另写一遍，与 `MANUAL_ADDRESS` 同款纪律）；
-- `SoulView` ＋ `soul_view()`（装配期拍一次"环境根里那一份在不在"）＋ 装配期同名冲突拒绝
+- `SELF_CONCEPT_ADDRESS = crate::self_concept::SELF_CONCEPT_FILE`（名字不另写一遍，与 `MANUAL_ADDRESS` 同款纪律）；
+- `SelfConceptView` ＋ `self_concept_view()`（装配期拍一次"环境根里那一份在不在"）＋ 装配期同名冲突拒绝
   （`ReservedAddressTaken`，与手册同款）；
 - `files_list` / `files_read` / `files_grep` 三处的保留地址分支（单文件 ⇒ 列它是 `wrong-kind`、
   底下没有子路径、不在查找面内）；
-- ⚠ **它不缓存**（与手册同款）：每次 `files_read` 现读那一份 ⇒ **刚写下的天性同一段里立刻读得到**
+- ⚠ **它不缓存**（与手册同款）：每次 `files_read` 现读那一份 ⇒ **刚写下的自识同一段里立刻读得到**
   ——"写完能不能核实"这条判据就落在这里；
-- 能力说明（她读的那个目录）与**手册**各加一句：手册里那句原来只写"改的是你的 soul 文件"，
-  现在多一句"写完了想核实，就在 files 视野里读 `soul`"。
+- 能力说明（她读的那个目录）与**手册**各加一句：手册里那句原来只写"改的是你的 self_concept 文件"，
+  现在多一句"写完了想核实，就在 files 视野里读 `self_concept`"。
 
-⚠ **一处如实记账**：单文件那一路现在是**两份同形实现**（`ManualView` / `SoulView`）。**第三份出现
+⚠ **一处如实记账**：单文件那一路现在是**两份同形实现**（`ManualView` / `SelfConceptView`）。**第三份出现
 时收成一张表**（地址 → 环境根下的文件名），不提前收——两份还不值得一层抽象。
 
 **验证**：`cargo fmt --check` ／ `cargo clippy --all-targets -- -D warnings` ／
 `cargo test --all-targets` 全绿 ⇒ **861 通过 / 0 失败 / 3 忽略**（63 套件）。新增用例
-`history_view::her_own_soul_is_readable_at_its_reserved_address`：**缺席时是"没有这个地址"**（不是
+`history_view::her_own_self_concept_is_readable_at_its_reserved_address`：**缺席时是"没有这个地址"**（不是
 空文件）、写过之后列得出来、读得到、逐字相同，列它 / 取子路径是 `wrong-kind`、拿它当查找面是
 `invalid-argument`。它与上一条守卫（`the_view_never_exposes_environment_internals`）**不冲突，而且
 是它的另一半**：环境**内部记录**（身份 / 两份存储 / 写锁）照样一律不可读，而**主体自己的自持物**
 有一条现读的路。
 
-**负空间**：不动 `write_soul` 一个字（写入口、上限、两条拒绝都没动）· 不动环境的内部记录面 ·
+**负空间**：不动 `write_self_concept` 一个字（写入口、上限、两条拒绝都没动）· 不动环境的内部记录面 ·
 不给它开写/删（视图仍然只读）· 不新增动词 · 不碰 im 服务端与任何冻结契约。
 
 ### 3.79 往一条笔记后面接一段：`notes_append`
@@ -3392,7 +3392,7 @@ let Some(access) = &self.search else {
 ```
 
 ⇒ **"这台机器没配"被报成了"被拒"**。代价很具体：操作者看到"被拒"会去查凭据**有效性**，而真正该做
-的是**配一个**。它与本仓库一贯要分开的两态同族（`Soul::Absent` / `Soul::Unreadable`、"读不到 ≠
+的是**配一个**。它与本仓库一贯要分开的两态同族（`SelfConcept::Absent` / `SelfConcept::Unreadable`、"读不到 ≠
 没有"）——**"没有" ≠ "被拒"**。
 
 **改了什么**：
@@ -4239,7 +4239,7 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 |---|---|---|
 | **一次活动（Run）** | `--create-dir` | 「显式授予**本次活动**在 `<资料根>/<该目录>` 里的写权限……**授权只对这一次 Run 有效**，旧参数与旧入口不因此获得写权限」（`agent_run.rs:95`） |
 | **一次装配（进程）** | `--terminal` · `--mcp` · `--web` | 「**授权面是装配期事实，不在 Run 中途变**」（`agent_run.rs:116`，装/卸要重启进程） |
-| **不需要授权** | 她自己的环境（`notes_create` / `soul`） | 「笔记写在自己的环境里，**本来就不需要声明**」（`agent_host.rs:17-18`） |
+| **不需要授权** | 她自己的环境（`notes_create` / `self_concept`） | 「笔记写在自己的环境里，**本来就不需要声明**」（`agent_host.rs:17-18`） |
 
 ⇒ ⚠ **第一行不是另一种哲学**：`agent_run` 是「装配一次 ＝ 跑一次」⇒ 它的"本次活动"**就是**它的装配单位。**三者归一：授权的单位 ＝ 装配的单位**。
 
@@ -4324,7 +4324,7 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 
 | 家的根上 | 谁的 | 今天有动词吗 |
 |---|---|---|
-| `notes/` · `soul` · `pinned_actions` · `timers` · `terminal-logs/` · 经历 · **`projects/`（本刀给的名字）** | **她的** | ✅ 有（且不需要任何授权） |
+| `notes/` · `self_concept` · `pinned_actions` · `timers` · `terminal-logs/` · 经历 · **`projects/`（本刀给的名字）** | **她的** | ✅ 有（且不需要任何授权） |
 | 身份 · 支级配置 · 模型绑定 · 备份 · 写锁、以及这份手册与出厂说明 | **机器与人的记录** | ❌ 一个都没有（有意） |
 
 ⚠ **而后者今天只靠"没有动词"保护** ✗ —— 她有**整机全权的 terminal** ⇒ ⇒ **不说出来就是假的**（她随时能用 shell 改掉自己的框）。
@@ -4461,8 +4461,8 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 | **超限拒绝的端到端注入（今天只有构造即拒的单元级验证）** | `ProtocolData{protocol, version, payload}` 明确所属协议、版本与大小上限（单条 64 KiB）；Core 只搬运并实施中立限额，Adapter **唯一**解释其厂商内容；缺失合法、损坏/协议不符/版本不认识/超限一律明确失败（`protocol-payload`），**不静默截断**；不存认证头、Key、客户端对象或整个 HTTP 交换。**仍缺**：`ProtocolData::new` 的超限拒绝只有单元级验证（构造即拒），没有一条"盘上真的写了 64 KiB+1 载荷"的端到端注入 |
 | **模型失败的**处理**（重试/退避/换通道/结算）——今天只让分类成为事实** | 适配层分出来的那九类**过边界**——`ModelError` 带 Core 的封闭分类 `ModelFailureClass`（九取值与适配层同名同值），收场 `SystemEnding::ModelFailed(Option<class>)` 把它一路带到盘上（`run-ended` 行的**可选** `failure` 字段）、终端（一行 `model-failure=<class>`）、诊断（`failure=<class>`）与恢复报告（`note=model-failure=<class>`）；适配层原来打向 stderr 的那行侧信道**已删**。`None` = 分类没有被记录（旧记录的合法形态，**不编造**）；取值不在封闭表里、或结局不是模型失败却带着分类 ⇒ 整行拒绝（fail-closed）。**仍缺**：模型失败的**处理**（重试/退避/换通道/结算）仍然一件都不做——本刀只让分类成为事实；"新记录必须带分类"这一档若将来要求，是写端强制的另一刀 |
 | **两条用例的红：钉的是一个偶然的阶段标签（`stage=run-start`），不是它们注释里那条契约** | **2026-09-25 登记 → 同日判定：不是缺陷，不改**。`composition.rs` 的驱动在**装订那一刻之前**先写一条 `static-head` 经历（设计意图：「写不下来就不驱动」——宁可什么都不做，也不留一条"装订过、但没人知道装订了什么"的痕迹），而 `run-start` 是**驱动里**由 Core 的循环写的 ⇒ 一次新活动的第一笔经历是 `static-head`。**判定依据三条**：①**意图达成了**——那一条确实记下了装订的是哪一份；②**孤儿痕迹无害，而且设计本来就给它留了类别**——`store.rs` 关于静态头的文档写明它"**合法地不是轨迹条目**"（与 `action-selected` 同族），因此"经历文件里有一条不是轨迹条目的记录"是既有类别，不是漏掉的一步；③**反方向的代价更大**——要让活动先于它的事实，就得动 Core 的循环（`commit_run_start` 由它调、`run.is_started()` 是它的内存状态），从装配层补写会让 Core **再写一次**（`RunAlreadyKnown`）。**那 2 条用例的红，钉的是一个偶然的阶段标签**（`stage=run-start`），不是它们自己注释里那条契约（"拒绝发生在第一次模型调用之前"——**那条成立**）。⇒ **不改断言**（"不得调整断言替实现过关"），如实留红并记账。 |
-| **分层：`os` 装了六类东西，其中四类不属于「循环＋插槽」** | **2026-09-25 只读审计登记；其中两类同日已修，两类仍开着**。逐项定层（判据＝读写什么、谁用、依赖谁）：①`MachineFailure` ＋ 三个便利入口 = **装配层**（直接命名 L5 的 `FileView`）——**仍开着**；②`AppDoor` / `Desktop` / `desktop()` = **呈现投影**（唯一消费者是 composition 的首轮目录渲染）——**仍开着**；③~~四个 `*_ORIGIN_TEXT` ＋ `MANUAL_ORIGIN_LABEL` = 显示区/环境内容~~ → 搬进 `src/activity_origin.rs`；④~~`ManualEnvironment` = 显示区的一件~~ → 同上，并改名 `ActivityOrigin`；⑤`with_environment_root` / `environment_root` = **环境根事实**——**仍开着**；⑥`pin_action` / `unpin_action` / `write_soul` 的实现**读写显示区自持物**（`<环境根>/pinned_actions` 与 `<环境根>/soul`）——**仍开着**。⑥的形状是：`timer_set` 住 `timer_app`、`notes_*` 住 `notes_app`，**这三个却住 `os`，同族的自持物动词分居两层**。另：`os.rs` 文档注释与代码有六处不一致（含一处行为性的：注释称"本次 Run 内再 pin 不生效"，但 pin 集是惰性首次求值、而 `admit` 对 OS 自有动词提前返回，**同一次 Run 内可能读回刚写下的那一份**）。 |
-| **分层：显示区干净，违规在别处** | **2026-09-25 实测结论（用于更正一次错误判断）**：八个显示区（`status_bar` / `notification_bar` / `pins_board` / `pinned_actions` / `skills_desktop` / `event_cards` / `holdings` / `soul`）的**非测试代码里，`crate::` 引用只有 `core` / `clock` / `screen` / `foundation`**——**对 App 与对 `os` 都是零引用**；出现 `crate::os::ManualEnvironment` 的三处全在各自的 `#[cfg(test)]` 里（作内层 `ContextSource` 替身）。**真正在射程外的是 `src/wake.rs:26`（`use crate::timer_app::TimerApp`：铃认识一个 app）与 `src/mcp/mod.rs`（取适配层常量）**；而 `BOUNDARY_MODULES` 不含 `wake`，`a_display_area_never_knows_an_app` 的 APPS 名单也不含 `os`。⚠ **2026-10-10 部分收口**：`wake` **已进** `BOUNDARY_MODULES`（§3.56 补 11 项），**仍开着的是那条边本身**——`wake.rs → timer_app` 今天依旧无人检查（它属 `a_display_area_never_knows_an_app` 的射程问题，要动产品代码）。 |
+| **分层：`os` 装了六类东西，其中四类不属于「循环＋插槽」** | **2026-09-25 只读审计登记；其中两类同日已修，两类仍开着**。逐项定层（判据＝读写什么、谁用、依赖谁）：①`MachineFailure` ＋ 三个便利入口 = **装配层**（直接命名 L5 的 `FileView`）——**仍开着**；②`AppDoor` / `Desktop` / `desktop()` = **呈现投影**（唯一消费者是 composition 的首轮目录渲染）——**仍开着**；③~~四个 `*_ORIGIN_TEXT` ＋ `MANUAL_ORIGIN_LABEL` = 显示区/环境内容~~ → 搬进 `src/activity_origin.rs`；④~~`ManualEnvironment` = 显示区的一件~~ → 同上，并改名 `ActivityOrigin`；⑤`with_environment_root` / `environment_root` = **环境根事实**——**仍开着**；⑥`pin_action` / `unpin_action` / `write_self_concept` 的实现**读写显示区自持物**（`<环境根>/pinned_actions` 与 `<环境根>/self_concept`）——**仍开着**。⑥的形状是：`timer_set` 住 `timer_app`、`notes_*` 住 `notes_app`，**这三个却住 `os`，同族的自持物动词分居两层**。另：`os.rs` 文档注释与代码有六处不一致（含一处行为性的：注释称"本次 Run 内再 pin 不生效"，但 pin 集是惰性首次求值、而 `admit` 对 OS 自有动词提前返回，**同一次 Run 内可能读回刚写下的那一份**）。 |
+| **分层：显示区干净，违规在别处** | **2026-09-25 实测结论（用于更正一次错误判断）**：八个显示区（`status_bar` / `notification_bar` / `pins_board` / `pinned_actions` / `skills_desktop` / `event_cards` / `holdings` / `self_concept`）的**非测试代码里，`crate::` 引用只有 `core` / `clock` / `screen` / `foundation`**——**对 App 与对 `os` 都是零引用**；出现 `crate::os::ManualEnvironment` 的三处全在各自的 `#[cfg(test)]` 里（作内层 `ContextSource` 替身）。**真正在射程外的是 `src/wake.rs:26`（`use crate::timer_app::TimerApp`：铃认识一个 app）与 `src/mcp/mod.rs`（取适配层常量）**；而 `BOUNDARY_MODULES` 不含 `wake`，`a_display_area_never_knows_an_app` 的 APPS 名单也不含 `os`。⚠ **2026-10-10 部分收口**：`wake` **已进** `BOUNDARY_MODULES`（§3.56 补 11 项），**仍开着的是那条边本身**——`wake.rs → timer_app` 今天依旧无人检查（它属 `a_display_area_never_knows_an_app` 的射程问题，要动产品代码）。 |
 | **「思考强度」那一格页面上没有、门的写接口也不认 ⇒ 今天只能手写清单** | **今天生效的样子**：① 清单那一条声明它，**唯一读侧**按**封闭表**（`none` / `minimal` / `low` / `medium` / `high` / `xhigh` ＋ **`max`**）校验——认不得的**明确拒绝、点名那一件、列出认得的取值**；② **两个生产入口都真的把它接上请求**（chat-completions 那一档；responses ＋ 档位 ⇒ **退出码 5**，点名取值并给出两条出路——**不静默丢掉**）；③ 主体开场那一行第 4 格 `· reasoning_effort = <档>`，并随 `run-start` **入账**（**盘上格式零变更**）；④ 换模型那一刻**名字 / 档位 / 窗口一起换**；⑤ 那一格的**显式 `null` 与「没写这一格」同义**（JS 写者的规范形状就是写 `null`）。**今天仍然成立的三条边界**：① responses 那条 wire **没有**这一格（声明了就是配对错误 ⇒ **拒绝**，不是静默丢弃）；② 她碰那一格的方式与模型配置其它格同款（`--terminal full`），**没有专门的动词**；③ ⚠ **页面上没有「思考强度」那一格**，门的写接口（`validateDeclaration`）也**不认**它 ⇒ **今天只能手写清单**（如实登记）。见 §3.50 / §3.53。 |
 | **她碰模型配置没有专门的动词（今天只走 `terminal` 这条通用路）** | **今天就能**：只要装配给了 `--terminal full`（**整机全权档**，档位就是授权本体），她就能写**任何宿主用户能写的文件**——包括 `<家>/model_sources.json`（清单）与 `<环境根>/model_binding.json`（绑定）⇒ **「主体自己换模型」不是待办，是现状**（走 `terminal` 这条通用路，**没有专门的动词**）。⚠ 与「配置模型是主体自己的事情」那条裁决**不冲突**：配置归她，这条路只是**她碰得到它的方式**。**真正要问的是「最坏情况可恢复吗」——盘过一遍，是**：① 绑定**写坏** ⇒ 门 fail-closed 拒绝启动、**她醒不过来**，但门**只读不写** ⇒ **操作者改一行就回来**；② 绑定**删掉** ⇒ 退回进程侧那一路，**照旧醒得过来**；③ 清单里**某条非法** ⇒ 拒绝启动并**点名那一件**；④ 清单**删掉** ⇒ 悬空绑定如实拒绝。⇒ **今天是「可恢复的坑」，不是死锁**——这既是「给她整机全权」这个决定站得住的原因，也是**不该收权限**的理由。⚠ **未做（如实登记）**：没有专门的动词。★ **「谁最后改过这一格」有见证了**（2026-10-18，见 §3.26）：门改过那两份文件就记一条（`<家>/logs/model-witness.ndjson`），读面**两档分开**报 —— **页面改的，有时刻**；**不是页面改的**（主体走 terminal、操作者自己的 CLI、别的工具），**只知"变了"，不知是谁**。⚠ **射程如实说**：它答的是「**页面有没有写过**」，**不是「有没有人写过」**；`up` 的迁移与布置时携带的那一份**不经门** ⇒ 落在第二档（那不是漏报，是这一层的判据如此）。⚠ 它**不是封印**：本地见证对拥有整机全权的主体不是密码学保证，它给的是**改动的可见性**。 |
 | **两个槽能不能被绕过** | **不能（三件叠着），不需要动手**。① **写路径类型级封闭**：`Run::accept_injection` 是 `pub(crate)` · `InjectionStage` 是**只有两个取值的封闭枚举** · 适配层对它的匹配**穷尽、没有兜底臂**（加第三个取值**编译不过**）· 生产里写者**只有 `drive_run`**。② **顺序是类型**：处境链是一个**类型别名**（`composition.rs` 的 `SituationChain`，由外到内**十一层**），**装配只有一处**，**没有注册表、没有名单、没有排序规则**。③ **结果被用例钉着**：「恰好一次」与「顺序确定」在 `tests/run_turn_slots.rs` / `manual_environment.rs` / `status_bar.rs` / `machine.rs` / `honest_block_fallback.rs` / `host_doorbell.rs`。⚠ **一处必须说准的**：**进视野的路径有两条**——两个槽，以及**适配层在渲染那一刻拼进请求尾巴的静态头** ⇒ 「两个槽是唯一路径」**不成立**；准确说法是「**恰好两条，第二条是显式声明的**」（`tests/orientation.rs` 的 `HeadRecorder`、`tests/provider_wire.rs` 钉着）。 |
@@ -4509,7 +4509,7 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 | 测试 | 对应行为 |
 |---|---|
 | `tests/action_failure_wordlist.rs` | **行动面词表的解码端判据**（2026-10-08，§3.39）：八份词表（`ImFailure` / `NotesFailure` / `FailureClass` / `WebFailure` / `TerminalFailure` / `McpFailure` / `ExpansionFailure` / `PinFailure`，共 **79 个标记**）四条机械判据——**覆盖**（调用点上出现的词表必须在名单里，三条豁免各写明理由）· **轮转**（`as_str` 能拼的每个标记，`from_str` 必须认回同一格）· **对称**（解码端与编码端的标记集合**相等**）· **封闭**（认不出的取值 ⇒ `None`）。⚠ **标记表不手抄**：从源码里那份 `as_str` 解析出来再喂给 `from_str`，因此与枚举不可能漂移；**已证伪**（删一条解码臂 ⇒ 轮转与对称两条同时红） |
-| `tests/minimal_agent.rs` | 最小活动、效果/失败、隔离、恢复，以及分层源码守卫（文件系统记号、供应商记号、导航记号、边界模块名单、`serde_json` 使用范围；`app_contract.rs` 不得认识 OS/具体 App/存储；**`no_app_forges_an_activity_identity`**——不许拿空字符串伪造 `RunId` / `AgentId`，判据带自检、**已证伪**；**`the_activity_failure_labels_have_one_authority`**——`RunError` 的十个稳定标记只许在 `core.rs` 拼一次，两个渲染面必须**带着分类**委托它，两条回归路（塌回一个词 / 再抄一份词）**都实测证伪过**；**`the_opening_view_chain_has_a_hard_ceiling`**（2026-10-08，C8）——处境链层数 = 别名的 `<` 个数 ＋ 1，上限 **11**（要加第 12 层先删一层），认不出别名即报错、**已证伪**（把上限临时压到 10 ⇒ 红）；**`her_visible_words_carry_no_new_metaphor`**（2026-10-08，C10）——24 个会进她视野的源文件 × 12 个封闭比喻词，**一处也不许有**（它前一版是债务账，18 行当天还清 ⇒ 升格），**已证伪**（抽掉账上一行 ⇒ 红）；**`the_door_plates_are_one_mechanical_sentence`**（2026-10-08，C10 另一半）——九张门牌（`AppPort::description`）必须**单行字面量 / 不带 `**` / 不带比喻词 / ≤ `DOOR_PLATE_MAX_BYTES`(384)**，动态门牌必须登记在 `DYNAMIC_DOOR_PLATES` 并写理由（今天只有 `mcp/app.rs` 一条），**已证伪**（往 `timer_app` 门牌里塞一个「墙」⇒ 报出 `timer_app.rs 的门牌不合格`）；⚠ 它**第一次运行就在真文件上抓出三处**（`web_app` 超 3 字节、`terminal_app` 留着一处 `**`、再超 52 字节）——那不是误报，是它当场干活；**`no_two_operator_readings_are_the_same`**（2026-10-08，三类读者的第 3 档）——把 `HostFailure` 的七个取值（含五个门铃分类）**全造出来**，断言分类标记两两不同、`[next]` 那一行两两不同、标记是稳定机读形状，另钉一条形状：两份 `as_str()` 的 match **不许有兜底 `_ =>`**，**两个方向都实测证伪过**（把两个门铃分类合成一个标签 ⇒ 报出「两类失败共用一个分类标记」；在 `as_str()` 里加一条兜底臂 ⇒ 报出「兜底臂」）；**`the_router_owns_no_domain_words`**（2026-10-08，§3.38）——9 个域分类与域回执措辞的字面量一旦出现在 `os.rs` 就红（`os` 要用就引所有者导出的 `as_str()`），并自检"这些字面量确实在所有者里"，**已证伪**（往 `os.rs` 一条注释里塞 `pinned-limit-reached` ⇒ 红）；**`the_soul_can_only_be_written_by_her_own_verb`**（TASK_70，2026-10-08 加强）——写天性的那一次调用全 crate **恰好一次、且落在 `write_from_subject` 的函数体里**，`soul.rs` 的公开面只许 `read` / `write_from_subject` 两个名字（`incept` 不许再公开），**已证伪**（加一个 `edit_soul` 去调它 ⇒ 报出「只许有一处」）） |
+| `tests/minimal_agent.rs` | 最小活动、效果/失败、隔离、恢复，以及分层源码守卫（文件系统记号、供应商记号、导航记号、边界模块名单、`serde_json` 使用范围；`app_contract.rs` 不得认识 OS/具体 App/存储；**`no_app_forges_an_activity_identity`**——不许拿空字符串伪造 `RunId` / `AgentId`，判据带自检、**已证伪**；**`the_activity_failure_labels_have_one_authority`**——`RunError` 的十个稳定标记只许在 `core.rs` 拼一次，两个渲染面必须**带着分类**委托它，两条回归路（塌回一个词 / 再抄一份词）**都实测证伪过**；**`the_opening_view_chain_has_a_hard_ceiling`**（2026-10-08，C8）——处境链层数 = 别名的 `<` 个数 ＋ 1，上限 **11**（要加第 12 层先删一层），认不出别名即报错、**已证伪**（把上限临时压到 10 ⇒ 红）；**`her_visible_words_carry_no_new_metaphor`**（2026-10-08，C10）——24 个会进她视野的源文件 × 12 个封闭比喻词，**一处也不许有**（它前一版是债务账，18 行当天还清 ⇒ 升格），**已证伪**（抽掉账上一行 ⇒ 红）；**`the_door_plates_are_one_mechanical_sentence`**（2026-10-08，C10 另一半）——九张门牌（`AppPort::description`）必须**单行字面量 / 不带 `**` / 不带比喻词 / ≤ `DOOR_PLATE_MAX_BYTES`(384)**，动态门牌必须登记在 `DYNAMIC_DOOR_PLATES` 并写理由（今天只有 `mcp/app.rs` 一条），**已证伪**（往 `timer_app` 门牌里塞一个「墙」⇒ 报出 `timer_app.rs 的门牌不合格`）；⚠ 它**第一次运行就在真文件上抓出三处**（`web_app` 超 3 字节、`terminal_app` 留着一处 `**`、再超 52 字节）——那不是误报，是它当场干活；**`no_two_operator_readings_are_the_same`**（2026-10-08，三类读者的第 3 档）——把 `HostFailure` 的七个取值（含五个门铃分类）**全造出来**，断言分类标记两两不同、`[next]` 那一行两两不同、标记是稳定机读形状，另钉一条形状：两份 `as_str()` 的 match **不许有兜底 `_ =>`**，**两个方向都实测证伪过**（把两个门铃分类合成一个标签 ⇒ 报出「两类失败共用一个分类标记」；在 `as_str()` 里加一条兜底臂 ⇒ 报出「兜底臂」）；**`the_router_owns_no_domain_words`**（2026-10-08，§3.38）——9 个域分类与域回执措辞的字面量一旦出现在 `os.rs` 就红（`os` 要用就引所有者导出的 `as_str()`），并自检"这些字面量确实在所有者里"，**已证伪**（往 `os.rs` 一条注释里塞 `pinned-limit-reached` ⇒ 红）；**`the_self_concept_can_only_be_written_by_her_own_verb`**（TASK_70，2026-10-08 加强）——写自识的那一次调用全 crate **恰好一次、且落在 `write_from_subject` 的函数体里**，`self_concept.rs` 的公开面只许 `read` / `write_from_subject` 两个名字（`incept` 不许再公开），**已证伪**（加一个 `edit_self_concept` 去调它 ⇒ 报出「只许有一处」）） |
 | `tests/doc_facts.rs` | **文档事实守卫**（2026-10-06 装）：`src/` 下每个 `.rs` 都要在 §2 代码地图里有一行（目录行覆盖子树）／正文里以 `src/<名字>.rs` 出现的路径必须存在（历史提及写进 `~~…~~`，这是唯一豁免）／§2 行里点名的代码符号必须在 `src/`＋`tests/` 的**代码**里找得到（行注释已剥；判据无白名单：常量 ≥8 字符、snake_case ≥4 字符、驼峰含大小写转换）。⚠ 它只证明"**被点名的名字存在**"——句子可以是假的，散文（§3）它一个字都不管；**改文档 §2 或增删模块时必须让它绿** |
 | `tests/run_input.rs`、`tests/run_turn_slots.rs` | 初始输入、资源及注入次数/顺序；轨迹按发生顺序同时含**模型响应**（`model-response`）、注入与结果，空来源不产生注入记录 |
 | `tests/progressive_disclosure.rs`、`tests/manual_environment.rs` | 展开作用域（现归 OS 的 `RunScope`，展开状态是**调用方自有**的 `RunExpansion`）、渐进披露和手动来源（来源是**环境内容**：在真实请求体里是独立的非 system 消息，不升成系统契约） |
@@ -4527,7 +4527,7 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 | `tests/authorized_creation.rs` | 默认只读（无授权时创建能力不出现、伪造请求被拒且零文件效果）；授权绑定身份/活动/目录（错身份、错活动、目录不存在或等于根都拒绝）；创建语义（中文 UTF-8 精确、空文本、64 KiB 上界不截断、同名 `already-exists` 且原字节不变）；路径边界（`..`、分隔符、绝对路径、盘符、UNC、冒号、控制字符各自 `invalid-path` 且不创建任何东西）；准入在 Prepared 之前（拒绝不留任何行动事实、拒绝经历对下一次模型调用可见、获准路径仍走完整确认链）；**八次拒绝之后第 10 个 Turn 才获准行动**仍能被重启后的诊断准确还原，且跨 Run 历史里读得到拒绝分类；`Turn::from_number` 覆盖 0/1/中间值/`u32::MAX`，盘上超 `u32` 的 Turn 明确拒绝不截断；拒绝经历保存失败时不再调用模型；文件已创建而结果事实保存失败时不重新执行、诊断读成 `dispatched-without-result=1`；真实适配层回环请求里能看见 `action-refused` 与拒绝分类；旧只读入口一件新能力都没多；**TASK_37 改名回归**：展开后的工具表里七个带 `files_` 前缀的名字全在场、九个旧名（`list` / `read_text` / `find_text` / `create_text` / `verify_text` / `create_note` / `read_note` / `list_notes` / `verify_note`）一个都不在 |
 | `tests/notes_app.rs` | 两个 App 用同一份契约装配、拿掉文件 App 后 Notes 照常工作、重复动作标识装配期拒绝；默认只读（创建能力不出现、伪造被拒、只读活动不建存储目录）；授权绑定 Agent/活动且文件 App 的目录授权不升级成 Notes 写权；创建语义（中文逐字一致、空正文、同名不覆盖、标题单行与上限、正文上限、未知参数）；身份生成与有界列表（形状非法 `invalid-id`、不存在 `not-found`、超上限显式 truncated）；数据隔离（FileView 看不到 Notes 存储、FakeNotes 冲突、Agent B 读不到 Agent A、正文不进事实）；跨进程 A 写 B 读（B 无授权仍读得到，且读回原文经夹具回显核对）；结果事实保存失败时不重做并留在盘上 |
 | `tests/provider_wire.rs` | 真实适配层 + 回环服务：一次 `complete` 恰好一次请求（服务端连接计数为 0 条多余连接）且请求体由当前 View 重建（system 契约在前、输入非 system 且恰好一次、结构事实、能力以**原生 `tools`** 出现而不再写进 system 契约）；九类供应商失败（HTTP 非 2xx、不可解析、**生成被截断**、**空响应**、**一次回复两个 `finish_run`**、**非法工具名**、`arguments` 不是 JSON、`arguments` 多一个字段、**结束取值不在封闭表里**）各自被收成系统终止、**零自动重试**、且响应体标记不出现在任何输出；哨兵凭据确实进入 `Authorization` 却不出现在 stdout/stderr/Trace/Fact；两个 Run 的请求体互不包含对方的输入与事实。**TASK_14 补上"缺回执"那一族**：尾部缺一条 ⇒ 请求建成且合成回执点名那个行动；一轮两条都缺 ⇒ 两条合成回执**按请求顺序**；只缺一条 ⇒ 缺的合成、有的仍是完整结果回执（`operation = …` / `state = success`）；没有对应请求的回执 ⇒ 仍在**发请求之前**失败（并断言回环**一条都没收到**）；正常历史（多动作轮次 + 拒绝回执 + 纯正文 + 收尾 + 思考续接）**一条消息都不多**；空正文收尾的助手帧渲染成合法空串而不是 `null`。**TASK_15 补上"分类全程"那一族**：十个失败形状各自断言**终端一行 `model-failure=<class>`、stderr 没有侧信道、盘上收场行带同一个 `failure`**（另有一条真实端口已关闭的传输失败、一条手工轨迹里的保留工具名）；反向也钉住——分类名与适配层的稳定分类名九对九同名同值，且 `from_str` 对表外取值返回 `None` |
-| `tests/orientation.rs` | **出厂说明（系统消息的静态头）＋ 手册**（TASK_79）：创建产出出厂文档（`agent_run init` → 出厂说明 ＋ 手册 ＋ 户口，且**不替主体写天性**）；两条 wire（chat / Responses）最后一条消息**逐字**等于「静态头 ＋ 一个换行 ＋ 机械事实」；**没有/空了/删了**那一份 ⇒ 那一条消息**逐字节**等于从前的五字段；**读不出来** ⇒ 如实标出一句且不拦活动；**Run 内改文件不改本次的静态头**、下一次活动的开场才变；**缺席也是明确装订一次**（跨活动复用同一个模型时上一个头不许留下）；**手册一个字节都不进请求**。**刀五**：**超过 4 KiB** ⇒ 那条消息**逐字**等于「`orientation-too-large` ＋ 机械事实」（不截断、正文一个字都不进请求、活动照跑）；**跨进程恢复重新拍读**（定案，且恢复出来的进程自己仍"Run 内不变"）；`read` 的字节墙在**恰好 4 096 字节**处两侧各量一次 |
+| `tests/orientation.rs` | **出厂说明（系统消息的静态头）＋ 手册**（TASK_79）：创建产出出厂文档（`agent_run init` → 出厂说明 ＋ 手册 ＋ 户口，且**不替主体写自识**）；两条 wire（chat / Responses）最后一条消息**逐字**等于「静态头 ＋ 一个换行 ＋ 机械事实」；**没有/空了/删了**那一份 ⇒ 那一条消息**逐字节**等于从前的五字段；**读不出来** ⇒ 如实标出一句且不拦活动；**Run 内改文件不改本次的静态头**、下一次活动的开场才变；**缺席也是明确装订一次**（跨活动复用同一个模型时上一个头不许留下）；**手册一个字节都不进请求**。**刀五**：**超过 4 KiB** ⇒ 那条消息**逐字**等于「`orientation-too-large` ＋ 机械事实」（不截断、正文一个字都不进请求、活动照跑）；**跨进程恢复重新拍读**（定案，且恢复出来的进程自己仍"Run 内不变"）；`read` 的字节墙在**恰好 4 096 字节**处两侧各量一次 |
 | `tests/manual_address.rs` | **视图里的第二个派生地址 `manual.md`**（TASK_79 刀五）：地址随那一份**在不在**（有 ⇒ 根列表里是 `manual.md\tfile`、读回逐字正文；摘掉那一份并重新装配 ⇒ 列表不出现、读报 `not-found` 且零内容）；它是**一份文件**（列它 / 往它底下走 `wrong-kind`）；读取规则**与资料面同源**（改了那一份下次读到新的、窗口参数 `invalid-argument`、超 64 KiB `too-large` 不截断）；**保留地址守卫**只在地址真的在时生效（同名资料 + 地址在 ⇒ `reserved-address-taken`；地址不在 ⇒ 照旧装配）；`files_grep` 不搜它（在 ⇒ `invalid-argument`，不在 ⇒ `not-found`）；**经历那条地址一行没动**（列活动、读段、类型不对与窗口参数四条照旧）；写动词落不到它身上（无授权 ⇒ `unknown-action`，那一份字节不变）；能力面仍是三项只读动词，描述里两个地址都在 |
 | `tests/live_file_app.rs` | 真实 Provider 相关路径，需另行授权，不能默认用真实凭据执行 |
 | `tests/holdings.rs` | **持有物**（§3.33）：**崩在收掉与开活动之间**（盘上已 `fired`、没有 Run）之后的下一次醒来——**新进程、没有锚、没有投影、没有细胞**——开场仍然看得见那条闹钟的身份 / `when` / 标签 / `fired-ago`；另一种崩法（到点了但还没 `consume_due`）如实读作 `pending` + `overdue`；**持有物不寄生于世界投影**（没有 im 时它照旧出场，而通知栏如实空着）；表在而空 ⇒ `holdings = 0` 说出口；**开场快照不重摆**（第二轮那一块的**计数不增长**——视野是全历史，判据与组件区同款） |
@@ -4554,7 +4554,7 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 node home.js up → 人在页面上说一句 → 铃 → 她醒 → 读世界 → 回话 → 人看到
 ```
 
-围绕这条主回路保留：im 通信面、自持物（`notes` / `soul` / `pins` / `timer`）、处境件（状态行 / 通知栏 / 机器处境 / 持有物 / 上一段怎么了）、两条线协议、模型配置门、家侧只读状态口、诊断与宿主状态命令。
+围绕这条主回路保留：im 通信面、自持物（`notes` / `self_concept` / `pins` / `timer`）、处境件（状态行 / 通知栏 / 机器处境 / 持有物 / 上一段怎么了）、两条线协议、模型配置门、家侧只读状态口、诊断与宿主状态命令。
 
 **冻结（不再投入、不宣传、只修安全缺陷）**：MCP（`--mcp`）、terminal（`--terminal`）、web（`search` 端点是配置，`--search-endpoint`）、im 社交面与表达面（`im-social` / `im-profile`）。
 

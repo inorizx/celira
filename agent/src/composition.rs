@@ -53,8 +53,8 @@ use crate::pinned_actions::PinnedActions;
 use crate::pins_board::PinsBoard;
 use crate::previous_activity::{PreviousActivity, PreviousReading, UnsettledOperation};
 use crate::recovery::{self, RunState};
+use crate::self_concept::{IdentityClaim, SelfConceptBoard};
 use crate::skills_desktop::{SkillsDesktop, read_skills};
-use crate::soul::{IdentityClaim, SoulBoard};
 use crate::status_bar::StatusBar;
 use crate::store::{Admission, Environment, EnvironmentReader, TracePayload, WakeOrigin};
 use crate::terminal_app::{TERMINAL_APP_ID, TerminalAccess, TerminalApp};
@@ -682,7 +682,7 @@ pub struct SessionRequest<'a> {
 /// **处境链的类型**：由外到内——状态栏（活状态）→ 通知栏（快照）→ 组件区（纸条板）→
 /// **动作 pin** → 技能桌面 → 事件卡片 → **持有物**（自己约下的时刻）→ **机器处境**（这一段在
 /// 什么样的执行体里想：平台 + shell ＋ **可选的第三格**"由谁想"，2026-10-08）→ **主体是谁**
-/// （天性 ＋ 身份行，TASK_70）→ **上一段怎么了**（上一次活动有没有正常收场）→ 手动环境（起源那句）。
+/// （自识 ＋ 身份行，TASK_70）→ **上一段怎么了**（上一次活动有没有正常收场）→ 手动环境（起源那句）。
 ///
 /// 给它一个名字是因为它已经长到一行写不下（TASK_68 P3 加了一层，TASK_70 又加了一层，
 /// 持有物那一刀再加一层，机器处境那一刀再加一层），而且这个名字就是"这一层由什么组成"的
@@ -697,7 +697,9 @@ type SituationChain = StatusBar<
         PinsBoard<
             PinnedActions<
                 SkillsDesktop<
-                    EventCards<Holdings<Machine<SoulBoard<PreviousActivity<ActivityOrigin>>>>>,
+                    EventCards<
+                        Holdings<Machine<SelfConceptBoard<PreviousActivity<ActivityOrigin>>>>,
+                    >,
                 >,
             >,
         >,
@@ -717,8 +719,8 @@ struct OpeningMaterials {
     skills: Option<usize>,
     /// 主体自己约下的时刻（**持有物**；读失败 ⇒ `None` ⇒ 如实渲染 `unknown`，不冒充"没安排过"）。
     holdings: Option<Vec<crate::holdings::HoldingRow>>,
-    /// 天性（三态：缺席 / 在 / 读不出来）。
-    soul: crate::soul::Soul,
+    /// 自识（三态：缺席 / 在 / 读不出来）。
+    self_concept: crate::self_concept::SelfConcept,
     /// 出厂说明（四态）。**不进处境链**——它是系统消息的静态头，由会话自己携带。
     orientation: crate::orientation::Orientation,
     /// **开场纸条要说的两条事实**：有一段没有正常收场、以及历史上最后一次存储故障。
@@ -798,7 +800,7 @@ fn read_opening_materials(
                 .ok(),
             TerminalApp::held_material(environment_root).ok(),
         ),
-        soul: crate::soul::read(environment_root),
+        self_concept: crate::self_concept::read(environment_root),
         orientation: crate::orientation::read(environment_root),
         // **上一段有没有收场**：由装配点在读准入时顺手带回（不在这里再读一次）。
         previous,
@@ -1019,8 +1021,8 @@ fn situation_chain(
                                 Machine::new(
                                     declarations.model.clone(),
                                     declarations.reasoning_effort.clone(),
-                                    SoulBoard::new(
-                                        materials.soul.clone(),
+                                    SelfConceptBoard::new(
+                                        materials.self_concept.clone(),
                                         declarations.identity.clone(),
                                         // **上一段怎么了**：紧贴起源那句——一块说"这次为什么醒"，
                                         // 一块说"上一段怎么结束的"。两块主语不同，因此不合并。
@@ -1115,7 +1117,7 @@ fn push_action_line(text: &mut String, capability: &Capability) {
 /// **动作目录**（TASK_68 P2 立；**TASK_71 桌面 P0 改成分组**）：桌面的两层 ——
 /// **门之外那一组 ＋ 每一扇 App 的门**。
 ///
-/// - **门之外**那组 = OS 自有动作（不归任何 App：展开、看格式、钉/摘、写天性），组头写明这一点；
+/// - **门之外**那组 = OS 自有动作（不归任何 App：展开、看格式、钉/摘、写自识），组头写明这一点；
 /// - **每扇门**一行门牌（`【<App 标识>】<App 自己那句话>`），门后是它**声明**的动词；
 ///   门内那几行**保持既有格式**（`<标识> | <骨架>`，只是缩进两格）——这样"照目录念一行就能调"
 ///   这条既有读法不变，读它也的人与断言都不用换读法；
@@ -1260,7 +1262,7 @@ pub struct RunSession<'a> {
     /// **拍读一次**，此后 Run 内携带——每一次驱动都把它重新装订给模型
     /// （[`crate::core::ModelPort::declare_static_head`]）。
     ///
-    /// 为什么读在装配、装订在驱动：读盘是**装配期事实**（与天性、纸条板、技能桌面同款——两处
+    /// 为什么读在装配、装订在驱动：读盘是**装配期事实**（与自识、纸条板、技能桌面同款——两处
     /// 装配点都读），而"模型端要看得见"这件事只有在驱动那一刻才成立。两者之间**不重读**
     /// ⇒ 主体在 Run 里改这个文件**不影响本次的静态头**，下一次活动的开场才变。
     ///

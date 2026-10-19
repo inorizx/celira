@@ -71,14 +71,14 @@ const CAPABILITY_INSPECT: &str = "inspect_action";
 const CAPABILITY_PIN: &str = "pin_action";
 const CAPABILITY_UNPIN: &str = "unpin_action";
 
-/// 写下 / 改写主体的**天性**（TASK_70）：把自己写的那一篇自述落到 `<环境根>/soul`。
+/// 写下 / 改写主体的**自识**（TASK_70）：把自己写的那一篇自述落到 `<环境根>/self_concept`。
 ///
 /// 与 `pin_action` 一样是 **OS 自己的动词**（不归任何 App、常驻在场），改的也是主体的**自持物**；
-/// 不同的是它写的是"主体是谁"那一份——出生那天可以是空的，此后由自己写。
+/// 不同的是它写的是"主体是谁"那一份——可以是空的，此后由自己写。
 ///
 /// ⚠️ **一词一主**：它与 `pin_action`（动作的格位）、`notes_pin`（贴在墙上的纸条）是三件事，
-/// 所以名字带 `soul` 而不复用 `pin`——`pin_action` 管的是 `pinned_actions`，**不碰** soul。
-const CAPABILITY_SOUL_WRITE: &str = "write_soul";
+/// 所以名字带 `self_concept` 而不复用 `pin`——`pin_action` 管的是 `pinned_actions`，**不碰** self_concept。
+const CAPABILITY_SELF_CONCEPT_WRITE: &str = "write_self_concept";
 
 /// **OS 自己的动词**：它们不归任何 App，因此**免归属索引**（它们由本模块自己分派）。
 ///
@@ -89,12 +89,12 @@ const OS_OWNED_ACTIONS: [&str; 5] = [
     CAPABILITY_INSPECT,
     CAPABILITY_PIN,
     CAPABILITY_UNPIN,
-    CAPABILITY_SOUL_WRITE,
+    CAPABILITY_SELF_CONCEPT_WRITE,
 ];
 
 /// 看详情时要给的那一个参数名（动作标识）。
 const PARAM_ACTION: &str = "action";
-/// 正文参数名（`write_soul` 用它；与 notes 那两处的同名参数同一个词）。
+/// 正文参数名（`write_self_concept` 用它；与 notes 那两处的同名参数同一个词）。
 const PARAM_TEXT: &str = "text";
 
 /// "这个名字你还没看过格式"的稳定分类（TASK_69，裁决 5）。
@@ -329,7 +329,7 @@ pub struct AppDoor {
 
 /// **桌面**（TASK_71 桌面 P0）：主体醒来第一眼的两层结构 —— **门之外**那一组，以及每一扇门。
 ///
-/// "门之外"= 不归任何 App 的动作（OS 自有那五个：展开、看格式、钉/摘、写天性）。
+/// "门之外"= 不归任何 App 的动作（OS 自有那五个：展开、看格式、钉/摘、写自识）。
 pub struct Desktop {
     /// 不归任何 App 的动作标识（**一份来源**：`OS_OWNED_ACTIONS`）。
     pub system: Vec<String>,
@@ -433,7 +433,7 @@ impl MinimalOs {
         // "系统自己的动作来源不知道"这种荒谬读数。
         //
         // 五个都是 `system`：展开 / 看详情 / 钉 / 摘 交回的是**系统渲染的读数**（能力骨架、
-        // 格位现状），写天性交回的是**系统对这次动作的确认**——五段回执里都没有外来字。
+        // 格位现状），写自识交回的是**系统对这次动作的确认**——五段回执里都没有外来字。
         for action in OS_OWNED_ACTIONS {
             sources.declare_os_owned(action, SourceClass::System);
         }
@@ -922,16 +922,16 @@ impl RunScope<'_> {
                  （不报错）。与 `{CAPABILITY_PIN}` 一样，**下一次开场生效**。"
             )),
             Capability::new(
-                ActionId::new(CAPABILITY_SOUL_WRITE),
-                "写下 / 改写你的天性：那是你在每一段清醒期开头读到的「你是谁」",
-                vec![ParamSpec::new(PARAM_TEXT, true, "你的天性正文")],
+                ActionId::new(CAPABILITY_SELF_CONCEPT_WRITE),
+                "写下 / 改写你的自识：从你自己的经历里提炼出你觉得自己是个什么样的。还没提炼出来，就还没有——它不欠着",
+                vec![ParamSpec::new(PARAM_TEXT, true, "你的自识正文")],
             )
             .exempt_from_inspection()
             .with_details(
                 "写下之后，下一次开场它就常驻在你视野的开头（当下的这一段不会变）。\
-                 它与「标上 `pinned` 的笔记」和「钉住的动作格位」是三件事：那两样是你**后来自己弄的**，\
-                 这一样是**出生那天写就、此后由你自己改**的那一份。\
-                 空正文会被拒绝——「没有天性」应当根本没有这一份，而不是留一个空洞。",
+                 它与「标上 `pinned` 的笔记」和「钉住的动作格位」是三件事：那两样是**具体的东西**（一条笔记、一个格位），\
+                 这一样是**关于你自己的一篇**——你什么时候想写就写，没写过就没有。\
+                 空正文会被拒绝——「没有自识」应当根本没有这一份，而不是留一个空洞。",
             ),
         ])
     }
@@ -1203,10 +1203,10 @@ impl ActionPort for RunScope<'_> {
             return self.pin(action, false);
         }
 
-        // 写下 / 改写主体的**天性**（TASK_70）：写权归自己，改的是**自己的地盘**。
+        // 写下 / 改写主体的**自识**（TASK_70）：写权归自己，改的是**自己的地盘**。
         // 与上面两个同款：要写盘 ⇒ 需要这一次装配声明的环境根；没声明就 fail-closed。
-        if id == CAPABILITY_SOUL_WRITE {
-            return self.write_soul(action);
+        if id == CAPABILITY_SELF_CONCEPT_WRITE {
+            return self.write_self_concept(action);
         }
 
         // 能力目录与分派用的是**同一张归属索引**：行动标识只有一个拥有者。
@@ -1439,16 +1439,16 @@ impl RunScope<'_> {
         }
     }
 
-    /// 写下 / 改写主体的**天性**（TASK_70）：改的是**主体自己的地盘**。
+    /// 写下 / 改写主体的**自识**（TASK_70）：改的是**主体自己的地盘**。
     ///
     /// **本函数只做路由判定**（2026-10-08 收口）——两件都是"能不能调"：
     /// - **参数形状**：`require_params`；**空正文明确拒绝**（`invalid-argument`，与"缺参数 /
-    ///   参数形状不对"同族——天性不会被清成空白："没有天性"应当是根本没有那一份）；
+    ///   参数形状不对"同族——自识不会被清成空白："没有自识"应当是根本没有那一份）；
     /// - **有没有环境根**：没声明 ⇒ **fail-closed**，不写也不假装写了。
     ///
     /// ⚠ **域规则与回执措辞不在这里**：超限拒绝、不写不截断、那一块回执与那三段读数长什么样，
-    /// 全归 [`crate::soul::write_from_subject`]——那一份事实的**唯一写者**。
-    fn write_soul(&self, action: &Action) -> ActionOutcome {
+    /// 全归 [`crate::self_concept::write_from_subject`]——那一份事实的**唯一写者**。
+    fn write_self_concept(&self, action: &Action) -> ActionOutcome {
         if let Err(shape) = Self::require_params(action.params(), &[PARAM_TEXT]) {
             return shape.outcome();
         }
@@ -1459,7 +1459,7 @@ impl RunScope<'_> {
         let Some(root) = self.os.environment_root() else {
             return ActionOutcome::failure("no-environment-root");
         };
-        match crate::soul::write_from_subject(root, text) {
+        match crate::self_concept::write_from_subject(root, text) {
             Ok(block) => ActionOutcome::success(vec![block]),
             Err(failure) => match failure.reading() {
                 Some(reading) => {

@@ -12,7 +12,7 @@
 //!
 //! ## 它是 App，不是 OS 的动词
 //!
-//! 与 `pin_action` / `write_soul`（OS 自己的动词、常驻在场）不同，这一件是**普通 App**：
+//! 与 `pin_action` / `write_self_concept`（OS 自己的动词、常驻在场）不同，这一件是**普通 App**：
 //! 只有它被**展开**之后，三条动词才进场；没展开时动词根本不在场（那道门归 OS，本件不认识它、
 //! 也不重复它那套分类词的名字）。
 //! 拔掉它，全场照跑（没有 timer 的世界里，主体只是没法约时间）。
@@ -39,7 +39,7 @@
 //! - **不替主体判断**：`when` 落在过去也照收（到点就响、如实显示**原定时刻**）——迟到是事实，
 //!   **不漏报**是铁律；
 //! - **不声明写效应**（[`TimerApp`] 不实现 `declared_effects`）：自持物写**不需要授权**
-//!   （既有先例：`pin_action` / `write_soul` 的文档与 `notes` 的准入注释，`os.rs` 里那句
+//!   （既有先例：`pin_action` / `write_self_concept` 的文档与 `notes` 的准入注释，`os.rs` 里那句
 //!   「写自己的地盘」）。它与 notes 的 creation 授权族**无关**——那一族管的是**授权资料根**里的
 //!   写（`files_create`），Agent 的自持物不经过它。
 
@@ -342,7 +342,7 @@ impl TimerApp {
         Ok(consumed)
     }
 
-    /// 整表落盘（一行一条）。**就地重写**（与 `pinned_actions` / `soul` 同款：自持物是主体的，
+    /// 整表落盘（一行一条）。**就地重写**（与 `pinned_actions` / `self_concept` 同款：自持物是主体的，
     /// 不引入"临时文件 + 改名"的第二套写路径；写坏了的后果是"下一次读不出来 ⇒ 如实说 unknown"，
     /// 而不是静默丢一条）。
     fn write(&self, entries: &[Entry]) -> io::Result<()> {

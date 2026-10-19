@@ -39,7 +39,7 @@
 //! - OS 骨干的发现、展开与路由只认识 `app_contract` 这份窄契约：不导入历史读取实现或 `store`，
 //!   也不依赖任何 App 的内部。⚠ **这一条今天只对"发现 / 展开 / 路由"成立**：`MinimalOs::open` /
 //!   `with_history` 这两个便利构造入口直接命名文件视图组件 `FileView`，`MachineFailure` 还嵌着
-//!   `FileViewFailure`，`execute` 直调 `pinned_actions` / `soul`——**这条依赖没有守卫**，登记在
+//!   `FileViewFailure`，`execute` 直调 `pinned_actions` / `self_concept`——**这条依赖没有守卫**，登记在
 //!   `README.md` §4（"os 装了六类东西"那一行）；
 //! - App 认识这份契约，但不认识 OS 骨干；**App 之间不得互相引用实现**（共用机制走中立件）。
 //!   ⚠ **「App」的权威判据是「实现了 `AppPort`」**（今天九个：`file_view` ＋ im 三包 ＋
@@ -98,8 +98,8 @@ pub mod recovery;
 pub mod resident_lifetime;
 pub mod responses_adapter;
 pub mod sandbox;
+pub mod self_concept;
 pub mod skills_desktop;
-pub mod soul;
 pub mod status_bar;
 pub mod store;
 pub mod terminal_app;

@@ -62,7 +62,7 @@ fn without_a_grant_there_is_no_creation_capability_and_a_forged_request_is_refus
     assert_eq!(
         ids.len(),
         5,
-        "没展开之前只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写天性）: {ids:?}"
+        "没展开之前只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写自识）: {ids:?}"
     );
 
     // 展开之后仍然只有读侧两项：创建能力不存在（不是"存在但会被拒绝"）。

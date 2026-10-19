@@ -6,7 +6,7 @@
 //!    相符（Linux 真机就在本机跑；Windows 分支没有真机 ⇒ 由 `src/machine.rs` 的映射用例钉住）；
 //! 2. **每次开场都在**：同一环境里两段活动（两个 run）各自的 `run-start` 注入里都有它；
 //! 3. **快照不重摆**：一段活动里**恰好一条**，之后每一轮都不再出现（与纸条板、持有物同款）；
-//! 4. **位置**：紧贴「我是谁」外面一圈——`起源 → 上一段 → 天性 → 身份行 → **机器处境** → 持有物`；
+//! 4. **位置**：紧贴「我是谁」外面一圈——`起源 → 上一段 → 自识 → 身份行 → **机器处境** → 持有物`；
 //! 5. **不承诺能力**：那一行里没有动词名、没有「你可以……」；
 //! 6. **互不干扰**：既有那些块一块不少（本文件顺带把邻居逐块点名）。
 //!
@@ -23,7 +23,7 @@ use celira_agent::core::{
 };
 use celira_agent::foundation::{AgentId, OperationId, Record, RunId, SubjectEnding};
 use celira_agent::machine::{MACHINE_LABEL, Platform, reading_of};
-use celira_agent::soul::{IdentityClaim, SOUL_FILE};
+use celira_agent::self_concept::{IdentityClaim, SELF_CONCEPT_FILE};
 use celira_agent::store::{Environment, TracePayload};
 
 const AGENT: &str = "agent-machine";
@@ -834,7 +834,7 @@ fn the_opening_note_also_carries_the_last_storage_failure() {
 fn the_fact_sits_between_the_identity_and_the_holdings_without_displacing_anyone() {
     let dir = TempDir::new("position");
     let mut environment = dir.environment();
-    std::fs::write(dir.env_root().join(SOUL_FILE), "我是阿默。\n").expect("写下天性");
+    std::fs::write(dir.env_root().join(SELF_CONCEPT_FILE), "我是阿默。\n").expect("写下自识");
 
     let mut session = open(
         &dir,
@@ -852,15 +852,15 @@ fn the_fact_sits_between_the_identity_and_the_holdings_without_displacing_anyone
     let blocks = &openings[0].2;
     let names: Vec<&str> = blocks.iter().map(|(label, _)| label.as_str()).collect();
 
-    // 位置：`起源 → 天性 → 身份行 → **机器处境** → 持有物`。
+    // 位置：`起源 → 自识 → 身份行 → **机器处境** → 持有物`。
     let at = |label: &str| {
         names
             .iter()
             .position(|name| *name == label)
             .unwrap_or_else(|| panic!("{label} 应当在开场: {names:?}"))
     };
-    assert_eq!(at("soul"), at("activity-origin") + 1, "{names:?}");
-    assert_eq!(at("identity"), at("soul") + 1, "{names:?}");
+    assert_eq!(at("self_concept"), at("activity-origin") + 1, "{names:?}");
+    assert_eq!(at("identity"), at("self_concept") + 1, "{names:?}");
     assert_eq!(
         at(MACHINE_LABEL),
         at("identity") + 1,
@@ -875,7 +875,7 @@ fn the_fact_sits_between_the_identity_and_the_holdings_without_displacing_anyone
     // 互不干扰：既有那些块一块不少（逐块点名，缺一块就红）。
     for label in [
         "activity-origin",
-        "soul",
+        "self_concept",
         "identity",
         MACHINE_LABEL,
         "holdings",

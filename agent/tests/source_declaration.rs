@@ -161,7 +161,7 @@ fn the_os_own_verbs_are_declared_by_the_os_itself() {
         "inspect_action",
         "pin_action",
         "unpin_action",
-        "write_soul",
+        "write_self_concept",
     ] {
         assert_eq!(
             sources.class_if_assembled(action),

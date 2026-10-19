@@ -379,7 +379,7 @@ pub fn create_environment(
     let environment = Environment::create(environment_root, agent.clone())
         .map_err(ManualEntryError::Environment)?;
     // **出厂文档**：出厂说明（做系统消息的静态头）与手册（零注入，自己读）。
-    // 摆在环境根里、与天性同层；创建之后系统不再动它们（生命周期归主体）。
+    // 摆在环境根里、与自识同层；创建之后系统不再动它们（生命周期归主体）。
     crate::orientation::place(environment_root)
         .map_err(|_| ManualEntryError::Environment(crate::store::StoreError::Io))?;
     Ok(environment.agent().clone())

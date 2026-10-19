@@ -5,8 +5,8 @@
 //!   按活动机械地呈现为只读逻辑文件，仍然只用同一套 `files_list` / `files_read` 访问；
 //! - **派生单文件地址**：保留逻辑地址 `manual.md`，背后是**环境根下那一份手册**——主体在自己
 //!   地盘上的文件（可删可改），在这里只读地可读；那一份不在环境根里时这个地址**缺席**。
-//! - **派生单文件地址（第二例）**：保留逻辑地址 `soul`，背后是**主体自己写下的那一篇天性**
-//!   （2026-10-13 加：在那之前 `write_soul` 是全库唯一一个**写完读不回来**的自持物）。
+//! - **派生单文件地址（第二例）**：保留逻辑地址 `self_concept`，背后是**主体自己写下的那一篇自识**
+//!   （2026-10-13 加：在那之前 `write_self_concept` 是全库唯一一个**写完读不回来**的自持物）。
 //!
 //! 为什么经历是**派生视图**而不是真实文件：环境的内部记录（身份记录、两份追加存储、写锁、
 //! 暂停记录）是**环境自己**的事实，不是 Agent 的普通资料。这里只读经历记录、按段机械渲染，
@@ -22,17 +22,17 @@
 //! history/<活动>/                     ← 一个活动的分段目录
 //! history/<活动>/000.txt              ← 一段经历：机械事实行 + 按序号排列的记录
 //! manual.md                           ← 派生单文件地址：环境根下那一份手册（环境根里有才在）
-//! soul                                ← 派生单文件地址：主体自己写下的天性（写过了才有）
+//! self_concept                                ← 派生单文件地址：主体自己写下的自识（写过了才有）
 //! ```
 //!
 //! **三个派生地址是同一套模式的实例**，区别只在"背后是什么"：`history/` 背后是**一组记录**
-//! （按活动与段机械切分），`manual.md` / `soul` 背后各是**一份文件**（整份读，没有"某一段"这回事）。
+//! （按活动与段机械切分），`manual.md` / `self_concept` 背后各是**一份文件**（整份读，没有"某一段"这回事）。
 //! 它们共享同一件事：地址**不是真实路径**，存在与否由**装配那一刻的事实**定（给了环境根 ⇒ 经历
 //! 地址在；环境根下真有那一份 ⇒ 那个单文件地址在），列与读都走同一套通用动词，从外面看不出"这个
 //! 是派生的"。派生**不等于**环境内部记录可读：环境根永远不被当作普通文件根，只有白名单里的这几个
 //! 地址有派生投影。
 //!
-//! ⚠ **2026-10-13 记账**：单文件那一路现在是**两份同形实现**（`ManualView` / `SoulView`）。第三份
+//! ⚠ **2026-10-13 记账**：单文件那一路现在是**两份同形实现**（`ManualView` / `SelfConceptView`）。第三份
 //! 出现时就该收成一张表（地址 → 环境根下的文件名），**不提前收**：两份还不值得一层抽象。
 //!
 //! 分段是唯一的分页方式：每段最多 [`RECORDS_PER_SEGMENT`] 条记录，并且不会因为字节上限
@@ -78,19 +78,19 @@ pub const HISTORY_DIR: &str = "history";
 /// ——主体是靠只读视野认这份东西的，两处各写一个名字迟早分叉）。
 pub const MANUAL_ADDRESS: &str = crate::orientation::MANUAL_FILE;
 
-/// 派生**天性**保留的逻辑地址（**单文件**，不是目录）。
+/// 派生**自识**保留的逻辑地址（**单文件**，不是目录）。
 ///
 /// 与 [`MANUAL_ADDRESS`] 同一套模式、同一个理由，而它是**主体自己那一份**（手册是系统给主体读的，
-/// 天性是主体写给自己的）。地址是**逻辑地址**，不是资料目录里的文件——资料目录里同名条目会让装配
+/// 自识是主体写给自己的）。地址是**逻辑地址**，不是资料目录里的文件——资料目录里同名条目会让装配
 /// 被拒绝（见 [`FileViewFailure::ReservedAddressTaken`]），而不是被静默遮蔽。
 ///
-/// ⚠ **2026-10-13 加**：它补的是主体自己列的第②条缺陷——「soul 写完不能核实」。在那之前
-/// `write_soul` 是全库**唯一一个写完读不回来的自持物**（笔记有 `notes_read`、格位有 `pins_board`、
-/// 约的时刻有 `timer_list`，而天性只有"下一场开场再读"）。⇒ 给它一条**现读**的路（手册那条路的
+/// ⚠ **2026-10-13 加**：它补的是主体自己列的第②条缺陷——「self_concept 写完不能核实」。在那之前
+/// `write_self_concept` 是全库**唯一一个写完读不回来的自持物**（笔记有 `notes_read`、格位有 `pins_board`、
+/// 约的时刻有 `timer_list`，而自识只有"下一场开场再读"）。⇒ 给它一条**现读**的路（手册那条路的
 /// 同款：不缓存、每次现读 ⇒ 写完立刻读得到写进去的那一份，**同一段里**就能核实）。
 ///
-/// 名字不在这里另写一遍：它就是环境根下那一份的文件名（[`crate::soul::SOUL_FILE`]）。
-pub const SOUL_ADDRESS: &str = crate::soul::SOUL_FILE;
+/// 名字不在这里另写一遍：它就是环境根下那一份的文件名（[`crate::self_concept::SELF_CONCEPT_FILE`]）。
+pub const SELF_CONCEPT_ADDRESS: &str = crate::self_concept::SELF_CONCEPT_FILE;
 
 /// 一段派生经历最多包含多少条记录。
 pub const RECORDS_PER_SEGMENT: usize = 50;
@@ -104,7 +104,7 @@ const CAPABILITY_FIND_TEXT: &str = "files_grep";
 
 /// **主体的作品目录**的逻辑名：`<环境根>/projects`。
 ///
-/// 与 `history` / 手册 / 天性那三个保留地址不同：那三个是**别人的或派生的**，这一格是**主体自己的**
+/// 与 `history` / 手册 / 自识那三个保留地址不同：那三个是**别人的或派生的**，这一格是**主体自己的**
 /// ——所以它有自己的动词名（`projects_*`），而不是资料面里的第四个地址（归属由名字自答）。
 pub const WORKS_DIR: &str = "projects";
 
@@ -157,13 +157,13 @@ pub struct FileView {
     /// 派生手册：环境根下那一份（只读）。`None` = 环境根里**没有**那一份 ⇒ 地址**缺席**
     /// （不是错误，也不是"读不到"）。
     manual: Option<ManualView>,
-    /// 派生**天性**：环境根下那一份（只读）。`None` = 环境根里**没有**那一份 ⇒ 地址**缺席**
+    /// 派生**自识**：环境根下那一份（只读）。`None` = 环境根里**没有**那一份 ⇒ 地址**缺席**
     /// （不是错误，也不是"读不到"——主体还没写过，就是没有）。
-    soul: Option<SoulView>,
+    self_concept: Option<SelfConceptView>,
     /// **主体自己的作品面**（`<环境根>/projects`）：读 ＋ 写，**不需要任何授权**
     /// （判据：「自己的东西不用申请，别处的要」，与 `notes_*` 同族）。
     ///
-    /// ⚠ 它**不是**资料面的一个地址：那三个保留地址（`history` / 手册 / 天性）都是**别人的或
+    /// ⚠ 它**不是**资料面的一个地址：那三个保留地址（`history` / 手册 / 自识）都是**别人的或
     /// 派生的**，而这一格是**主体自己的**，连动词名都分开（`projects_*`）——归属由名字自答。
     works: WorksFace,
 }
@@ -211,23 +211,23 @@ fn manual_view(environment_root: &Path) -> Option<ManualView> {
     }
 }
 
-/// 派生天性的来源：**环境根下那一份文件**（只读）。
+/// 派生自识的来源：**环境根下那一份文件**（只读）。
 ///
-/// 与手册同一条纪律：不复制正文、不缓存——每次 `files_read` 都现读那一份，因此**刚写下的天性
+/// 与手册同一条纪律：不复制正文、不缓存——每次 `files_read` 都现读那一份，因此**刚写下的自识
 /// 同一段里立刻读得到**（"写完能不能核实"这条判据就落在这里）。
 #[derive(Debug)]
-struct SoulView {
+struct SelfConceptView {
     path: PathBuf,
 }
 
-/// 装配期拍一次：**环境根里有没有**那一份天性（`<环境根>/soul`）。
+/// 装配期拍一次：**环境根里有没有**那一份自识（`<环境根>/self_concept`）。
 ///
 /// 判据与手册同款（`symlink_metadata`，**不跟随链接**）：在不在是**名字**问题，读不通的那几种
-/// （权限、坏数据、那个名字底下不是普通文件）在读取那一刻如实报出来，绝不在这里压成"主体没有天性"。
-fn soul_view(environment_root: &Path) -> Option<SoulView> {
-    let path = environment_root.join(SOUL_ADDRESS);
+/// （权限、坏数据、那个名字底下不是普通文件）在读取那一刻如实报出来，绝不在这里压成"主体没有自识"。
+fn self_concept_view(environment_root: &Path) -> Option<SelfConceptView> {
+    let path = environment_root.join(SELF_CONCEPT_ADDRESS);
     match fs::symlink_metadata(&path) {
-        Ok(_) => Some(SoulView { path }),
+        Ok(_) => Some(SelfConceptView { path }),
         Err(_) => None,
     }
 }
@@ -262,7 +262,7 @@ impl FileView {
             materials: FileApp::open(root)?,
             history: None,
             manual: None,
-            soul: None,
+            self_concept: None,
             works: WorksFace::Absent,
         })
     }
@@ -307,16 +307,18 @@ impl FileView {
         if fs::symlink_metadata(materials_root.join(HISTORY_DIR)).is_ok() {
             return Err(FileViewFailure::ReservedAddressTaken);
         }
-        // 手册的地址由**环境根里那一份在不在**决定（装配期拍一次，与天性 / 动作 pin / 技能桌面
+        // 手册的地址由**环境根里那一份在不在**决定（装配期拍一次，与自识 / 动作 pin / 技能桌面
         // 同族）：在 ⇒ 资料面里同名条目会让这个地址无法被唯一解释，拒绝装配；不在 ⇒ 地址压根
         // 不存在，资料面里有同名文件也无关。
         let manual = manual_view(&environment_root);
         if manual.is_some() && fs::symlink_metadata(materials_root.join(MANUAL_ADDRESS)).is_ok() {
             return Err(FileViewFailure::ReservedAddressTaken);
         }
-        // 天性的地址同理（也由"环境根里那一份在不在"决定），只是那一份**主体自己写**。
-        let soul = soul_view(&environment_root);
-        if soul.is_some() && fs::symlink_metadata(materials_root.join(SOUL_ADDRESS)).is_ok() {
+        // 自识的地址同理（也由"环境根里那一份在不在"决定），只是那一份**主体自己写**。
+        let self_concept = self_concept_view(&environment_root);
+        if self_concept.is_some()
+            && fs::symlink_metadata(materials_root.join(SELF_CONCEPT_ADDRESS)).is_ok()
+        {
             return Err(FileViewFailure::ReservedAddressTaken);
         }
         // 作品面：**主体自己的东西**，不需要任何授权，也不需要任何声明——在每一支上都在场。
@@ -341,7 +343,7 @@ impl FileView {
                 root: environment_root,
             }),
             manual,
-            soul,
+            self_concept,
             works,
         })
     }
@@ -368,7 +370,7 @@ impl FileView {
                 "读数：首行 `more` 是机械读数——`none` = 没有更多，`after <名字>` = 下次用这个名字\
                  接着列。上限：一次最多 100 项。边界：`after` 是**名字**不是下标；它不属于\
                  这个目录时明确失败（不猜近似名）。`history`（这个身份环境已确认的经历）与\
-                 `manual.md`（你家里那份手册）与 `soul`（你自己的天性）是**保留的逻辑地址**，\
+                 `manual.md`（你家里那份手册）与 `self_concept`（你自己的自识）是**保留的逻辑地址**，\
                  不是任务完成判定。",
             ),
             Capability::new(
@@ -389,8 +391,8 @@ impl FileView {
                  **派生经历**：`history/<活动>/<段>.txt` 按段读，段间不重叠、不截断；段首的 `state` 只\
                  说明存储结构（开始/结束事实/封存），不是任务完成判定；经历段**自带分段**，对它给窗口\
                  参数会明确失败。**派生手册**：`manual.md` 是**一份文件**（你家里那份手册的正文），\
-                 整份读、没有分段，对它给窗口参数同样明确失败。**派生天性**：`soul` 是你自己写下的\
-                 那一篇（`write_soul` 写的就是它）——同一条路整份读，**写完立刻读得到**，因此写完\
+                 整份读、没有分段，对它给窗口参数同样明确失败。**派生自识**：`self_concept` 是你自己写下的\
+                 那一篇（`write_self_concept` 写的就是它）——同一条路整份读，**写完立刻读得到**，因此写完\
                  想核实就再读它一次。若文件长、先把这一段的长度读成小一点更省事。",
             ),
             Capability::new(
@@ -410,8 +412,8 @@ impl FileView {
                  命中位置（`name` 或 `line=N`）+ 那一段片段（片段最多 120 字节，超长以 `…` 截断\
                  ——正文仍在盘上，要用就 `files_read`）。结果按路径名排序，同一条材料最多出现一次。\
                  **上限**：最多扫 500 个文件、最多返回 100 条候选；触到任一上限时首行**如实报截断**。\
-                 **不搜保留地址**（`history/`、`manual.md` 与 `soul`）：经历有自己的分段结构、手册与\
-                 天性各是一份文件，三者都用 `files_list` + `files_read` 看。",
+                 **不搜保留地址**（`history/`、`manual.md` 与 `self_concept`）：经历有自己的分段结构、手册与\
+                 自识各是一份文件，三者都用 `files_list` + `files_read` 看。",
             ),
         ])
     }
@@ -575,9 +577,9 @@ impl FileView {
         names.first().map(String::as_str) == Some(MANUAL_ADDRESS)
     }
 
-    /// 天性那个地址（单文件，与手册同款）。
-    fn is_soul_address(names: &[String]) -> bool {
-        names.first().map(String::as_str) == Some(SOUL_ADDRESS)
+    /// 自识那个地址（单文件，与手册同款）。
+    fn is_self_concept_address(names: &[String]) -> bool {
+        names.first().map(String::as_str) == Some(SELF_CONCEPT_ADDRESS)
     }
 
     /// 列出派生经历目录。
@@ -797,16 +799,16 @@ impl FileView {
                 None => ActionOutcome::failure(FailureClass::NotFound.as_str()),
             };
         }
-        if FileView::is_soul_address(&names) {
-            // 天性也是**单文件**：列它是类型不对；地址不在（主体还没写过）时是"没有这个地址"，
+        if FileView::is_self_concept_address(&names) {
+            // 自识也是**单文件**：列它是类型不对；地址不在（主体还没写过）时是"没有这个地址"，
             // 不是"空目录"。
-            return match self.soul {
+            return match self.self_concept {
                 Some(_) => ActionOutcome::failure(FailureClass::WrongKind.as_str()),
                 None => ActionOutcome::failure(FailureClass::NotFound.as_str()),
             };
         }
         if names.is_empty()
-            && (self.history.is_some() || self.manual.is_some() || self.soul.is_some())
+            && (self.history.is_some() || self.manual.is_some() || self.self_concept.is_some())
         {
             // 视图根的合并列表：真实条目 + 保留的逻辑地址（哪个在就摆哪个）。
             return match self.materials.entries_of("") {
@@ -817,8 +819,8 @@ impl FileView {
                     if self.manual.is_some() {
                         items.push((MANUAL_ADDRESS.to_string(), "file"));
                     }
-                    if self.soul.is_some() {
-                        items.push((SOUL_ADDRESS.to_string(), "file"));
+                    if self.self_concept.is_some() {
+                        items.push((SELF_CONCEPT_ADDRESS.to_string(), "file"));
                     }
                     items.sort();
                     match file_app::render_listing_page(&items, after) {
@@ -883,9 +885,9 @@ impl FileView {
             }
             return self.read_manual();
         }
-        if FileView::is_soul_address(&names) {
-            if self.soul.is_none() {
-                // 地址不在（主体还没写过天性）：任何深度都是"没有这个路径"。
+        if FileView::is_self_concept_address(&names) {
+            if self.self_concept.is_none() {
+                // 地址不在（主体还没写过自识）：任何深度都是"没有这个路径"。
                 return ActionOutcome::failure(FailureClass::NotFound.as_str());
             }
             if names.len() > 1 {
@@ -895,23 +897,23 @@ impl FileView {
             if params.get(PARAM_OFFSET).is_some() || params.get(PARAM_LIMIT).is_some() {
                 return ActionOutcome::failure(FailureClass::InvalidArgument.as_str());
             }
-            return self.read_soul();
+            return self.read_self_concept();
         }
         self.materials.execute(agent, operation, action)
     }
 
-    /// 读天性的正文（**整份**，现读）。
+    /// 读自识的正文（**整份**，现读）。
     ///
     /// 与手册、与资料面的整份读取**共用同一条实现**（[`file_app::read_text_file`]）：同一个动词在
     /// 三个地址上不许有三套脾气。
     ///
-    /// ⚠ **它就是"写完能不能核实"那条判据的落点**（2026-10-13）：`write_soul` 落地之后，主体
-    /// 在**同一段**里 `files_read("soul")` 就能读到刚写进去的那一份——不缓存、每次现读。
-    fn read_soul(&self) -> ActionOutcome {
-        let Some(soul) = &self.soul else {
+    /// ⚠ **它就是"写完能不能核实"那条判据的落点**（2026-10-13）：`write_self_concept` 落地之后，主体
+    /// 在**同一段**里 `files_read("self_concept")` 就能读到刚写进去的那一份——不缓存、每次现读。
+    fn read_self_concept(&self) -> ActionOutcome {
+        let Some(self_concept) = &self.self_concept else {
             return ActionOutcome::failure(FailureClass::NotFound.as_str());
         };
-        match file_app::read_text_file(&soul.path) {
+        match file_app::read_text_file(&self_concept.path) {
             Ok(text) => ActionOutcome::success(vec![ContentBlock::new(CAPABILITY_READ_TEXT, text)]),
             Err(class) => ActionOutcome::failure(class.as_str()),
         }
@@ -964,8 +966,8 @@ impl FileView {
                         None => ActionOutcome::failure(FailureClass::NotFound.as_str()),
                     };
                 }
-                Ok(names) if FileView::is_soul_address(&names) => {
-                    return match self.soul {
+                Ok(names) if FileView::is_self_concept_address(&names) => {
+                    return match self.self_concept {
                         Some(_) => ActionOutcome::failure(FailureClass::InvalidArgument.as_str()),
                         None => ActionOutcome::failure(FailureClass::NotFound.as_str()),
                     };

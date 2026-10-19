@@ -208,12 +208,12 @@ fn two_apps_from_one_contract_expand_independently() {
     let mut expansion = RunExpansion::new(agent.clone(), run.clone());
     let mut scope = os.scope(&mut expansion);
 
-    // 入口只有 OS 自己的那几项（展开 / 看详情 / 钉 / 摘 / 写天性）：App 的内部能力都不在目录里。
+    // 入口只有 OS 自己的那几项（展开 / 看详情 / 钉 / 摘 / 写自识）：App 的内部能力都不在目录里。
     let entry = scope.capabilities(&agent, &run);
     assert_eq!(
         entry.len(),
         5,
-        "入口只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写天性）"
+        "入口只有 OS 自己的五项能力（展开 / 看详情 / 钉 / 摘 / 写自识）"
     );
     let expand_capability = entry.find(&ActionId::new("open_app")).expect("展开在场");
     let details = expand_capability.details().to_string();
@@ -489,7 +489,7 @@ fn entry_and_expansion_never_dispatch_an_app() {
                 "inspect_action".to_string(),
                 "pin_action".to_string(),
                 "unpin_action".to_string(),
-                "write_soul".to_string(),
+                "write_self_concept".to_string(),
             ]
         );
         assert_eq!(visits.get(), 0);

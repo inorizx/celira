@@ -10,7 +10,7 @@
 //! ## 这一份文件证明什么
 //!
 //! 证明的是**生产装配路径**上读数真的落进注入文本，不是"助手函数自己好用"：每一处**能真的
-//! 超限**的来源，都用它自己的**真实入口**喂一个超限输入（写主体的天性文件、声明一段巨长的起源、
+//! 超限**的来源，都用它自己的**真实入口**喂一个超限输入（写主体的自识文件、声明一段巨长的起源、
 //! 声明一份巨长的投影、往事件卡片细胞里塞一个巨长的房名、把宿主输入顶到批次上限），
 //! 然后读模型看得到的那一段。
 //!
@@ -33,7 +33,7 @@ use celira_agent::core::{
 };
 use celira_agent::event_cards::EventCardsReport;
 use celira_agent::foundation::{AgentId, RunId};
-use celira_agent::soul::SOUL_FILE;
+use celira_agent::self_concept::SELF_CONCEPT_FILE;
 use celira_agent::status_bar::STATUS_BAR_LABEL;
 use celira_agent::store::{Environment, WakeOrigin};
 
@@ -90,10 +90,10 @@ impl TempDir {
         Environment::create(&self.env_root(), AgentId::new(AGENT)).expect("建立身份环境")
     }
 
-    /// 往主体的地盘写一份天性（**自己的入口**：`<环境根>/soul`）。
-    fn write_soul(&self, text: &str) {
+    /// 往主体的地盘写一份自识（**自己的入口**：`<环境根>/self_concept`）。
+    fn write_self_concept(&self, text: &str) {
         std::fs::create_dir_all(self.env_root()).expect("建环境根");
-        std::fs::write(self.env_root().join(SOUL_FILE), text).expect("写天性");
+        std::fs::write(self.env_root().join(SELF_CONCEPT_FILE), text).expect("写自识");
     }
 }
 
@@ -222,34 +222,37 @@ fn reading_upper_bound(label: &str) -> usize {
 // 一、能真的超限的来源：走它们自己的真实入口，读注入文本
 // ---------------------------------------------------------------------------
 
-/// **天性**（自己写的、逐字整份）是这一批里唯一可能真超 64 KiB 的那一块：主体写多少就是多少。
+/// **自识**（自己写的、逐字整份）是这一批里唯一可能真超 64 KiB 的那一块：主体写多少就是多少。
 ///
-/// 它必须**留名**：超限即天性静默消失，是这一刀里最贵的一种丢法。
+/// 它必须**留名**：超限即自识静默消失，是这一刀里最贵的一种丢法。
 #[test]
-fn an_own_soul_over_the_batch_limit_leaves_a_reading_instead_of_vanishing() {
-    const SOUL_BYTES: usize = 70_000;
-    let dir = TempDir::new("soul");
-    // ⚠ **顺序即事实**（2026-10-06）：环境先存在，天性才写得进去——`create` 只在一个空位置上创建
+fn an_own_self_concept_over_the_batch_limit_leaves_a_reading_instead_of_vanishing() {
+    const SELF_CONCEPT_BYTES: usize = 70_000;
+    let dir = TempDir::new("self_concept");
+    // ⚠ **顺序即事实**（2026-10-06）：环境先存在，自识才写得进去——`create` 只在一个空位置上创建
     // （身份不在却有别的东西 ⇒ 明确拒绝，见 README §3.3）。
     let mut environment = dir.environment();
-    dir.write_soul(&"s".repeat(SOUL_BYTES));
+    dir.write_self_concept(&"s".repeat(SELF_CONCEPT_BYTES));
 
     let mut session = session(&dir, &mut environment, RunOrigin::manual(), 2);
     drive_waiting(&mut session);
 
-    let (text, bytes) = block(&session, "soul");
+    let (text, bytes) = block(&session, "self_concept");
     assert_eq!(
         text,
-        format!("{NOT_DELIVERED}（原始 {} B）", "soul".len() + SOUL_BYTES),
-        "读数要写清那份天性原本多大"
+        format!(
+            "{NOT_DELIVERED}（原始 {} B）",
+            "self_concept".len() + SELF_CONCEPT_BYTES
+        ),
+        "读数要写清那份自识原本多大"
     );
-    assert_eq!(bytes, "soul".len() + text.len());
+    assert_eq!(bytes, "self_concept".len() + text.len());
 
-    // 也不许换个地方"半给"：整份天性一个字节都没进视野。
+    // 也不许换个地方"半给"：整份自识一个字节都没进视野。
     for (label, body, _) in injected_blocks(&session) {
         assert!(
-            body.len() < SOUL_BYTES,
-            "{label} 里出现了超限天性的一部分（长度 {}）",
+            body.len() < SELF_CONCEPT_BYTES,
+            "{label} 里出现了超限自识的一部分（长度 {}）",
             body.len()
         );
     }
@@ -265,7 +268,7 @@ fn an_own_soul_over_the_batch_limit_leaves_a_reading_instead_of_vanishing() {
 ///
 /// 换句话说：刀三之前，起源是宿主任意声明的一句字符串，所以"巨长的起源被如实报成读数"
 /// 是一条要被证明的纪律；刀三之后这句话**构造不出来**——本条的判据从"超限留名"改成
-/// "派生正文原样落地"。超限留名那条纪律没有被削弱：它由同文件里通知栏 / 事件卡片 / 天性
+/// "派生正文原样落地"。超限留名那条纪律没有被削弱：它由同文件里通知栏 / 事件卡片 / 自识
 /// 三条**仍能造出超限内容**的用例继续守着。
 #[test]
 fn a_vocabulary_origin_always_lands_its_derived_text() {
@@ -571,19 +574,23 @@ fn combining_names_every_label_of_the_half_that_yielded() {
     )])
     .expect("在上限内");
     let own = ContentBatch::of(vec![
-        ContentBlock::new("soul", "s".repeat(20_000)),
+        ContentBlock::new("self_concept", "s".repeat(20_000)),
         ContentBlock::new("identity", "i".repeat(20_000)),
     ])
     .expect("在上限内");
 
     let combined = combine(other, own);
     let notice = combined.blocks().last().expect("有读数");
-    assert_eq!(notice.label(), "soul+identity", "让位的两块都要留名");
+    assert_eq!(
+        notice.label(),
+        "self_concept+identity",
+        "让位的两块都要留名"
+    );
     assert_eq!(
         notice.text(),
         format!(
             "{NOT_DELIVERED}（原始 {} B）",
-            "soul".len() + 20_000 + "identity".len() + 20_000
+            "self_concept".len() + 20_000 + "identity".len() + 20_000
         )
     );
 }

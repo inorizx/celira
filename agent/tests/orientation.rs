@@ -10,7 +10,7 @@
 //!
 //! 钉住的东西：
 //!
-//! 1. 创建产出出厂文档（出厂说明 ＋ 手册），且**没有替主体写天性**（soul 由自己写）；
+//! 1. 创建产出出厂文档（出厂说明 ＋ 手册），且**没有替主体写自识**（self_concept 由自己写）；
 //! 2. 有出厂说明 ⇒ 两条 wire（chat / Responses）最后一条消息都是**两段式**，静态头在机械事实
 //!    **之前**，两段之间只有一个换行；
 //! 3. **没有**出厂说明（或它是空的、被删了）⇒ 那一条消息**逐字节就是机械事实**——与今天相同；
@@ -162,14 +162,14 @@ fn every_receipt_source_word_is_explained_in_the_manual() {
     );
 }
 
-/// 创建那一次把环境根里的**两份出厂文档**摆上，而且**没有替主体写天性**。
+/// 创建那一次把环境根里的**两份出厂文档**摆上，而且**没有替主体写自识**。
 ///
-/// ⚠️ 任务书写的是"创建时落三个文件：soul（既有）＋ orientation ＋ manual"，而 `soul` 那一项
-/// **在今天的产品里就是不产出的**：主人 2026-09-21 裁决「写天性归自己」，`soul::incept` 的
-/// 调用点封闭在 `os.rs`（守卫 `the_soul_can_only_be_written_by_her_own_verb`）。因此这里如实断言：
-/// **出厂两份落盘、天性一个字都不替主体写**——`soul` 的位置由"主体第一次自己写"填上。
+/// ⚠️ 任务书写的是"创建时落三个文件：self_concept（既有）＋ orientation ＋ manual"，而 `self_concept` 那一项
+/// **在今天的产品里就是不产出的**：主人 2026-09-21 裁决「写自识归自己」，`self_concept::incept` 的
+/// 调用点封闭在 `os.rs`（守卫 `the_self_concept_can_only_be_written_by_her_own_verb`）。因此这里如实断言：
+/// **出厂两份落盘、自识一个字都不替主体写**——`self_concept` 的位置由"主体第一次自己写"填上。
 #[test]
-fn the_birth_lays_down_the_two_factory_documents_and_writes_no_soul_for_her() {
+fn the_birth_lays_down_the_two_factory_documents_and_writes_no_self_concept_for_her() {
     let temp = TempDir::new("birth");
     let root = temp.env_root();
 
@@ -198,8 +198,8 @@ fn the_birth_lays_down_the_two_factory_documents_and_writes_no_soul_for_her() {
         "创建仍然写户口（既有语义不变）"
     );
     assert!(
-        !root.join("soul").exists(),
-        "创建**不替主体写天性**：soul 由自己写（主人 2026-09-21 裁决）"
+        !root.join("self_concept").exists(),
+        "创建**不替主体写自识**：self_concept 由自己写（主人 2026-09-21 裁决）"
     );
 }
 
@@ -507,7 +507,7 @@ fn an_empty_or_removed_document_is_a_missing_head_and_not_an_error() {
 fn an_unreadable_document_is_reported_instead_of_silently_skipped() {
     let temp = TempDir::new("unreadable");
     let (root, materials) = home_with_documents(&temp);
-    // 用目录占住那个名字：读它必然失败（与天性那条用例同一个造法）。
+    // 用目录占住那个名字：读它必然失败（与自识那条用例同一个造法）。
     std::fs::remove_file(root.join(ORIENTATION_FILE)).expect("先摘掉那一份");
     std::fs::create_dir(root.join(ORIENTATION_FILE)).expect("用目录占住那个名字");
     let run = "run-unreadable";
