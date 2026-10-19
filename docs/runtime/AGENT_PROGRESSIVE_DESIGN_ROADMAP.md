@@ -148,7 +148,7 @@ RAG（语义检索）在当前宪法判据下已否（主人裁决记录：系�
 
 ## 8. 阶段七：Handoff 与上下文续接
 
-Handoff 是独立的临时注入内容，不属于核心；工程上经开场插槽进入 Run（**交接那一份**是未完结事项快照的组成锚点——名字与形状见 `AGENT_VOCABULARY.md` §9「交接（handoff）」与 `RUNTIME_FOUNDATION_DESIGN.md` §B4）。它只在当前 Run 因上下文边界需要续接时使用：
+Handoff 是独立的临时注入内容，不属于核心；工程上经开场插槽进入 Run（**交接那一份**是未完结事项快照的组成锚点——名字与形状见 `AGENT_VOCABULARY.md` §9「交接（handoff）」，交付生命周期与失败矩阵见 `agent/README.md` §3.22）。它只在当前 Run 因上下文边界需要续接时使用：
 
 ```text
 Run A 接近边界
@@ -175,7 +175,7 @@ Run A 接近边界
 
 ## 10. 交接给后续负责人
 
-后续负责人先读：宪法（`docs/constitution/AGENT_CONTINUITY_CONSTITUTION.md`）、词表（`AGENT_VOCABULARY.md`）、原则（`AGENT_CORE_PRINCIPLES.md`）、分层（`RUNTIME_CORE_AND_LAYERING.md`）、地基设计（`RUNTIME_FOUNDATION_DESIGN.md`）、本文档。
+后续负责人先读：宪法（`docs/constitution/AGENT_CONTINUITY_CONSTITUTION.md`）、词表（`AGENT_VOCABULARY.md`）、原则（`AGENT_CORE_PRINCIPLES.md`）、终局正文（`terminal/README.md`）、本文档。
 
 然后只选择一个真实、窄的下一步进行验证。不要把本文当成一次性实现清单，也不要在没有新的产品判断前修改权威契约。
 

@@ -1,8 +1,8 @@
-// 文档诚实声明守卫 —— `agent/README.md` 的 §3.x 改写不许删掉"如实登记"。
+// 文档诚实声明守卫 —— `agent/README.md` 的改写不许删掉"如实登记"。
 //
-// 填哪个洞（2026-10-17 立）
+// 填哪个洞（2026-10-17 立；2026-10-19 改成**全文棘轮**）
 // ---------------------------------------------------------------------------
-// §3.x 正在被逐节改写：把"这一刀的经过"从"当前事实"里剥掉。这件事的判据是
+// 这份文档正在被**按主题重组**：把按落地顺序记的节归并进按主题记的节。这件事的判据是
 // 「**能压的是过程，压不动的是事实**」——而过程与事实在正文里**长得一模一样**，
 // 唯一的机器可辨差别是：**事实里有一部分是"承认自己不知道"的句子**
 // （未覆盖 / 未裁 / 如实登记 / 触发条件 / 不假装 / 今天不可达 …）。
@@ -15,25 +15,31 @@
 // ---------------------------------------------------------------------------
 // **拿"已提交的版本"当基线，拿"工作树"当被测**：
 //
-//   硬判据（红）：某节在基线里出现过的**标记种类**，在工作树里**一个都不许少**。
+//   硬判据（红）：基线里出现过的**标记种类**，在工作树里**一个都不许少**（按**全文**数）。
 //                 少一种 ⇒ 那一类诚实声明被整类删掉了。
-//   软读数（只报）：同一节的**标记条数**减少 ⇒ 打印出来给人看，**不判红**。
+//   软读数（只报）：同一标记的**总条数**减少 ⇒ 打印出来给人看，**不判红**。
 //                 （合并两句同义声明是合法的；只有"整类消失"才一定是删事实。）
 //
-// 为什么用 HEAD 当基线而不是快照文件：**"改 §3.x 之前先跑它"** 是它的使用姿势——
+// ⚠ **为什么从"逐节"改成"全文"**（2026-10-19，这一条是设计，别改回去）：
+// 逐节比对**必然挡住重组**——归并两个节、删一个并入的壳节，在逐节视角下都长得像
+// "整节消失"或"某一类标记变少"。而重组正是这份文档唯一能真正变短的路径
+// （实测：逐节压缩一节 115 行只省 12 行）。⇒ 结构可以动，**诚实声明一条都不许丢**。
+// 同一条判据 `check-doc-current.mjs` 早就写着（"为什么是总数棘轮，不是逐节棘轮"）。
+//
+// 为什么用 HEAD 当基线而不是快照文件：**"改这份文档之前先跑它"** 是它的使用姿势——
 // 基线永远是"上一次提交的样子"，不需要人维护第二份副本。
-// ⇒ **它的触发条件**：改了 `agent/README.md` 的 §3.x 正文 ⇒ 跑它（`npm run check:docs` 一起跑）。
+// ⇒ **它的触发条件**：改了 `agent/README.md` 正文 ⇒ 跑它（`npm run check:docs` 一起跑）。
 //
 // 量得到 / 量不到（如实登记，不假装）
 // ---------------------------------------------------------------------------
-// 量得到：**整类诚实声明被删**（硬判据）；**标记条数下降**（软读数）。
+// 量得到：**整类诚实声明被删**（硬判据）；**标记总条数下降**（软读数）。
 // 量不到：① **不带标记的事实被删**（例如"某个上限是 600 秒"这类，正文里没有标记词）
 //         ——这一格**只有人核**，守卫一个字都帮不上；
 //         ② **改写把话说反了**（标记还在、意思反了）；
-//         ③ **新增的节**（基线里没有的节不查——没有可比对象）。
+//         ③ **搬到别的文件去了**（那可能是对的搬家，也可能是静默删除——只有人核）。
 // ⚠ 所以它**不是"改写合格"的证明**，只是"没把承认无知的句子删光"的下界。
 //
-// 退出码：0 = 通过 · 1 = 有节少了一整类标记
+// 退出码：0 = 通过 · 1 = 有整类标记消失
 //
 // 用法：node scripts/check-doc-honesty.mjs
 
@@ -60,73 +66,41 @@ const MARKERS = [
   ['缺什么', '负空间：这一格明确没有什么'],
 ];
 
-/**
- * 从全文里切出 §3.x 各节的正文（`### N.NN …` 到下一个 `##`/`###` 之前）。
- *
- * ⚠ **键归一掉字母后缀、并把同一族的正文并起来**（`3.93` 与 `3.93a` 都算 `3.93`）。
- * 两个理由，都是实测踩出来的：
- *   ① **历史上有过重复节号**（`3.93` / `3.94` / `3.95` 各出现过两轮），按号做键会让
- *      **后一节静默覆盖前一节** ⇒ 拿两个不同的节互比，报出假阳性；
- *   ② 重复号后来按仓里的先例加了后缀（`3.93a`）**修复**，而基线里没有后缀 ⇒
- *      不归一就会把"同一节改了名"读成"整节消失"。
- * ⇒ 归一后的判据是「**这一族（同号及其后缀）的诚实声明不许整类变少**」，对改名免疫。
- */
-function sections(text) {
-  const lines = text.split('\n');
-  const heads = [];
-  lines.forEach((line, index) => {
-    const m = /^#{2,3} (\d+(?:\.\d+)*[a-z]?)\.?\s/.exec(line);
-    if (m) heads.push({ index, num: m[1] });
-  });
-  const out = new Map();
-  heads.forEach((head, i) => {
-    if (!head.num.startsWith('3.')) return;
-    const key = head.num.replace(/[a-z]$/, '');
-    const end = i + 1 < heads.length ? heads[i + 1].index - 1 : lines.length - 1;
-    const body = lines.slice(head.index, end + 1).join('\n');
-    out.set(key, out.has(key) ? `${out.get(key)}\n${body}` : body);
-  });
-  return out;
-}
-
-/** 一节里每种标记出现几次。 */
-function tally(body) {
+/** 全份文档里每种标记出现几次。 */
+function tally(text) {
   const counts = new Map();
   for (const [word] of MARKERS) {
-    const hits = body.split(word).length - 1;
+    const hits = text.split(word).length - 1;
     if (hits > 0) counts.set(word, hits);
   }
   return counts;
 }
 
-/** 比较基线与被测，返回 {missing, shrank}。 */
+/**
+ * 比较基线与被测，返回 `{missing, shrank}`。
+ *
+ * **按全文数，不按节数**（见文件头「为什么从逐节改成全文」）：结构（分节、标题、顺序）
+ * 可以任意动，只要**每一种曾在基线里出现过的诚实标记，在工作树里至少还剩一处**。
+ * 导出签名 `compare(baselineText, currentText)` 保持字典调用方不变。
+ */
 export function compare(baselineText, currentText) {
-  const base = sections(baselineText);
-  const cur = sections(currentText);
+  const was = tally(baselineText);
+  const is = tally(currentText);
   const missing = [];
   const shrank = [];
-  for (const [num, body] of base) {
-    const now = cur.get(num);
-    if (now === undefined) {
-      missing.push({ num, word: '(整节)', was: 1, is: 0 });
-      continue;
-    }
-    const was = tally(body);
-    const is = tally(now);
-    for (const [word, count] of was) {
-      const got = is.get(word) ?? 0;
-      if (got === 0) missing.push({ num, word, was: count, is: 0 });
-      else if (got < count) shrank.push({ num, word, was: count, is: got });
-    }
+  for (const [word, count] of was) {
+    const got = is.get(word) ?? 0;
+    if (got === 0) missing.push({ word, was: count, is: 0 });
+    else if (got < count) shrank.push({ word, was: count, is: got });
   }
-  return { missing, shrank, baseSections: base.size, curSections: cur.size };
+  return { missing, shrank };
 }
 
 function readBaseline() {
   return execFileSync('git', ['show', `HEAD:${DOC}`], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
-/** 植入违规：把某一节里某个标记整类删掉 ⇒ 必须被抓住。 */
+/** 植入违规：把某类标记整类删掉 ⇒ 必须被抓住。 */
 function selfCheck() {
   const sample = [
     '### 3.1 甲',
@@ -144,36 +118,52 @@ function selfCheck() {
   const ok =
     clean.missing.length === 0 &&
     caught.missing.length === 1 &&
-    caught.missing[0].num === '3.1' &&
-    caught.missing[0].word === '未覆盖';
+    caught.missing[0].word === '未覆盖' &&
+    caught.missing[0].is === 0;
   if (!ok) {
     console.error('[check-doc-honesty] selfCheck 失败：植入的违规没被抓到 —— 否则这个守卫就是装饰');
     console.error(JSON.stringify({ clean, caught }, null, 2));
     process.exit(1);
   }
-  return { plantedViolations: 1 };
+  // 第二条自检：**重组必须被放行** —— 两节并成一节、标题全改，标记一个不少 ⇒ 不许红。
+  const regrouped = [
+    '## 3. 甲与乙（并成一节）',
+    '',
+    '这一格**未覆盖**：没有行为证明。',
+    '',
+    '这一格如实登记：不做。触发条件：第二个消费者出现时。',
+    '',
+  ].join('\n');
+  const merged = compare(sample, regrouped);
+  if (merged.missing.length !== 0) {
+    console.error('[check-doc-honesty] selfCheck 失败：合法的重组被拦住了（结构不是判据）');
+    console.error(JSON.stringify(merged, null, 2));
+    process.exit(1);
+  }
+  return { plantedViolations: 1, regroupAllowed: true };
 }
 
 const baseline = readBaseline();
 const current = readFileSync(join(repoRoot, DOC), 'utf8');
 const self = selfCheck();
-const { missing, shrank, baseSections, curSections } = compare(baseline, current);
+const { missing, shrank } = compare(baseline, current);
 
 if (shrank.length > 0) {
-  console.log(`[check-doc-honesty] 软读数（不判红）：${shrank.length} 处标记条数下降 —— 合并同义声明是合法的，请人核一眼：`);
-  for (const s of shrank.slice(0, 20)) console.log(`    §${s.num}  「${s.word}」${s.was} → ${s.is}`);
-  if (shrank.length > 20) console.log(`    …另有 ${shrank.length - 20} 处`);
+  console.log(`[check-doc-honesty] 软读数（不判红）：${shrank.length} 类标记条数下降 —— 合并同义声明是合法的，请人核一眼：`);
+  for (const s of shrank) console.log(`    「${s.word}」${s.was} → ${s.is}`);
 }
 
 if (missing.length > 0) {
-  console.error(`[check-doc-honesty] 失败：${missing.length} 处诚实声明被整类删掉`);
-  for (const m of missing) console.error(`    §${m.num}  「${m.word}」${m.was} → 0`);
-  console.error('  ⇒ 若这是有意为之，请把理由写进那一节；不许静默删掉"承认自己不知道"的句子。');
+  console.error(`[check-doc-honesty] 失败：${missing.length} 类诚实声明被整类删掉`);
+  for (const m of missing) console.error(`    「${m.word}」${m.was} → 0`);
+  console.error('  ⇒ 若这是有意为之，请把理由写进文档；不许静默删掉"承认自己不知道"的句子。');
   process.exit(1);
 }
 
+const left = [...tally(current).values()].reduce((a, b) => a + b, 0);
+const was = [...tally(baseline).values()].reduce((a, b) => a + b, 0);
 console.log(
-  `[check-doc-honesty] 通过：§3.x ${curSections} 节（基线 ${baseSections} 节）· ` +
-    `封闭词表 ${MARKERS.length} 个 · 自检植入 ${self.plantedViolations} 条违规已抓住 · ` +
-    `软读数 ${shrank.length} 处下降`,
+  `[check-doc-honesty] 通过：诚实标记 ${left} 条（基线 ${was} 条）· ` +
+    `封闭词表 ${MARKERS.length} 个 · 自检：植入 ${self.plantedViolations} 条违规已抓住、` +
+    `合法重组已放行 · 软读数 ${shrank.length} 类下降`,
 );

@@ -1,21 +1,21 @@
-//! **本机住户**——「这台机器上住着谁、她该在跑吗、把她起起来」。
+//! **本机住户**——「这台机器上住着谁、主体该在跑吗、把它起起来」。
 //!
 //! ## 这一片解决什么
 //!
 //! §8.1：**本地进程是本地 app 的孩子**。世界的生命周期已经归壳（[`crate::local_world`]），
-//! 但住户那半从前没有主人：`home.js up` 起过她、安家那只手起过她，**app 打开时不会起她**
-//! ⇒ 用户看到的是"世界在跑、她却不在线、也不回话"，而他没有办法（除了去命令行）。
+//! 但住户那半从前没有主人：`home.js up` 起过它、安家那只手起过它，**app 打开时不会起它**
+//! ⇒ 用户看到的是"世界在跑、它却不在线、也不回话"，而他没有办法（除了去命令行）。
 //!
 //! ## 判据（三条，都不发明）
 //!
 //! 1. **谁是住户**：`<家>/agents/<支>/` 且（有 `agent.conf` 或 `identity.json`）
 //!    —— 与 `residents.js` 的 `residents()` 同款，形状权威在 [`crate::registration`]。
-//! 2. **她在这台机器上在不在跑**：**账本**（`logs/agents/<支>/host.pid`，谁起的谁记账）
+//! 2. **主体在这台机器上在不在跑**：**账本**（`logs/agents/<支>/host.pid`，谁起的谁记账）
 //!    ＋ **身份核对**（那个 pid 现在还是我们的宿主吗 —— [`crate::process_facts`]，照
 //!    `proc.js` 的"杀之前先验身份"）。**不扫进程表**（§8.7 撤掉的正是"认领别人的进程"）。
 //! 3. **该不该起**：**账本 ＋ 身份核对**决定动作（判据表与用例见 [`action_for`]）——
-//!    在跑 ⇒ 不动；账本不在 / 陈旧 / 指向别人 / **核对不了** ⇒ **起她**（接管，`up.js` 同款）。
-//!    ⚠ **presence 只当读数、不当闸**：世界说她在线（`GET /v1/rooms/<房>/live`）会照问照报，
+//!    在跑 ⇒ 不动；账本不在 / 陈旧 / 指向别人 / **核对不了** ⇒ **起它**（接管，`up.js` 同款）。
+//!    ⚠ **presence 只当读数、不当闸**：世界说主体在线（`GET /v1/rooms/<房>/live`）会照问照报，
 //!    但那是一个有 `SEEN_TTL` 滞后的投影 —— 拿它当硬闸会让**刚停过的住户再也起不来**
 //!    （2026-10-03 真机栽过：陈旧账本指向一个打不开的 pid ⇒ `unverifiable` ⇒ 被自己的闸挡死）。
 //!
@@ -25,7 +25,7 @@
 //! - **不做 PID 认领**：账本陈旧 ⇒ 当"没在跑"处理并**重起**（不杀、不认领任何进程）；
 //! - **不轮换凭据**：起的时候**读**本地存储里那份（按「世界 × 身份」分条）；读不到 ⇒ 如实拒绝
 //!   （轮换是安家那只手的事，见 [`crate::anjia`]）；
-//! - **不承诺生命周期**：崩了不自动重启（§8.6-2）；停她归托盘/退出语义那一刀（§8.2-8.3）。
+//! - **不承诺生命周期**：崩了不自动重启（§8.6-2）；停它归托盘/退出语义那一刀（§8.2-8.3）。
 
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,7 @@ use crate::local_world::LocalFacts;
 use crate::process_facts::{self, Ownership};
 use crate::registration::{self, AgentConf};
 
-/// 一支本机住户（机器侧事实：她在哪、她的账本在哪）。
+/// 一支本机住户（机器侧事实：它在哪、它的账本在哪）。
 #[derive(Debug, Clone)]
 pub struct Resident {
     pub agent_id: String,
@@ -73,7 +73,7 @@ pub fn residents(home_dir: &Path) -> Vec<Resident> {
         .collect()
 }
 
-/// 她在**这台机器上**在不在跑（三态 + 一档"核对不了"）。
+/// 它在**这台机器上**在不在跑（三态 + 一档"核对不了"）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResidentState {
     /// 在跑：账本里的 pid 活着，而且确实是我们的宿主。
@@ -103,7 +103,7 @@ pub fn ledger_pid(pid_file: &Path) -> Option<u32> {
     text.trim().parse::<u32>().ok().filter(|pid| *pid > 0)
 }
 
-/// 她的现状：**账本 + 身份核对**（不扫进程表）。
+/// 它的现状：**账本 + 身份核对**（不扫进程表）。
 pub fn state_of(resident: &Resident, host_exe: &Path) -> ResidentState {
     let Some(pid) = ledger_pid(&resident.pid_file) else {
         return ResidentState::NotRunning { stale_ledger: None };
@@ -119,13 +119,13 @@ pub fn state_of(resident: &Resident, host_exe: &Path) -> ResidentState {
 }
 
 // ---------------------------------------------------------------------------
-// 起她
+// 起它
 // ---------------------------------------------------------------------------
 
-/// 一次"起她"的结局（每一态都有名字，给读数用）。
+/// 一次"起它"的结局（每一态都有名字，给读数用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartOutcome {
-    /// 她本来就在跑（账本指向我们的宿主）—— 一个字都没动。
+    /// 它本来就在跑（账本指向我们的宿主）—— 一个字都没动。
     AlreadyRunning { pid: u32 },
     /// 起来了（pid 已记账本）。
     Started { pid: u32 },
@@ -134,7 +134,7 @@ pub enum StartOutcome {
     RefusedNoCore { exe: PathBuf },
     /// 停手：模型那一半没人在（且没有文件档绑定）—— 与 `up.js` 的早失败口径同款。
     RefusedMissingModel,
-    /// 停手：本地存储里没有她的后端凭据（或读不出来）—— 起不了（宿主认证不过）。
+    /// 停手：本地存储里没有它的后端凭据（或读不出来）—— 起不了（宿主认证不过）。
     RefusedMissingCredential { detail: String },
     /// 失败：起进程那一步没成（原因原样）。
     Failed { detail: String },
@@ -172,7 +172,7 @@ pub fn start_resident(
         return StartOutcome::AlreadyRunning { pid };
     }
     // 模型那一半：**只认绑定**（2026-10-07 主人裁：app 形态不继承环境变量那两条 —— 见
-    // `host_process::model_plan` 的判据）。没绑定 ⇒ 这一支还没配，如实拒绝起她。
+    // `host_process::model_plan` 的判据）。没绑定 ⇒ 这一支还没配，如实拒绝起它。
     let plan = match host_process::model_plan(&facts.home_dir, &resident.env_root) {
         Ok(plan) => plan,
         Err(host_process::ModelPlanError::BindingUnreadable(_)) => {
@@ -182,7 +182,7 @@ pub fn start_resident(
             return StartOutcome::RefusedMissingModel
         }
     };
-    // 她的后端凭据：**读**（不轮换）本地存储里按「世界 × 身份」分条那份。
+    // 它的后端凭据：**读**（不轮换）本地存储里按「世界 × 身份」分条那份。
     let credential_dir = home_facts::credentials_dir();
     let world = facts.world_base();
     let backend = match home_facts::read_credential(&credential_dir, &world, &resident.agent_id) {
@@ -190,14 +190,14 @@ pub fn start_resident(
         home_facts::CredentialRead::Missing => {
             return StartOutcome::RefusedMissingCredential {
                 detail: format!(
-                "本地存储里没有她（{}）在这个世界（{world}）的后端凭据 —— 先在 app 里把她安一次家",
+                "本地存储里没有这支 Agent（{}）在这个世界（{world}）的后端凭据 —— 先在 app 里给它安一次家",
                 resident.agent_id
             ),
             }
         }
         home_facts::CredentialRead::Unreadable(reason) => {
             return StartOutcome::RefusedMissingCredential {
-                detail: format!("她的后端凭据读不出来（{reason}）—— 先看清它再重试"),
+                detail: format!("这支 Agent 的后端凭据读不出来（{reason}）—— 先看清它再重试"),
             }
         }
     };
@@ -252,7 +252,7 @@ pub fn start_resident(
 }
 
 // ---------------------------------------------------------------------------
-// 「打开 app ⇒ 她就在」
+// 「打开 app ⇒ 它就在」
 // ---------------------------------------------------------------------------
 
 /// 一次"确保本机住户都在跑"的读数（每支一行）。
@@ -261,7 +261,7 @@ pub struct ResidentReport {
     pub agent_id: String,
     pub label: String,
     pub state: ResidentState,
-    /// 世界此刻说她在线吗（`None` = 没问 / 问不到）—— **读数**，不是闸。
+    /// 世界此刻说它在不在线（`None` = 没问 / 问不到）—— **读数**，不是闸。
     pub presence_online: Option<bool>,
     pub outcome: Option<StartOutcome>,
 }
@@ -270,17 +270,17 @@ pub struct ResidentReport {
 ///
 /// ## 判据：**账本 + 身份核对**决定动作，presence 只当读数（2026-10-03 真机修的）
 ///
-/// 从前 presence 是一道**硬闸**（"世界说她在线 ⇒ 不替你起"）。真机上它把产品自己的承诺挡死了：
-/// 她的账本指向一个**打不开的 pid**（旧 pid 被复用、`OpenProcess` 拒绝访问 ⇒ `unverifiable`），
-/// 于是"核对不上 ⇒ 不动"，她**永远起不来**（日志读数就是 `住户 小月：unverifiable`）。
+/// 从前 presence 是一道**硬闸**（"世界说它在线 ⇒ 不替你起"）。真机上它把产品自己的承诺挡死了：
+/// 它的账本指向一个**打不开的 pid**（旧 pid 被复用、`OpenProcess` 拒绝访问 ⇒ `unverifiable`），
+/// 于是"核对不上 ⇒ 不动"，它**永远起不来**（日志读数就是 `住户 小月：unverifiable`）。
 ///
 /// 现在照 `up.js` 的做法（*"要修账本就 `node home.js up`（会接管）"*）：
 ///
 /// | 账本 | 身份核对 | 动作 |
 /// |---|---|---|
-/// | 有 | 是我们的、活着 | **不动**（她本来就在跑） |
-/// | 有 | 是别的程序 / pid 上什么都没有 / **核对不了** | **起她**（账本陈旧或核不出 ⇒ 接管） |
-/// | 没有 | — | **起她** |
+/// | 有 | 是我们的、活着 | **不动**（它本来就在跑） |
+/// | 有 | 是别的程序 / pid 上什么都没有 / **核对不了** | **起它**（账本陈旧或核不出 ⇒ 接管） |
+/// | 没有 | — | **起它** |
 ///
 /// ⚠ 为什么 presence **不能**当硬闸：它是**世界侧的投影**，按契约有 `SEEN_TTL` 的滞后
 /// （`CORE_V1_AGENT_PROTOCOL.md` §6.1：*"拉取式 Backend 停止活动后最多 SEEN_TTL 内仍可能被判为
@@ -291,15 +291,15 @@ pub struct ResidentReport {
 ///
 /// | 账本 | 身份核对 | 世界在跑 | 动作 |
 /// |---|---|---|---|
-/// | 有 | 是我们的、活着 | — | **不动**（她本来就在跑） |
-/// | 有 | 别的程序 / pid 上什么都没有 / 核对不了 | 在跑 | **起她**（账本陈旧或核不出 ⇒ 接管） |
-/// | 没有 | — | 在跑 | **起她** |
-/// | 任意 | 任意 | **没在跑** | **不动**（她起来也连不上谁） |
+/// | 有 | 是我们的、活着 | — | **不动**（它本来就在跑） |
+/// | 有 | 别的程序 / pid 上什么都没有 / 核对不了 | 在跑 | **起它**（账本陈旧或核不出 ⇒ 接管） |
+/// | 没有 | — | 在跑 | **起它** |
+/// | 任意 | 任意 | **没在跑** | **不动**（它起来也连不上谁） |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResidentAction {
     /// 一个字都不动。
     Leave,
-    /// 起她（`start_resident` 内部还会再核一次状态）。
+    /// 起它（`start_resident` 内部还会再核一次状态）。
     Start,
 }
 
@@ -347,9 +347,9 @@ pub fn ensure_residents(facts: &LocalFacts, human_token: Option<&str>) -> Vec<Re
         .collect()
 }
 
-/// 世界此刻说她在线吗（`GET /v1/rooms/<房>/live` —— 主体进行态的唯一裁决面）。
+/// 世界此刻说它在不在线（`GET /v1/rooms/<房>/live` —— 主体进行态的唯一裁决面）。
 ///
-/// 三态：`Some(true/false)` 问到了 / `None` 问不到（没有会话、她那间房还不知道、请求失败）。
+/// 三态：`Some(true/false)` 问到了 / `None` 问不到（没有会话、它那间房还不知道、请求失败）。
 /// **这是读数**：调用方把它摆出来，不据此动手（理由见 `ensure_residents` 的判据表）。
 fn presence_of(facts: &LocalFacts, resident: &Resident, human_token: Option<&str>) -> Option<bool> {
     let token = human_token?;
@@ -517,7 +517,7 @@ mod tests {
             action_for(&ResidentState::Running { pid: 7 }, false),
             ResidentAction::Leave
         );
-        // 账本不在 / 陈旧 / 指向别人 / **核对不了** ⇒ 都起她（接管；`up.js` 同款）。
+        // 账本不在 / 陈旧 / 指向别人 / **核对不了** ⇒ 都起它（接管；`up.js` 同款）。
         // ⚠ `Unverifiable` 必须是 Start：真机上它曾被当成"不动"，于是刚停过的住户**永远起不来**
         //   （日志读数就是 `住户 小月：unverifiable`）。
         for state in [
@@ -539,7 +539,7 @@ mod tests {
                 ResidentAction::Start,
                 "{state:?} 该被接管"
             );
-            // 世界没在跑 ⇒ 不起（她起来也连不上谁）。
+            // 世界没在跑 ⇒ 不起（它起来也连不上谁）。
             assert_eq!(
                 action_for(&state, false),
                 ResidentAction::Leave,

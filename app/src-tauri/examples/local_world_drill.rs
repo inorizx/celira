@@ -150,7 +150,7 @@ fn main() {
             });
         }
         "residents" => {
-            // 「打开 app ⇒ 她就在」那条路的手动把手：报现状 → 确保都在跑 → 贴日志尾。
+            // 「打开 app ⇒ 它就在」那条路的手动把手：报现状 → 确保都在跑 → 贴日志尾。
             let list = celira_app_lib::local_residents::residents(&facts.home_dir);
             if list.is_empty() {
                 println!("[住户] 这个家还没有住户（安家那只手还没安过谁）");
@@ -174,7 +174,7 @@ fn main() {
                 SessionOutcome::Ok { token, .. } => Some(token),
                 _ => {
                     println!(
-                        "[住户] ⚠ 拿不到主人会话 —— 「世界说她在线吗」那一问跳过（账本仍然照判）"
+                        "[住户] ⚠ 拿不到主人会话 —— 「世界说它在不在线」那一问跳过（账本仍然照判）"
                     );
                     None
                 }

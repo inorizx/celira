@@ -8,8 +8,8 @@
 //! 调用链深处——两条都为了"运行时选一个实现"去改中立层。枚举让"选一次、之后是同一个具体类型"
 //! 成立：Core 一行不动，两个适配层也互不认识。
 //!
-//! 本模块**不做**：工厂注册表、按名字动态发现、多协议路由、回退——只有一个二选一，而且它由
-//! 宿主显式声明（`--model-protocol`）。
+//! 本模块**不做**：`Protocol` trait、工厂注册表、按名字动态发现、多协议路由、回退——只有一个
+//! 二选一，而且它由宿主显式声明（`--model-protocol`）。
 
 use crate::core::{ModelError, ModelOutput, ModelPort, View};
 use crate::cost::UsageWriter;

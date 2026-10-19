@@ -36,6 +36,9 @@
 //!   同一张纸条（真机实测：run-4 没走完，之后的 -1、-2 与 timer 那一段 -3 **都**带着 run-4
 //!   那张）。而对 -3 来说，它的"上一段"（-2）是**正常收场**的——**写「上一段」就是假话**。
 //!   ⇒ 只报**事实**（"有一段没正常收场，是哪一段"），不报**相邻关系**（"就是刚才那一段"）。
+//! - **它没有固定大小**（2026-10-19 登记）：正常收场 ⇒ **零字节**（整块不出场，见上一条）；异常 ⇒
+//!   **一句话起**——没走完的段名最多列 [`MAX_UNFINISHED`] 段、未结算的操作最多列
+//!   [`MAX_UNSETTLED`] 件，多的**报数、不截断**。⇒ 它**没有字节上限**，只有"按事实各说一句"这条形状。
 
 use crate::clock::{LocalOffset, format_local};
 use crate::core::{ContentBatch, ContentBlock, ContextSource, InjectionContext, combine};

@@ -43,9 +43,9 @@ pub const MODEL_MAX_BYTES: usize = 200;
 pub const REASONING_EFFORTS: [&str; 7] =
     ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-/// 绑定里那两格"**她说的**"键名（2026-10-09 加宽的形状）。
+/// 绑定里那两格"**主体说的**"键名（2026-10-09 加宽的形状）。
 ///
-/// 判据：**钥匙属机器，"用什么型号/什么档位"属她** —— 那两格可以写进绑定（支级）来覆盖条目
+/// 判据：**钥匙属机器，"用什么型号/什么档位"属主体** —— 那两格可以写进绑定（支级）来覆盖条目
 /// 里的同名字段。键名与 agent 侧 `model_source.rs` 的 `KEY_MODEL` / `KEY_REASONING` 逐字同名
 /// （一个概念一个名称）。
 const KEY_MODEL: &str = "model";
@@ -72,7 +72,7 @@ pub struct ModelSourceEntry {
     /// **这一份模型收不收得到媒体材料**（2026-10-17）：宿主声明，**fail-closed**（不写就是不支持）。
     ///
     /// ⚠ 与 `reasoning_effort` **同一个病、同一条药**：写者重建条目时漏了它，就等于把用户开的
-    /// 那一格**删掉** —— 而这里删掉的后果是"她静默地重新读不动图片"（**没有任何报错**）。
+    /// 那一格**删掉** —— 而这里删掉的后果是"主体静默地重新读不动图片"（**没有任何报错**）。
     pub vision: bool,
     pub api_key: String,
 }
@@ -276,7 +276,7 @@ fn render_list(entries: &[ModelSourceEntry]) -> String {
             ));
         }
         // **媒体材料：总是写**（照 `writeList`：这一格落盘时是**显式布尔**；缺了它，等于把用户
-        // 开着的那一格删掉 —— 而那是"她静默地重新读不动图片"，没有任何报错）。
+        // 开着的那一格删掉 —— 而那是"主体静默地重新读不动图片"，没有任何报错）。
         out.push_str(&format!(",\n    \"vision\": {}", entry.vision));
         out.push_str("\n  }");
     }
@@ -505,7 +505,7 @@ pub fn clear_binding(env_root: &Path) -> Result<(), String> {
 /// `<家>/agents/<id>/` 里有 `model_binding.json`，而它**不是住户** —— 住户判据直接复用
 /// [`crate::registration::resident_env_roots`] 那一份（**不另写第二把尺子**）。
 ///
-/// 为什么它与绑定同属本模块：绑定的**落点**就是"她的环境根"，而环境根要等接她第 2 步才建
+/// 为什么它与绑定同属本模块：绑定的**落点**就是"它的环境根"，而环境根要等接它第 2 步才建
 /// ⇒ "先选好"只多出一个**环境根先于住户出现**的形状，绑定本身的形状一字未改。
 ///
 /// ⚠ **它们不是住户**：调用方不许把它们并进"这台机器上的住户"那一格（那是假话）。
@@ -724,13 +724,13 @@ mod tests {
         assert_eq!(next_entry_id(&[]), "ms-1");
     }
 
-    /// **重新绑定时，她那两格不许被抹掉**（2026-10-09 加宽：钥匙属机器，用什么想属她）。
+    /// **重新绑定时，主体那两格不许被抹掉**（2026-10-09 加宽：钥匙属机器，用什么想属主体）。
     ///
     /// 为什么单独立一条：写者每次只拿到 `source`，而绑定里可能有 `model` / `reasoning_effort`
-    /// —— 漏了保留这一步，页面上重新绑一次就把她那两格**悄悄抹掉**（与 `reasoning_effort`
+    /// —— 漏了保留这一步，页面上重新绑一次就把主体那两格**悄悄抹掉**（与 `reasoning_effort`
     /// 那次"页面保存抹掉清单那一格"是同族事故，实测吃过一次）。
     #[test]
-    fn rebinding_keeps_what_she_said_about_model_and_effort() {
+    fn rebinding_keeps_what_the_subject_said_about_model_and_effort() {
         let home = temp_home("binding-keep");
         let env_root = home.join("agents").join("a-1");
         fs::create_dir_all(&env_root).unwrap();
@@ -751,7 +751,7 @@ mod tests {
         assert_eq!(
             parsed.get("model").and_then(Value::as_str),
             Some("her-model"),
-            "她那两格不许被抹掉：{text}"
+            "主体那两格不许被抹掉：{text}"
         );
         assert_eq!(
             parsed.get("reasoning_effort").and_then(Value::as_str),

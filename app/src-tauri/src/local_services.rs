@@ -96,7 +96,7 @@ pub fn snapshot(facts: &LocalFacts) -> ServicesSnapshot {
 /// 调用方把它摆出来或写进日志，**不吞**。
 pub fn stop_all(facts: &LocalFacts) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
-    // 1) 住户先停（她们连的是世界；世界先没了她们会开始报错、日志变吵）。
+    // 1) 住户先停（它们连的是世界；世界先没了它们会开始报错、日志变吵）。
     for resident in crate::local_residents::residents(&facts.home_dir) {
         lines.push(stop_resident(facts, &resident));
     }
@@ -109,7 +109,7 @@ pub fn stop_all(facts: &LocalFacts) -> Vec<String> {
 pub fn stop_resident(facts: &LocalFacts, resident: &crate::local_residents::Resident) -> String {
     let label = resident.label();
     let Some(pid) = crate::local_residents::ledger_pid(&resident.pid_file) else {
-        return format!("{label}：账本上没有她的宿主 —— 没动任何东西");
+        return format!("{label}：账本上没有这支 Agent 的宿主 —— 没动任何东西");
     };
     match process_facts::terminate(pid, &facts.layout.host_exe) {
         Ok(()) => {
@@ -216,7 +216,7 @@ pub async fn local_services_readout(
 /// **[全部停止]**（§8.3 的总开关）：停世界 ＋ 停全部住户，逐条如实回报。
 ///
 /// ⚠ 停的是**本机服务**，不是"关掉这个家"：环境根、账本之外的东西一个字都不动
-/// （她的经历、家的数据照旧在）。
+/// （主体的经历、家的数据照旧在）。
 #[tauri::command]
 pub async fn local_services_stop(
     config: tauri::State<'_, crate::MachineConfigDir>,

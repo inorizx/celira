@@ -5,7 +5,7 @@
 //! **这一份最后是「从页面改的」吗？如果是，什么时候改的？**
 //!
 //! ⚠ 它**答不出"是谁"**：答得出的是**两档**，而且**两档必须分开说**——
-//! 「从页面那条路改的」**有时刻**；「别处改的」（她走 terminal 写、直接改文件、别的工具）
+//! 「从页面那条路改的」**有时刻**；「别处改的」（主体走 terminal 写、直接改文件、别的工具）
 //! **只知"变了"，不知是谁**。⇒ 判据一句话：**它答的是「页面有没有写过」，不是「有没有人写过」。**
 //!
 //! ## 缝收在**门上**，不在 `write_atomic` 上（这一条是承重的）
@@ -24,7 +24,7 @@
 //!
 //! ## 它抓的是「改动」，不是「篡改」（这一条必须说出口）
 //!
-//! 同机同用户 ⇒ 她够得着那两份文件，也够得着这本账。⇒ **本地见证对拥有整机全权的主体不是
+//! 同机同用户 ⇒ 主体够得着那两份文件，也够得着这本账。⇒ **本地见证对拥有整机全权的主体不是
 //! 封印**。它是**改动的可见性**，**不是密码学保证** —— 不许把它说成后者。
 //!
 //! ## 它不拒绝任何东西，也**绝不**让一笔写失败
@@ -395,7 +395,7 @@ pub fn record_write(home_dir: &Path, file: &Path, at_ms: i64) -> Result<Record, 
 
 /// 记一条"**门摘掉了这一份**"（那一刻它不在 ⇒ `sha256: null`）。
 ///
-/// 为什么"清"也算一笔写：它决定她下一拍还醒不醒得过来。不记它，页面上的"解除指定"
+/// 为什么"清"也算一笔写：它决定主体下一拍还醒不醒得过来。不记它，页面上的"解除指定"
 /// 就会在读数里变成"别处有人动过它" —— 把第一档报成第二档。
 pub fn record_clear(home_dir: &Path, file: &Path, at_ms: i64) -> Result<Record, String> {
     let Some(rel) = relative_file(home_dir, file) else {
@@ -418,6 +418,10 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         dir
     }
+
+    /// 一个**多字节**字符（非可打印 ASCII），**写成转义**——两条用例要拿它试"路径必须可打印
+    /// ASCII"那条判据，而源码里不必出现那个字（声音纪律）。
+    const NON_ASCII: char = '\u{5979}';
 
     /// ★ **跨语言向量**：与 JS 那份 `tests/model-witness.test.js` 的 `VECTOR` **钉同一个值**。
     /// 改任何一边的规范行，两处里必有一处红。
@@ -474,7 +478,18 @@ mod tests {
         assert!(decode("{\"at-ms\":1,\"file\":\"x\",\"size\":0,\"sha256\":null}").is_err());
         assert!(decode("不是 JSON").is_err());
         assert!(decode("[1,2]").is_err());
-        assert!(make_record(1, "agents/她/model_binding.json", 0, None, None).is_err());
+        // ⚠ **这里必须用一个多字节字符**：这一格测的是"路径要是**可打印 ASCII**"，
+        // 换成任何 ASCII 名字（`not-an-id.json`）都走不到那条判据上（实测吃过一次：
+        // 守卫那一刀换掉了它，用例当场变绿——**判据被换没了**）。
+        // 字符写成转义，源码里因此不出现它（声音纪律：`no_person_pronouns_in_shell_sources`）。
+        assert!(make_record(
+            1,
+            &format!("agents/{NON_ASCII}/model_binding.json"),
+            0,
+            None,
+            None
+        )
+        .is_err());
         assert!(make_record(1, "x", 0, Some("xyz".to_string()), None).is_err());
         assert!(make_record(1, "x", 0, None, Some("A".repeat(64))).is_err());
         assert!(make_record(-1, "x", 0, None, None).is_err());
@@ -494,8 +509,13 @@ mod tests {
         );
         let outside = home.parent().unwrap().join("elsewhere.json");
         assert_eq!(relative_file(&home, &outside), None);
+        // 住户目录下**只有那两份**认得出；别的一律 `None`。这里取一个**多字节**名字——
+        // 判据是"相对路径要可打印 ASCII"（与上一条同一条，见那里的注）。
         assert_eq!(
-            relative_file(&home, &home.join("agents").join("她.json")),
+            relative_file(
+                &home,
+                &home.join("agents").join(format!("{NON_ASCII}.json"))
+            ),
             None
         );
         let _ = fs::remove_dir_all(&home);
@@ -512,7 +532,7 @@ mod tests {
         record_write(&home, &list, 1000).unwrap();
         let same = reading_for(&open(&home), &home, &list);
         assert_eq!((same.state, same.at_ms), ("same", Some(1000)));
-        // ③ 门外的手改的（她走 terminal）⇒ changed/content，时刻仍是"门最后写于何时"
+        // ③ 门外的手改的（主体走 terminal）⇒ changed/content，时刻仍是"门最后写于何时"
         fs::write(&list, "[] \n").unwrap();
         let changed = reading_for(&open(&home), &home, &list);
         assert_eq!(

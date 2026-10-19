@@ -540,7 +540,7 @@ mod tests {
         let home = scratch(label);
         fs::create_dir_all(home.join("env")).unwrap();
         fs::write(home.join("env").join("identity.json"), r#"{"agent":"a-1"}"#).unwrap();
-        fs::write(home.join("env").join("notes.md"), "她的笔记").unwrap();
+        fs::write(home.join("env").join("notes.md"), "主体的笔记").unwrap();
         fs::create_dir_all(home.join("logs")).unwrap();
         let mut conf = String::from("human_id=h-1\n");
         for line in conf_lines {
@@ -589,7 +589,7 @@ mod tests {
         let env = home.join("agents").join("a-1");
         assert_eq!(
             fs::read_to_string(env.join("notes.md")).unwrap(),
-            "她的笔记",
+            "主体的笔记",
             "环境里的东西照旧"
         );
         // 支级登记写上（room 来自 home.conf，slot 缺省 1）。
@@ -767,5 +767,113 @@ mod tests {
             !same_path("D:\\h\\env", "D:\\h\\env-backup"),
             "子串不算同一个"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // 声音纪律（2026-10-19 立；判据与 `agent/tests/minimal_agent.rs` 那条同形）
+    // -----------------------------------------------------------------------
+
+    /// **声音纪律**：壳的 **`.rs` 源码（含 `examples/` 与测试模块）**里**任何一行**都不出现那个人称代词。
+    ///
+    /// **原约束**：本仓的散文层习惯用它讲一支具体的 Agent——那是**解释层**的叙述视角。
+    /// **新边界**：它**不许**出现在壳的源码里——用户可见读数（"没有这支 Agent 的凭据"）、
+    /// 页面文案、示例的 `println!`、以及注释。一个代词同时断言了三件事：**性别、单一连续
+    /// 人格、可被第三人称叙述**——三件都不是机械事实，而壳的读数**是给用户看的**。
+    /// **真实消费者**：`local_residents` / `local_services` / `local_world` 的读数会渲染进
+    /// 「本机服务」面板与托盘退出那一路（2026-10-19 实测：那三处各中一条）。
+    ///
+    /// **本文件自己不许出现那个字**：它写成转义常量 [`PRONOUN_SHE`]，夹具用 [`with_she`] 拼。
+    /// 这不是洁癖——守卫要是写得出它，就会被"清一遍"的机械替换顺手改掉，守卫当场失效。
+    /// **这件事在 `agent/` 那一侧真实发生过一次**（2026-09-25），代价是那一格整段重写。
+    ///
+    /// **⚠ 与 `agent/` 那条守卫的一处刻意不同**：那条只扫 `src/`（它的测试夹具**必须**能写出
+    /// 这个字才能证明拦得住），而**本条扫整个 crate**——壳这边没有那个必要：要试"非可打印
+    /// ASCII"那条判据的地方写成转义常量（`model_witness.rs` 的 `NON_ASCII`）就够了，
+    /// 因此这里的射程可以更紧，也更该更紧（示例的 `println!` 同样是给人看的）。
+    ///
+    /// **`它` 不在此列**：它指物是正常的中文，本守卫只拦**人称**代词（中文只认
+    /// [`PRONOUN_SHE`]；"他"在中立词里到处都是，机械判据分不开）。但"拿 `它` 指 Agent"
+    /// 是另一种毛病（把主体降成物），它不可机械判定，因此只写在这里。
+    #[test]
+    fn no_person_pronouns_in_shell_sources() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+        let mut paths: Vec<PathBuf> = Vec::new();
+        collect_rust_sources(&root, &mut paths);
+        paths.sort();
+        assert!(
+            !paths.is_empty(),
+            "{} 下必须至少有一个 .rs 文件，否则守卫形同虚设",
+            root.display()
+        );
+
+        // 自检：判据**真的会红**，也**不误报**（免得守卫写成永远为真）。
+        assert!(
+            person_pronoun_in(&with_she("这一支{}没起来")).is_some(),
+            "判据自己失效了：这一行必须被认出来"
+        );
+        assert!(
+            person_pronoun_in("这一支没起来").is_none(),
+            "判据不许误报：正常的读数不是代词"
+        );
+
+        let mut offenders: Vec<String> = Vec::new();
+        for path in &paths {
+            let text = fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("读不到 {}: {error}", path.display()));
+            let name = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            for (index, line) in text.lines().enumerate() {
+                if person_pronoun_in(line).is_some() {
+                    offenders.push(format!("{name}:{}: {}", index + 1, line.trim()));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "出现人称代词（声音纪律）：\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    /// 递归收集 `.rs` 文件（与 `agent/tests/minimal_agent.rs` 那份同款）。
+    fn collect_rust_sources(directory: &Path, paths: &mut Vec<PathBuf>) {
+        let entries = fs::read_dir(directory)
+            .unwrap_or_else(|error| panic!("读不到 {}: {error}", directory.display()));
+        for entry in entries {
+            let path = entry.expect("目录项可读").path();
+            let file_type = fs::symlink_metadata(&path).expect("可读元数据").file_type();
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                collect_rust_sources(&path, paths);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                paths.push(path);
+            }
+        }
+    }
+
+    /// 被禁的那个人称代词，**写成转义**（见守卫文档：本文件自己不许出现它）。
+    const PRONOUN_SHE: char = '\u{5979}';
+
+    /// 把夹具里的 `{}` 换成那个字——夹具因此不必在源码里写出它。
+    fn with_she(text: &str) -> String {
+        text.replace("{}", &PRONOUN_SHE.to_string())
+    }
+
+    /// 这一行里出现的**人称**代词（没有就是 `None`）。
+    ///
+    /// 中文**只认** [`PRONOUN_SHE`]：另一个第三人称代词"他"不进这一格，因为它在中立词里
+    /// 到处都是——`其他` / `排他` / `他方`——机械判据分不开，硬拦就是"用裸子串误报中立词汇"。
+    /// 这是**有意的取舍**：宁可漏一个不常用的代词，也不让守卫天天喊狼来了。
+    fn person_pronoun_in(line: &str) -> Option<&'static str> {
+        if line.contains(PRONOUN_SHE) {
+            return Some("she-zh");
+        }
+        None
     }
 }

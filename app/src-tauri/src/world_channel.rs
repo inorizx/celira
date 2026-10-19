@@ -233,7 +233,7 @@ impl WorldHttp {
         self.finish(request.send())
     }
 
-    /// **她与主人的那间 `direct` 房**（`adopt.js` 的 `findExistingDirectRoom` 直译）。
+    /// **主体与主人的那间 `direct` 房**（`adopt.js` 的 `findExistingDirectRoom` 直译）。
     ///
     /// 一次 `GET /v1/rooms` 就够：清单里每条自带 `peer`（对端）——"这个人类与这支 Agent
     /// 之间的那间房"是**问得出来的机械事实**，不用猜、也不用逐间拉成员。
@@ -301,11 +301,11 @@ impl WorldHttp {
         }
     }
 
-    /// **她在不在线**（`GET /v1/rooms/<房>/live` —— 主体进行态的唯一裁决面）。
+    /// **主体在不在线**（`GET /v1/rooms/<房>/live` —— 主体进行态的唯一裁决面）。
     ///
     /// 判据在契约里：**在线由连接派生**（门铃流 / 最近被看见），不是对端上报的身体读数
     /// （`CORE_V1_AGENT_PROTOCOL.md` §6.1）。壳用它做**起住户的安全闸**：账本说本机没有
-    /// 她的宿主、而世界说她在线 ⇒ 多半别处有宿主 ⇒ 不替你起第二个。
+    /// 主体的宿主、而世界说它在线 ⇒ 多半别处有宿主 ⇒ 不替你起第二个。
     ///
     /// 三态：`Ok(Some(true/false))` 问到了 / `Ok(None)` 问到了但没有这个人 / `Err` 问不到。
     pub fn room_live_online(
@@ -435,7 +435,7 @@ fn field<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a serde_js
 /// `unreachable` / `not-owned` / `not-active` / `ok`。
 #[derive(Debug, Clone)]
 pub enum OwnedVerdict {
-    /// 问到了：是你的、且 active。`name` 是她在这个世界里的名字。
+    /// 问到了：是你的、且 active。`name` 是它在这个世界里的名字。
     Ok { name: String },
     /// 问不到（连不上 / 回执读不懂）——**什么都不许动**。
     Unreachable { detail: String },

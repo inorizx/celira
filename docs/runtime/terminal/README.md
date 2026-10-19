@@ -60,7 +60,7 @@
 
 | # | 差异 | 两边各是什么 |
 |---|---|---|
-| 1 | **本组分层表没有 Adapter / Composition 两层** | 本组：`RUNTIME_CORE_AND_LAYERING.md` §五那张表；`docs/agent/`：`05_AGENT_ENGINEERING.md` 的七模块含 **Adapters** 与 **Composition**（对应物在本组只见于 `RUNTIME_TERMINAL_ENGINEERING.md` 的 ports/adapters 与 host_admin） |
+| 1 | **本组分层表没有 Adapter / Composition 两层** | 本组：`RUNTIME_TERMINAL_ENGINEERING.md` 的 ports/adapters 与 host_admin；`docs/agent/`：`05_AGENT_ENGINEERING.md` 的七模块含 **Adapters** 与 **Composition** |
 | 2 | **本组工程骨架里没有 OS 层** | 本组：`RUNTIME_TERMINAL_ENGINEERING.md` 的 domain / application / ports / adapters；`docs/agent/`：`05_AGENT_ENGINEERING.md` 的 **OS 骨干**（身份/权限接入、能力入口路由、资源与生命周期）。⚠ 上面那张表已登记「**OS**」这个**写法**的重名，**但没写「本组骨架里没有这一层」**——本条补的正是缺的那半句 |
 
 **判据**：**粒度差异不是本体之争**——两张图切的层数不同，不表示哪一张错。

@@ -36,7 +36,7 @@ Agent 与人的差别数得完，每条都有对应的机制。**物理不能改
 | 常识定格在出厂那天 | 世界靠 App 实时读，不信回忆 |
 | 看不见自己的内部（身份、处境、过去只能从外部读） | 全部由注入供给（§5） |
 | 没有手脚；一次一件事；手速固定 | App 是手脚，视野是眼睛；长事跨多轮，进度上状态行 |
-| 不叫不醒（自己不会开机） | 唤醒路由（门铃 / 闹钟 / 宿主） |
+| 不叫不醒（自己不会开机） | 唤醒源（门铃 / 闹钟 / 宿主） |
 | 会一本正经胡说（生成的字只是「像真的」） | 事实必须过工具回传，看见才算数；账本记真实结果，不记打算 |
 
 **政策**（宿主可配）：预算给多少、死线多长——见 §9 的 `max_turns` / `max_tokens` / `deadline`。
@@ -143,7 +143,7 @@ Agent 与人的差别数得完，每条都有对应的机制。**物理不能改
 | `Turn`（轮） | 一次「看＋行动」 | `core` |
 | `Run`（活动） | 一段连续的清醒：有界动作，收场即结束 | `core`；账本 `run` |
 | `run` / `turn` / `turn_limit` / `further_model_calls_at_most` / `entries` | 给主体的机械事实读数 | 读数行（`status_bar`）与适配层的系统消息 |
-| `唤醒路由` | 门铃 / 闹钟 / 宿主停机 —— 它只决定「**何时**」开始一次 Run，**不决定「要不要」**；「要不要」归**主体自己设置**（`RUNTIME_TERMINAL_DECISIONS.md` §7），不归系统裁决。唤醒节流属**机械的合并**，不属裁决点（当前事实与那一格的缺口见 `agent/README.md` §4） | `agent/src/wake.rs`（`WakePort` / `Doorbell` / `TimerSource`）＋ `agent/src/doorbell.rs`；宿主那一条等待 |
+| `唤醒源` | 门铃 / 闹钟 / 宿主停机 —— 它只决定「**何时**」开始一次 Run，**不决定「要不要」**；「要不要」归**主体自己设置**（`RUNTIME_TERMINAL_DECISIONS.md` §7），不归系统裁决。唤醒节流属**机械的合并**，不属裁决点（当前事实与那一格的缺口见 `agent/README.md` §4）。⚠ **正名（2026-10-19）**：旧写法「唤醒路由」在词表之外**一处都没人用**（唯一引用它的那份旧稿已焚，判据见 `check-docs.mjs` 判据三） | `agent/src/wake.rs`（`WakePort` / `Doorbell` / `TimerSource`）＋ `agent/src/doorbell.rs`；宿主那一条等待 |
 | 循环 / 插槽 | **两个件，不是一个**：**循环**在 `core`（唯一执行流程、有界循环）；**插槽与发现/展开/路由**在 `os`（动作面：发现、渐进展开、机械路由）。⚠ 别把 `os` 当成「系统」——它不含循环 | `core` / `os` |
 | 上下文窗口 | 宿主**声明**，`HostLoop::context_window`；窗口是声明不是测量。状态行那一格渲染的是**占用读数**（`context_reading`），**不是窗口本身**——分母从不来自那一格。⚠ 本表此前叫「视野容量」——**全仓 3 处、只在词表里**，而「上下文窗口」38 处 / 26 文件、`context_window` 230 处 / 39 文件 ⇒ **已按活名改正**（见 §9.1①） | `agent/src/context_reading.rs`／`HostLoop::context_window` |
 | 显示区 | 状态行等固定区域，加上本 Run 累加的回执（「视野本身就是轨迹」） | `agent/src/status_bar.rs` / `notification_bar.rs` / `pins_board.rs` |
@@ -198,7 +198,7 @@ Agent 与人的差别数得完，每条都有对应的机制。**物理不能改
 | `Capability` / `Tool` / `Action*` / 动作 | 一个可调用的动作 | 四个**面**：原语（动作）／声明（`Capability`）／线（`Tool`）／执行（`ActionPort`）。MCP 的 `ToolSpec` **直接产出** `Capability` ⇒ `Capability ≡ Tool` | `core.rs`（`Capability` / `ActionPort`）／`app_contract.rs` |
 | `Home` / 世界 / `core` / 逻辑 im 服务端 | 同一个权威单元 | 契约专名 vs 产品词 vs 代码词——**IM 平面，权威不在这里**。⚠ **2026-10-18 裁过一次外延**：`PRODUCT_VISION.md` §4 里「公共世界」共 7 处，其中 **L103 曾用它描述 IM 产品（含客户端）**——那是**措辞不严，不是第二个所指**（同节 L108 的判据：「**拔掉客户端**：Agent 走 Backend 协议，**不依赖任何客户端**」⇒ **世界不需要客户端就能活**）；**该处已改写**。⇒ **「世界」= core（逻辑 im 服务端 ＋ 它裁决的公共事实），不含客户端** | `PRODUCT_VISION.md` §4「一词一主」 |
 | **值班室 / `direct` 房** | 你与某一支 Agent 之间的那一间 `direct` 房 | ⚠ **它不是第三种房 kind**：`direct` 是**契约词**，**「值班室」是产品给它起的名字**（`home.js up` 打印的那一间）。⇒ 读到「值班室」按 `direct` 理解，**别当成一个新房型**（全仓 74 处 / 22 文件，用量大而定义只在 `README.md` 首现那一句） | `../contracts/core-v1/CORE_V1_IM_CONTRACT.md` §5.1（`direct`）／`../../README.md` 首现处（产品定义） |
-| `Extension` / `App` | **一组动作的接入单元** | **旧线叫 `Extension`、新线叫 `App`**：`AGENT_CORE_PRINCIPLES.md` §「Extension / Tool」（活文档）写「Extension 是一个 Agent 可以进入的完整小系统；Tool 是 Extension 暴露的原子动作」，同文件 `:38` 写「IM、Files、Terminal、Memory、RAG 等都是 Extension」；新线与实现用 `App`（§9.1② 的 `App` 行 ＋ `agent/src/app_contract.rs` 的 `AppPort`）。⚠ 第三个同名是**已删除的旧目录** `extensions/`（`RUNTIME_CORE_AND_LAYERING.md` §五的更正段已明写「已不存在」） | `app_contract.rs`／本文件 §9.1② |
+| `Extension` / `App` | **一组动作的接入单元** | **旧线叫 `Extension`、新线叫 `App`**：`AGENT_CORE_PRINCIPLES.md` §「Extension / Tool」（活文档）写「Extension 是一个 Agent 可以进入的完整小系统；Tool 是 Extension 暴露的原子动作」，同文件 `:38` 写「IM、Files、Terminal、Memory、RAG 等都是 Extension」；新线与实现用 `App`（§9.1② 的 `App` 行 ＋ `agent/src/app_contract.rs` 的 `AppPort`）。⚠ 第三个同名是**已删除的旧目录** `extensions/`（旧线物，考古走 Git 历史） | `app_contract.rs`／本文件 §9.1② |
 | **`Run` / 活动 / 清醒** | 一段连续的清醒 | **三种写法、三种读者**：`Run`＝**标识符**；「活动」＝**UI 标签**（1:1）；「清醒」＝**内部散文**（⚠ 上屏即违规，`jargon.mjs` 明列） | `core`；UI 标签见 `AGENTS.md`「UI 标签与概念 1:1」 |
 | **处境链 / 开场快照 / Run 级插槽** | Run 边界注入的那一批 | **本表正文自己明文等同**（「处境链那批，即「开场快照」」）却一直没登记；三个写法都活（全仓 38 / 36 / —） | `agent/src/composition.rs` |
 | **搁下 / `hold` / `held` / 歇着** | 主体结束这一段的第二种方式 | 动词 `hold_run`（20 处）＝**标识符**；状态 `SubjectEnding::Held`（77 处）＝**标识符**；「搁下」（107 处）＝**中文正名**；「歇着」（13 处）＝**别名**。⚠ 本表**相邻两行此前用了两套写法**（「搁下 `held`」与「`hold`（歇着）」） | `RUNTIME_TERMINAL_DECISIONS.md` §6；`foundation.rs` 的 `SubjectEnding` |

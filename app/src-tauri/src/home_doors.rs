@@ -412,7 +412,7 @@ pub fn config_snapshot(facts: &LocalFacts) -> Value {
         .collect();
     // ★ **这两份配置最后是谁改的**（2026-10-18；形状权威 `scripts/home/model_witness.js`）。
     //   一次读全，然后**按份看**（`哪一份 ⇒ 它自己最后一条`）—— 不是"整本账里有没有人动过"。
-    //   两档分开报：门改的**有时刻**；别处改的（她走 terminal、别的工具）**只知"变了"**。
+    //   两档分开报：门改的**有时刻**；别处改的（主体走 terminal、别的工具）**只知"变了"**。
     let ledger = crate::model_witness::open(home_dir);
     let reading_of =
         |file: &Path| crate::model_witness::reading_for(&ledger, home_dir, file).to_json();
@@ -549,7 +549,7 @@ pub fn config_snapshot(facts: &LocalFacts) -> Value {
                     "bound": bound,
                     "model": model,
                     "reasoningEffort": effort,
-                    // 她那份绑定（**先选好的那条**）也有见证 —— 与住户那一格同一个形状、同一个来路。
+                    // 这一支那份绑定（**先选好的那条**）也有见证 —— 与住户那一格同一个形状、同一个来路。
                     "witness": reading_of(
                         &crate::home_facts::agent_env_root(home_dir, &agent_id)
                             .join(crate::model_sources::BINDING_FILE),
@@ -926,11 +926,11 @@ fn agent_id_shape_ok(value: &str) -> bool {
 ///
 /// - `agent_id` **没给** ⇒ 这台机器上的**每一支**（家级默认）；
 /// - `agent_id` **给了** ⇒ **只写那一支**（一支一份绑定本来就是住户级事实，缺的只是"只给某一支换"）；
-/// - `agent_id` **给了、而这台机器上还没有这一支** ⇒ 写**她将来会住的那个环境根**
-///   （`<家>/agents/<id>/`）：**选择先于接上** —— 绑定的落点本来就是"她的环境根"，
-///   而环境根要等接她第 2 步才建。⚠ 这一格曾经是拒绝（`no_such_resident`），于是
-///   "先给她选好、再接上"这条路在页面上走不通（2026-10-14 主人撞上：机器上有两条来源，
-///   而接她的那一步按"选哪一条 = 花谁的钱，不替她决定"停在原地，两边互等）。
+/// - `agent_id` **给了、而这台机器上还没有这一支** ⇒ 写**它将来会住的那个环境根**
+///   （`<家>/agents/<id>/`）：**选择先于接上** —— 绑定的落点本来就是"它的环境根"，
+///   而环境根要等接它第 2 步才建。⚠ 这一格曾经是拒绝（`no_such_resident`），于是
+///   "先给它选好、再接上"这条路在页面上走不通（2026-10-14 主人撞上：机器上有两条来源，
+///   而接它的那一步按"选哪一条 = 花谁的钱，不替它决定"停在原地，两边互等）。
 ///
 ///   ⚠ **形状不合法不许走到这里**（调用方先过 [`agent_id_shape_ok`]，那一格回 `bad_agent_id`）。
 ///   ⚠ 空目录**不算住户**（住户判据要 `agent.conf` 或 `identity.json`）⇒ 写下的这一笔
@@ -1178,7 +1178,7 @@ fn binding_write(facts: &LocalFacts, body_text: &str) -> (u16, Value) {
     //   不许静默成功：没有可绑/可解的那一支，就该说清（与 JS 门那一侧**同一个码、同一个状态**：
     //   `scripts/home/config-server.js` 的 `ERRORS.NO_RESIDENT`，客户端那份封闭表逐字对齐）。
     //   ⚠ **2026-10-14**：这一条只对"**没点名**"的那一笔成立 —— 点了名的（哪怕这台机器上
-    //   一支住户都还没有）有目标：写在她将来会住的那个环境根上（"选择先于接上"）。
+    //   一支住户都还没有）有目标：写在它将来会住的那个环境根上（"选择先于接上"）。
     if agent_id.is_none() && env_roots_with_ids(&facts.home_dir).is_empty() {
         return (409, json!({ "error": "no_resident" }));
     }
@@ -1699,7 +1699,7 @@ fn roster(residents: &[local_residents::Resident], facts: &LocalFacts) -> Value 
 ///
 /// ⚠ **为什么要有这一格**（2026-10-05）：壳只认新布局 `<家>/agents/<支>/`，而把老家搬成
 /// 新形态是 `up.js` 的 `migrateHomeShape`（**app 不做迁移**，见 `app/README.md` §5 第 9 行）
-/// ⇒ 老家在壳里会落到"零住户"，页面于是说「**这台机器上还没有 Agent**」，而**她明明在**
+/// ⇒ 老家在壳里会落到"零住户"，页面于是说「**这台机器上还没有 Agent**」，而**它明明在**
 /// （只是住在老形态里）。那是把"我认不出这个形状"说成"它不存在"。
 /// 判据一句话：**认不出的形状不许说成不存在** —— 这一格只报事实，人话归页面。
 ///
@@ -2785,17 +2785,17 @@ mod tests {
     }
 
     /// ★ 2026-10-12：**住户级覆盖** —— `agentId` 给了就**只写那一支**；
-    /// ★ 2026-10-14「选择先于接上」：点名一支**还没住户化**的 ⇒ 落在**她将来会住的那个
+    /// ★ 2026-10-14「选择先于接上」：点名一支**还没住户化**的 ⇒ 落在**它将来会住的那个
     /// 环境根**上（`<家>/agents/<id>/`）；点名一个**形状不合法**的 ⇒ `400 bad_agent_id`
     /// （这一格会变成目录名 ⇒ 不预检就是目录穿越）。
     ///
     /// 与 JS 门那一侧同一条口径（`config-server.js` 的 `writeTargetsOf` /`agentIdShapeOk`）。
     ///
     /// ⚠ **判据翻转的记账**：② 从前是 `409 no_such_resident`（"这台机器上没有这一支 ⇒ 拒"）。
-    /// 翻转的理由不是放宽，是**那条判据缺了一个真处境**：绑定本来就住在"她的环境根"里，
-    /// 而环境根要等接她第 2 步才建 ⇒ "先给她选好、再接上"这条路在页面上走不通
-    /// （2026-10-14 主人撞上：机器上有两条来源，接她时按"选哪条 = 花谁的钱"停在原地，
-    /// 而选的那一页要求她已经在机器上 —— 两边互等）。老消费者不少什么：`no_such_resident`
+    /// 翻转的理由不是放宽，是**那条判据缺了一个真处境**：绑定本来就住在"它的环境根"里，
+    /// 而环境根要等接它第 2 步才建 ⇒ "先给它选好、再接上"这条路在页面上走不通
+    /// （2026-10-14 主人撞上：机器上有两条来源，接它时按"选哪条 = 花谁的钱"停在原地，
+    /// 而选的那一页要求它已经在机器上 —— 两边互等）。老消费者不少什么：`no_such_resident`
     /// 照旧留在封闭表里（**旧版的门**在远程那台还这么答）。
     #[test]
     fn binding_can_target_one_resident_and_seeds_an_unhomed_one() {
@@ -2844,13 +2844,13 @@ mod tests {
             "没点名的那一支一个字节都不许动"
         );
 
-        // ② 点名一支**还没住户化**的 ⇒ 落在她将来会住的那个环境根上；别人一个字节不动。
+        // ② 点名一支**还没住户化**的 ⇒ 落在它将来会住的那个环境根上；别人一个字节不动。
         let fresh = home.join("agents").join("a-9");
         let (status, body) = binding_write(&facts, r#"{"source":"ms-2","agentId":"a-9"}"#);
         assert_eq!(status, 200, "{body}");
         assert!(
             binding_text(&fresh).contains("ms-2"),
-            "先选好的那一笔要落在她的环境根上"
+            "先选好的那一笔要落在它的环境根上"
         );
         assert!(
             !fresh.join("agent.conf").exists(),
@@ -2860,7 +2860,7 @@ mod tests {
             binding_text(&first).contains("ms-1"),
             "先选好的那一笔不许顺手改别人"
         );
-        // 读面：她进 `boundUnhomed`（"先选好了"），**不进** `boundPerResident`（"住户"）。
+        // 读面：它进 `boundUnhomed`（"先选好了"），**不进** `boundPerResident`（"住户"）。
         let snapshot = config_snapshot(&facts);
         let unhomed: Vec<&str> = snapshot["boundUnhomed"]
             .as_array()
@@ -2878,7 +2878,7 @@ mod tests {
         assert_eq!(
             residents,
             vec!["a-1", "a-2"],
-            "她不是住户 ⇒ 不许混进住户那一格"
+            "它还不是住户 ⇒ 不许混进住户那一格"
         );
 
         // ③ **形状不合法** ⇒ 400，且连目录都不建。
@@ -3065,7 +3065,7 @@ mod tests {
     /// "这一拍从哪儿读的"，不是"谁改的"。判据四条，一条都不许压：
     /// ① **按份记**：这道门写了几份就记几条（清单 / 每一支的绑定各自一条）；
     /// ② **"清"也是一笔写**（`sha256: null`）—— 不记它，页面上的"解除指定"会读成"别处有人动过它"；
-    /// ③ **两档分开**：门改的 ⇒ `same` **且有时刻**；门外那只手改的（她走 terminal）⇒
+    /// ③ **两档分开**：门改的 ⇒ `same` **且有时刻**；门外那只手改的（主体走 terminal）⇒
     ///    `changed/content`，而**是谁这条路上答不出来**（时刻仍是"门最后写于何时"）；
     /// ④ **判不了 ≠ 没改过**：从没被门碰过 ⇒ `no-witness`。
     #[test]
@@ -3131,7 +3131,7 @@ mod tests {
         );
         assert!(after["witnessChainBreakAt"].is_null(), "链是完整的");
 
-        // ③ 门外那只手改的（她走 terminal）⇒ `changed/content`，而"是谁"答不出来
+        // ③ 门外那只手改的（主体走 terminal）⇒ `changed/content`，而"是谁"答不出来
         std::fs::write(&binding_path, "{\n  \"source\": \"ms-1\"\n}\n").unwrap();
         let touched = config_snapshot(&facts);
         assert_eq!(
@@ -3376,7 +3376,7 @@ mod tests {
     /// ★ 2026-10-05：**认不出的形状不许说成不存在**。
     ///
     /// 壳只认新布局，而把老家（`<家>/env`）搬成新形态是 `up.js` 的事（app 不做迁移）
-    /// ⇒ 老家会落到"零住户"，页面说"这台机器上还没有 Agent"，**而她明明在**。
+    /// ⇒ 老家会落到"零住户"，页面说"这台机器上还没有 Agent"，**而它明明在**。
     /// 这一格只报事实（`legacyHome: true`），人话归页面。
     #[test]
     fn a_legacy_shaped_home_is_reported_as_such_not_as_absent() {

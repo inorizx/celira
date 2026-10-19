@@ -58,7 +58,7 @@ use crate::world_channel::WorldHttp;
 /// 规矩：**取这台机器的用户名**（机器事实 —— 就是"他自己"，不表态关系）；
 /// 取不到 ⇒ 中性占位 `未命名`。⚠ 从前这里是 `主人`：那会把 **IM 里可变的昵称**与
 /// **世界侧的 ownership**（`role='owner'` 是权限事实）压成一个词，而且 Agent 拿到
-/// 这个显示名就会照着叫 —— 等于系统借一个昵称替她认定了关系（判据 9）。
+/// 这个显示名就会照着叫 —— 等于系统借一个昵称替主体认定了关系（判据 9）。
 pub fn default_human_display_name() -> String {
     let username = std::env::var("USERNAME").ok();
     let user = std::env::var("USER").ok();
@@ -164,7 +164,7 @@ impl WorldState {
     }
 }
 
-/// 一支本机住户在读数里的样子（**只报机器事实**：她是谁、账本说她在不在跑）。
+/// 一支本机住户在读数里的样子（**只报机器事实**：它是谁、账本说它在不在跑）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResidentReadout {
@@ -558,7 +558,7 @@ pub async fn local_world_readout(
 }
 
 /// 表态「在这台机器上跑一个世界」：写下表态，然后**确保它在跑**（探活优先），
-/// **并确保这个家的住户都在跑**（§8.1：本地进程是本地 app 的孩子 —— "打开就进、她就在"）。
+/// **并确保这个家的住户都在跑**（§8.1：本地进程是本地 app 的孩子 —— "打开就进、它就在"）。
 ///
 /// 返回值是**起完之后**的读数（世界在不在、主人是谁、住户各在不在跑），**不含 token** ——
 /// token 只从 [`local_world_session`] 出来，一次一支。
@@ -585,10 +585,10 @@ pub async fn local_world_enable(
                     return Ok(view);
                 }
             };
-            // 世界在跑 ⇒ 把本机住户也带起来（她本来在跑 ⇒ 一个字都不动）。
+            // 世界在跑 ⇒ 把本机住户也带起来（它本来在跑 ⇒ 一个字都不动）。
             // ⚠ 起住户**不等报到**：不为了报一句读数把正门堵二十秒（状态由下一次读数给出）。
-            // ⚠ 主人会话是**可选的**：拿不到就跳过"世界说她在线吗"那一问（账本仍然照判），
-            //    但**绝不**因为拿不到会话就不起她 —— 那会让"打开 app 她就在"这条承诺失效。
+            // ⚠ 主人会话是**可选的**：拿不到就跳过"世界说它在不在线"那一问（账本仍然照判），
+            //    但**绝不**因为拿不到会话就不起它 —— 那会让"打开 app 它就在"这条承诺失效。
             let token = match local_session(&facts) {
                 SessionOutcome::Ok { token, .. } => Some(token),
                 _ => None,
@@ -637,13 +637,15 @@ fn summarize_residents(reports: &[crate::local_residents::ResidentReport]) -> Op
                 format!("{}：缺宿主可执行件（{}）", report.label, exe.display())
             }
             StartOutcome::RefusedMissingModel => format!(
-                "{}：模型那一半没人在（没有文件档绑定，也没有 DEEPSEEK_API_KEY）—— 没起她",
+                "{}：模型那一半没人在（没有文件档绑定，也没有 DEEPSEEK_API_KEY）—— 没起这支 Agent",
                 report.label
             ),
             StartOutcome::RefusedMissingCredential { detail } => {
                 format!("{}：{detail}", report.label)
             }
-            StartOutcome::Failed { detail } => format!("{}：起她没成（{detail}）", report.label),
+            StartOutcome::Failed { detail } => {
+                format!("{}：起这支 Agent 没成（{detail}）", report.label)
+            }
         };
         lines.push(line);
     }

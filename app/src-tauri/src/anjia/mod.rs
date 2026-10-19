@@ -4,7 +4,7 @@
 //!
 //! **创建给身份，安家给身体；两半两显式，不存在默认 Agent**（`PROJECT_SHAPE.md` §8.5）。
 //! 世界侧能建 Agent（前端 `POST /v1/agents`），但那只建了**身份** —— 不写环境根、
-//! 不发后端凭据、不起任何东西，所以**她不会回话**。这一层补的是机器侧那一次显式安家
+//! 不发后端凭据、不起任何东西，所以**它不会回话**。这一层补的是机器侧那一次显式安家
 //! 在 **app 里的自动化**：不发明新概念、不新造协议（im 服务端与 `scripts/home/` 一字不动）。
 //!
 //! ## 六步（§8.5）与三条判据（`adopt.js` 照抄，只改第三条）
@@ -123,7 +123,7 @@ pub enum RefusalReason {
     ModelBindingUnreadable,
     /// 缺模型凭据（没有绑定，也没有 `DEEPSEEK_API_KEY`）。
     MissingModelCredential,
-    /// 这台机器上有多条模型来源，而**这一支还没选用哪一条**（选哪条 = 花谁的钱 ⇒ 不替她决定）。
+    /// 这台机器上有多条模型来源，而**这一支还没选用哪一条**（选哪条 = 花谁的钱 ⇒ 不替它决定）。
     ModelNotChosen,
     /// 本地存储里的凭据文件读不懂。
     CredentialUnreadable,
@@ -411,7 +411,7 @@ pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
     // ── 2.5) 模型那一半（照 `up.js` 的早失败口径；见文件头）──
     //
     // ⚠ 2026-10-03：这一段的**口径收进了 `host_process::model_plan`**（安家那只手与
-    // "打开 app 起她"共用同一处）—— 从前两边各写一份，迟早漂移。
+    // "打开 app 起它"共用同一处）—— 从前两边各写一份，迟早漂移。
     //
     // ★ 2026-10-15：**没有模型计划不再拦住"接上"**（`plan = None` ⇒ 照旧建家、只是先不起）。
     //   判据与四态见 [`choose_entry_if_unbound`]：接上是"存在"，选模型是"花钱"，存在不等花钱。
@@ -626,7 +626,7 @@ pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
     // `node home.js status` 看这支住户是「住户 ?，房 无 …… 还没安家」，`up` 还会想再安一次。
     // 形状权威是 `scripts/home/residents.js`（照抄，不发明）：`agent_id` / `room_id` / `slot` /
     // `display_name`；序号 `max(已有) + 1` 单调不回收；房**问世界**（`GET /v1/rooms` 找
-    // `kind=direct` 且 `peer.id` 就是她的那间——`adopt.js` 原样），问不到就写空。
+    // `kind=direct` 且 `peer.id` 就是它的那间——`adopt.js` 原样），问不到就写空。
     //
     // ⚠ 这里写的全是**编排事实**（这台机器上的第几支、跟哪间房绑着）——**主体自己的经历与判断
     // 一个字都不在这里**（判据 9：系统补能力缺口、不替认知判断）。
@@ -634,7 +634,7 @@ pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
         Ok(Some(id)) => id,
         Ok(None) => {
             lines.push(
-                "[安家] 世界里还没有她与主人的那间 direct 房 —— 登记里房那一格先写空".to_string(),
+                "[安家] 世界里还没有它与主人的那间 direct 房 —— 登记里房那一格先写空".to_string(),
             );
             String::new()
         }
@@ -690,7 +690,7 @@ pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
     // ★ 2026-10-15：**没有模型计划就不起**（`plan = None`，即 0 条或多条来源、这一支还没选）。
     //   这不是失败，也不是"跑起来了"——**接上了，先没起它**（第三种结局，如实报）。
     //   起了它也答不了话（`local_residents::start_resident` 本来就如实拒绝没模型的住户），
-    //   所以这里**不起**：早失败那条纪律照旧（不是"起起来再看着她认证不过"）。
+    //   所以这里**不起**：早失败那条纪律照旧（不是"起起来再看着它认证不过"）。
     let Some(plan) = plan else {
         lines.push(
             "[安家] 接上了，但**先没起它**：这一支还没选模型 —— 去它自己的页面上选一条\
@@ -834,7 +834,7 @@ fn push_failure_detail(lines: &mut Vec<String>, stderr: &str, error: Option<&str
 /// 环境根与凭据都在、登记却缺 —— 于是 `home.js` 那个视角永远说它"还没安家"。
 /// 补登记**只补机械事实**：
 ///
-/// - **不碰环境根**（她的经历、笔记、轨迹一个字都不动）；
+/// - **不碰环境根**（主体的经历、笔记、轨迹一个字都不动）；
 /// - **不碰进程**（不起、不停、不认领 PID）；
 /// - **幂等**（登记内容没变就一个字都不写）。
 pub fn ensure_registration(
@@ -856,7 +856,7 @@ pub fn ensure_registration(
     let env_root = home_dir.join("agents").join(&agent_id);
     if !env_root.join("identity.json").is_file() {
         lines.push(format!(
-            "[登记] 这个家没有她的环境根（{} 里没有 identity.json）—— 补登记只补**已经安家**的住户；\
+            "[登记] 这个家没有它的环境根（{} 里没有 identity.json）—— 补登记只补**已经安家**的住户；\
              要安一支新的： node home.js up --agent {agent_id}",
             env_root.display()
         ));
@@ -945,7 +945,7 @@ pub fn ensure_registration(
     let room_id = match world_client.find_own_direct_room() {
         Ok(Some(id)) => id,
         Ok(None) => {
-            lines.push("[登记] 世界里还没有她与主人的那间 direct 房 —— 房那一格写空".to_string());
+            lines.push("[登记] 世界里还没有它与主人的那间 direct 房 —— 房那一格写空".to_string());
             String::new()
         }
         Err(detail) => {
@@ -1033,7 +1033,7 @@ pub enum RegisterOutcome {
     Registered { changed: bool },
     /// 拒绝：id 形状不对。
     RefusedBadId,
-    /// 拒绝：这个家没有她的环境根（补登记只管已经安家的住户）。
+    /// 拒绝：这个家没有它的环境根（补登记只管已经安家的住户）。
     RefusedNoEnvRoot,
     /// 拒绝：问不到世界（这一点**不猜**）。
     RefusedWorldUnreadable,
@@ -1102,7 +1102,7 @@ type BindingRefusal = (RefusalReason, Vec<String>);
 ///
 /// ⚠ **不违反 2026-10-07 那条裁决**（app 形态不继承模型来源）：来源仍然**只从页面来**
 /// （页面写的清单），一个环境变量都不读；这一次动的只是"**要不要因为还没选而拒绝接上**"。
-/// ⚠ **也不违反"早失败"那条纪律**：没模型就**不起进程**（不是"起起来再看着她认证不过"）——
+/// ⚠ **也不违反"早失败"那条纪律**：没模型就**不起进程**（不是"起起来再看着它认证不过"）——
 /// 起不起的判据在 `local_residents::start_resident`（它本来就如实拒绝没模型的住户），
 /// 这一步只是**不再把"接上"也一起挡掉**。
 ///
@@ -1257,13 +1257,13 @@ mod tests {
         cleanup(&[&home, &repo]);
     }
 
-    /// ★ 「已经安家」时报出的**环境根**：只有 `home.conf` 的住户登记对得上时，她住的地方是
+    /// ★ 「已经安家」时报出的**环境根**：只有 `home.conf` 的住户登记对得上时，它住的地方是
     /// **今天**的环境根（`<家>/agents/<id>/`），**不是** `<家>/env`（那是 2026-09-30 以前的
     /// 老家形状、只是迁移输入）。
     ///
     /// ⚠ **2026-10-18 加**：这一格此前**没有任何测试**——`home_facts.rs` 的 ③ 只断言
     /// `Plan::Already { .. }`、**不看路径** ⇒ 那条路径一直写着老家形状而没人发现。
-    /// 判据一句话：**读数说"她住哪"，就必须是她真的住哪**（那是给用户看的）。
+    /// 判据一句话：**读数说"它住哪"，就必须是它真的住哪**（那是给用户看的）。
     #[test]
     fn already_homed_by_conf_reports_todays_env_root_not_the_old_shape() {
         let home = temp_dir("already-conf-home");
