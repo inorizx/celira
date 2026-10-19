@@ -35,7 +35,14 @@
  *   ⚠ **射程只有词表，这是量出来的**：全仓 md 共 38 条这类引用，`agent/README.md` 的 13 条是
  *   **裸文件名**（基准隐含在 `agent/src/`）⇒ 放大射程会立刻产生 13 条假红。见下方那一段。
  *
- * ⇒ 四条判据都是"**声明即受约束**"：一个文件自称对外入口，它就接受判据一；
+ * - **判据五（前门不许引用门后的东西）**：`outputs/`（裁决材料、实测报告、施工单）**整目录不随
+ *   本仓发表**，而对外入口里一条**具体**的 `outputs/X.md` 对仓外读者就是一条**打不开的路径**。
+ *   门后文档里那种引用是**承重的**（`AGENTS.md`：一处引用就是那份文件"不得删除"的理由），
+ *   **前门不是**。2026-10-19 实测：前门 0 处（早先几轮清干净的）⇒ 这条判据防的是下一刀再漏。
+ *   ⚠ **只认具体文件名**——泛指的 `outputs/…` 是**边界声明自己要用的写法**（README 末段那句话
+ *   必须说出这个形状，否则读者遇到它时无从理解）。
+ *
+ * ⇒ 五条判据都是"**声明即受约束**"：一个文件自称对外入口，它就接受判据一与判据五；
  * 一份 outputs 文件被活文档点名，它就接受判据二；一个词进了 §9 主表，它就接受判据三；
  * 一条引用写进词表，它就接受判据四。
  *
@@ -52,6 +59,8 @@
  * 4. **词表里的每条 `文件:行号`：路径解析得到、行号在范围内**。⚠ **射程只有词表**——
  *    别的文档用裸文件名（基准隐含），放大射程就是一堆假红。有意保留的坏引用，
  *    **在那一行写「豁免判据四」并把理由写在同处**。
+ * 5. **对外入口里不许出现具体的 `outputs/<名字>.<扩展名>`**（泛指的 `outputs/…` 放行，
+ *    见那个函数的注释）。门后文档不受它管。
  *
  * ## 它量得到什么、量不到什么（如实登记）
  *
@@ -181,8 +190,36 @@ function checkPronoun(rel, text, isOutward) {
   ]
 }
 
-const REF_RE = /outputs\/([A-Za-z0-9_-]+\.md)/g
+/**
+ * 判据五：**对外入口不许引用门后的东西**（具体到文件名的 `outputs/<名字>.<扩展名>`）。
+ *
+ * 判据是"读者能不能打开"：那个目录**整份不随本仓发表**，因此前门里一条**具体**的 `outputs/…`
+ * 路径就是一条死路径。
+ *
+ * ⚠ **只认具体文件名**（2026-10-19 实测抓出来的）：第一版写成"任何 `outputs/`"，于是
+ * `README.md` 那条**边界声明自己**（"the `outputs/…` references you will meet … point at the
+ * maintainer's records"）当场被报红——而那句话**必须**说出这个写法，否则读者遇到它时无从理解。
+ * ⇒ 判据是"**能不能打开**"：泛指的 `outputs/…` 说得清，具体的 `outputs/X.md` 打不开。
+ *
+ * ⚠ 它**只管前门**——门后文档里那种引用是**承重的**（`AGENTS.md`：一处引用就是那份文件
+ * "不得删除"的理由），门后照旧。
+ */
+function checkNoBehindTheDoorRefs(rel, text) {
+  const problems = []
+  String(text)
+    .split(/\r?\n/)
+    .forEach((line, index) => {
+      if (!/outputs\/[A-Za-z0-9_-]+\.[A-Za-z0-9]+/.test(line)) return
+      problems.push(
+        `${rel}:${index + 1}：对外入口引用了一个**具体的** \`outputs/\` 文件 —— ` +
+          `**那个目录整份不随本仓发表** ⇒ 仓外读者拿到的是一条打不开的路径。` +
+          `改成转述，或指向 README.md 的边界声明（判据五）。`,
+      )
+    })
+  return problems
+}
 
+const REF_RE = /outputs\/([A-Za-z0-9_-]+\.md)/g
 /** 从一段文本里取出它按名字引用的 outputs 文件。 */
 function findOutputsRefs(text) {
   const out = new Set()
@@ -398,6 +435,17 @@ function selfCheck() {
   if (checkPronoun('<self-check>', '这里一个代词都没有。', true).length !== 0)
     missed.push('称谓判据自检：零代词的对外入口**不许**报红')
 
+  // 判据五自检（2026-10-19 加）：**必须**抓住前门里那条打不开的路径，**必须**放行别的写法。
+  // ⚠ 夹具**拼**出来（本文件也在扫描面里，写死那个字面量会让守卫抓到自己）。
+  const behind = `${'outputs'}/${'SOME_REPORT.md'}`
+  if (checkNoBehindTheDoorRefs('<self-check>', `见 \`${behind}\` 那份报告`).length !== 1)
+    missed.push('判据五自检：前门里引用门后的目录**必须**被抓到')
+  if (checkNoBehindTheDoorRefs('<self-check>', '边界声明见 README.md 的「仓库地图与命名」末段').length !== 0)
+    missed.push('判据五自检：转述式写法（不写那条路径）**不许**报红')
+  // ⚠ 泛指的写法**必须**放行：边界声明自己就要说出 `outputs/…` 这个形状（见那个函数的注释）。
+  if (checkNoBehindTheDoorRefs('<self-check>', `遇到 \`${'outputs'}/…\` 这类引用，读成一条出处`).length !== 0)
+    missed.push('判据五自检：泛指的 `outputs/…`（边界声明要用它）**不许**报红')
+
   const refs = findOutputsRefs(
     // ⚠ 夹具**拼**出来、不写字面量：本文件也在扫描面里（`.mjs`），写「outputs/ + 文件名」这种
     //   字面量会让守卫抓到**自己的夹具**（实测踩过两次：第一版报夹具没登记；修的时候又在注释里
@@ -506,6 +554,18 @@ function main() {
     problems.push(...checkPronoun(rel, readFileSync(join(ROOT, rel), 'utf8'), true))
   }
 
+  // 1.5) **前门不许引用门后的东西**（判据五，2026-10-19 加）
+  //
+  // 判据：`outputs/`（裁决材料、实测报告、施工单）**整目录不随本仓发表** ⇒ 对外入口里出现
+  // 一条 `outputs/…` 引用，对仓外读者就是**一条打不开的路径**。门后文档里那种引用是承重的
+  // （`AGENTS.md`：一处引用就是"不得删除"的理由），**前门不是**——那里应当把它写成
+  // 转述或指向 `README.md` 的边界声明。
+  // 今天前门是 0 处（早先几轮清干净的）；这条判据防的是**下一刀再漏**。
+  for (const rel of outward.keys()) {
+    if (!existsSync(join(ROOT, rel))) continue
+    problems.push(...checkNoBehindTheDoorRefs(rel, readFileSync(join(ROOT, rel), 'utf8')))
+  }
+
   // 2) 证据锚索引判据
   //
   // ⚠ **不适用就报 `N/A`**（2026-10-18 加）：公开仓里**没有证据库**（那是维护者那一侧的东西，
@@ -573,7 +633,7 @@ function main() {
     process.exit(1)
   }
   console.log(
-    `[check-docs] 通过：对外入口 ${outward.size} 份（称谓判据）· ` +
+    `[check-docs] 通过：对外入口 ${outward.size} 份（称谓零代词 ＋ 不引用门后的具体路径）· ` +
       (hasIndex
         ? `被引用的 outputs 文件 ${refs.size} 份 ⊆ 索引 ${registered.size} 个名字`
         : '判据二 N/A（本仓没有证据库）') +
