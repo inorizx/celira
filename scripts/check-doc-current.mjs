@@ -72,7 +72,11 @@ const EVENT_LABEL = /TASK_\d+/g
  * 让后一节静默覆盖前一节。这里只做"分布读数"，不需要跨版本对齐，所以用原文更诚实。
  */
 function blocks(text) {
-  const lines = text.split('\n')
+  // ⚠ **必须吃掉行尾的 `\r`**（2026-10-18 实测踩过）：JS 的 `.` **不匹配 `\r`**，
+  // 而下面那条标题正则锚在 `$` 上 ⇒ 工作树一旦是 CRLF（Windows 上 `core.autocrlf=true`
+  // 很常见，而 `.gitattributes` 只管**提交**归一、管不到工作树），**一个标题都匹配不到**，
+  // 软读数会静默变成「散在 1 个标题下」—— 数字还在，意思没了。
+  const lines = text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
   const out = new Map()
   let key = '(前言)'
   out.set(key, [])
@@ -119,19 +123,30 @@ function readBaseline() {
   })
 }
 
-/** 植入违规：往一节里加一处刀叙述 ⇒ 必须被抓住。 */
+/** 植入违规：往一节里加一处刀叙述 ⇒ 必须被抓住。**顺带钉住 CRLF**。 */
 function selfCheck() {
   const sample = '### 3.1 甲\n\n这一格是当前事实。\n'
   const broken = '### 3.1 甲\n\n本刀改了这一点。\n'
   const same = knifeTotal(sample)
   const grew = knifeTotal(broken)
-  const ok = same === 0 && grew === 1
+  // ⚠ **CRLF 那一半**（2026-10-18 实测踩过的那个洞）：`.split('\n')` 之后每行带 `\r`，
+  // 而 `(\S.*)$` 匹配不到带 `\r` 的行 ⇒ 不剥 `\r` 的话，**标题一个都数不出来**、
+  // 软读数静默失效（总数判据照旧"绿"，所以这个洞只有自检能抓）。
+  //
+  // ⚠ **断言必须是"标题名"，不能是"块数"**：匹配不到时那一行会落进 `(前言)` 块，
+  // **块数仍然是 1** ⇒ 断言块数的话，这条自检**在坏的实现上也绿**（第一版就是这样，
+  // 实测发现它抓不到，才改成断言标题）。判据：**换掉实现，它必须红**。
+  const crlf = '### 3.1 甲\r\n\r\n本刀改了这一点。\r\n'
+  const crlfRows = knifeByBlock(crlf)
+  const crlfTitle = crlfRows.length === 1 ? crlfRows[0].title : '(块数不是 1)'
+  const crlfTotal = knifeTotal(crlf)
+  const ok = same === 0 && grew === 1 && crlfTitle === '3.1 甲' && crlfTotal === 1
   if (!ok) {
     console.error('[check-doc-current] selfCheck 失败：植入的违规没被抓到 —— 否则这个守卫就是装饰')
-    console.error(JSON.stringify({ same, grew }))
+    console.error(JSON.stringify({ same, grew, crlfTitle, crlfTotal }))
     process.exit(1)
   }
-  return { planted: 1 }
+  return { planted: 1, crlf: 1 }
 }
 
 const baselineText = readBaseline()
@@ -176,5 +191,5 @@ if (is > was) {
 
 console.log(
   `[check-doc-current] 通过：刀叙述 ${is} 处（基线 ${was} 处，未净增）· ` +
-    `自检植入 ${self.planted} 条违规已抓住。`,
+    `自检植入 ${self.planted} 条违规已抓住（含 CRLF 一条）。`,
 )
