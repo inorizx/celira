@@ -98,6 +98,7 @@ const DOC_ENTRY_FILES = [
   ['README.md', '仓外读者的第一份'],
   ['README.zh-CN.md', '同上，中文'],
   ['EXTENDING.md', '给想给 Celira 加东西的人'],
+  ['SECURITY.md', '报漏洞的人（GitHub 私密上报那一格；凭据纪律指回 AGENTS.md）'],
   ['examples/README.md', '能直接抄的样例'],
   ['im/server/README.md', '世界的部署文档（部署者在仓外）'],
   ['client/THEME_GUIDE.md', '主题作者'],
