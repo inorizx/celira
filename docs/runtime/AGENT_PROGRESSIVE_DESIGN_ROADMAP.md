@@ -148,7 +148,7 @@ RAG（语义检索）在当前宪法判据下已否（主人裁决记录：系�
 
 ## 8. 阶段七：Handoff 与上下文续接
 
-Handoff 是独立的临时注入内容，不属于核心；工程上经开场插槽进入 Run（handoff_notes 是未完结事项快照的组成锚点）。它只在当前 Run 因上下文边界需要续接时使用：
+Handoff 是独立的临时注入内容，不属于核心；工程上经开场插槽进入 Run（**交接那一份**是未完结事项快照的组成锚点——名字与形状见 `AGENT_VOCABULARY.md` §9「交接（handoff）」与 `RUNTIME_FOUNDATION_DESIGN.md` §B4）。它只在当前 Run 因上下文边界需要续接时使用：
 
 ```text
 Run A 接近边界

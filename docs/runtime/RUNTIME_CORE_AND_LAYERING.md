@@ -64,11 +64,11 @@
 
 **App 负责**：自己的事实与数据 · 自己的注入内容（经核心插槽，不自有注入管道）· 自己的工具与动作 · 自己的业务语义 · 自己的持久化 · 自己的读取与展示入口。
 
-**App 示例**（已接线 / 模块残余）：Celira IM（预装）· Clock（预装）· Notes（预装）· Files（fs）· Terminal · Web · Email · Handoff（record `kind="handoff"` 的消费侧组合，见 §八）· Artifact · Communication。
+**App 示例**（已接线 / 模块残余）：Celira IM（预装）· Clock（预装）· Notes（预装）· Files（fs）· Terminal · Web · Email · Handoff（**主体自持物 ＋ 交付判据 ＋ 开场插槽**的消费侧组合，见 §八）· Artifact · Communication。
 
 **四条硬边界**：
 
-1. **Handoff 不是核心**：它是 record + 交付游标 + 开场插槽的消费侧组合，无专属核心分支（§八）。核心**不依赖它的具体类型与字段、也不自动生成 Handoff**——写不写由 Agent 决定；移除它，Run 的建立/循环/收场/恢复照样成立。
+1. **Handoff 不是核心**：它是**主体自持物的一份文件**（`<环境根>/handoff`，写权归她自己的动词）＋ **交付判据**（从账里折，**不是一份新事实**）＋ 开场插槽的消费侧组合，无专属核心分支（§八）。核心**不依赖它的具体类型与字段、也不自动生成 Handoff**——写不写由 Agent 决定；移除它，Run 的建立/循环/收场/恢复照样成立。
 2. **Handoff 经 Run-level / Turn-level 接缝接入**，不新开注入通道（`AGENT_CORE_PRINCIPLES.md` §6：注入只走核心的开场插槽）。
 3. **Session 只表示一次 Run 内的追加式工作轨迹**，不承担跨 Run 的长期连续性。旧线实现事实（`agent/runtime/` 已于 2026-09-17 退役，当前实现事实见 `agent/README.md`）：Run 内轨迹的权威载体是 Subject Fact Ledger 与 `core::trace::RunTrace`（Run 内追加式工作轨迹；条目形状由装配层提供），经装配层投影为 `DialogueView.frames`；`extensions/session` 仍是未接入对话 Lane 的模块残余。
 4. **跨 Run 的连续性通过事实、记录、行动结果与 App 自己的持有物建立**——不通过核心持有的长会话容器（`AGENT_CONTINUITY_CONSTITUTION.md` §五：连续性是**数据**的属性，不是工具的属性）。具体 App 的能力不属于核心：核心不出现 App 的业务名。
