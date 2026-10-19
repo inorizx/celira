@@ -39,6 +39,11 @@
  *         ③ **`TASK_NN` 用得对不对**（是当出处，还是当主语）。
  * ⚠ 所以它**不是"文档已经干净"的证明**，只是"没有变脏"的下界。
  *
+ * ⚠ **豁免写在行里**（与判据三 / 判据四同规）：确实要保留、但**有意为之**的行，在**那一行**
+ * 写「豁免判据current」并写明理由。豁免**不是隐形的** —— 软读数会把豁免行数报出来。
+ * 今天只有一处：**规矩自己的措辞**（§5 那句「不是「这一刀的经过」」，而 `AGENTS.md`
+ * 正引用那一句作为权威）—— 改它等于改规矩的名字。
+ *
  * 退出码：0 = 通过 · 1 = 刀叙述净增了
  *
  * 用法：node scripts/check-doc-current.mjs
@@ -71,12 +76,17 @@ const EVENT_LABEL = /TASK_\d+/g
  * ⚠ **键是标题原文**，不是号 —— 这份文档有过重复节号（`3.93` 出现两轮），按号做键会
  * 让后一节静默覆盖前一节。这里只做"分布读数"，不需要跨版本对齐，所以用原文更诚实。
  */
+/** 吃掉行尾的 `\r` —— 理由见 `blocks()` 里那段注释。 */
+function stripCr(text) {
+  return text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
+}
+
 function blocks(text) {
   // ⚠ **必须吃掉行尾的 `\r`**（2026-10-18 实测踩过）：JS 的 `.` **不匹配 `\r`**，
   // 而下面那条标题正则锚在 `$` 上 ⇒ 工作树一旦是 CRLF（Windows 上 `core.autocrlf=true`
   // 很常见，而 `.gitattributes` 只管**提交**归一、管不到工作树），**一个标题都匹配不到**，
   // 软读数会静默变成「散在 1 个标题下」—— 数字还在，意思没了。
-  const lines = text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
+  const lines = stripCr(text)
   const out = new Map()
   let key = '(前言)'
   out.set(key, [])
@@ -92,23 +102,41 @@ function blocks(text) {
   return out
 }
 
+/**
+ * **行内豁免**（与判据三 / 判据四同规）：确实要保留刀叙述、但有意为之的行，
+ * 在**那一行**写「豁免判据current」并写明理由。豁免**不是隐形的**——下面会把条数报出来。
+ *
+ * 今天只有一处：**规矩自己的措辞**（「§3.x 收的是「当前事实」，不是「这一刀的经过」」，
+ * `AGENTS.md` 正引用 §5 这一句作为权威）。改它 = 改规矩的名字。
+ */
+const EXEMPT = '豁免判据current'
+
+/** 一行的刀叙述条数（**豁免行算 0**）。 */
+function lineKnife(line) {
+  if (line.includes(EXEMPT)) return 0
+  let n = 0
+  for (const [word] of KNIFE_WORDS) n += line.split(word).length - 1
+  return n
+}
+
 /** 全文的刀叙述条数（硬判据用）。 */
 function knifeTotal(text) {
-  let n = 0
-  for (const [word] of KNIFE_WORDS) n += text.split(word).length - 1
-  return n
+  return stripCr(text).reduce((sum, line) => sum + lineKnife(line), 0)
 }
 
 /** 每个标题下的刀叙述条数（软读数用）。 */
 function knifeByBlock(text) {
   const rows = []
   for (const [title, body] of blocks(text)) {
-    const joined = body.join('\n')
-    let n = 0
-    for (const [word] of KNIFE_WORDS) n += joined.split(word).length - 1
+    const n = body.reduce((sum, line) => sum + lineKnife(line), 0)
     if (n > 0) rows.push({ title, n })
   }
   return rows.sort((a, b) => b.n - a.n)
+}
+
+/** 豁免了几行（**报出来**：豁免不能是隐形的）。 */
+function exemptLineCount(text) {
+  return stripCr(text).filter((line) => line.includes(EXEMPT)).length
 }
 
 function eventLabels(text) {
@@ -140,13 +168,23 @@ function selfCheck() {
   const crlfRows = knifeByBlock(crlf)
   const crlfTitle = crlfRows.length === 1 ? crlfRows[0].title : '(块数不是 1)'
   const crlfTotal = knifeTotal(crlf)
-  const ok = same === 0 && grew === 1 && crlfTitle === '3.1 甲' && crlfTotal === 1
+  // ⚠ **豁免那一半**：写了豁免 token 的行**必须不计入**（否则豁免是假的）。
+  const exempted = '### 3.1 甲\n\n本刀改了这一点。豁免判据current：自检用。\n'
+  const exemptTotal = knifeTotal(exempted)
+  const exemptCount = exemptLineCount(exempted)
+  const ok =
+    same === 0 &&
+    grew === 1 &&
+    crlfTitle === '3.1 甲' &&
+    crlfTotal === 1 &&
+    exemptTotal === 0 &&
+    exemptCount === 1
   if (!ok) {
     console.error('[check-doc-current] selfCheck 失败：植入的违规没被抓到 —— 否则这个守卫就是装饰')
-    console.error(JSON.stringify({ same, grew, crlfTitle, crlfTotal }))
+    console.error(JSON.stringify({ same, grew, crlfTitle, crlfTotal, exemptTotal, exemptCount }))
     process.exit(1)
   }
-  return { planted: 1, crlf: 1 }
+  return { planted: 1, crlf: 1, exempt: 1 }
 }
 
 const baselineText = readBaseline()
@@ -157,6 +195,7 @@ const was = knifeTotal(baselineText)
 const is = knifeTotal(currentText)
 const byBlock = knifeByBlock(currentText)
 const labels = eventLabels(currentText)
+const exempt = exemptLineCount(currentText)
 
 if (is < was) {
   console.log(
@@ -166,7 +205,7 @@ if (is < was) {
 
 console.log(
   `[check-doc-current] 软读数：刀叙述 ${is} 处、散在 ${byBlock.length} 个标题下；` +
-    `事件标签 \`TASK_NN\` ${labels} 处（**允许**，只报不判）。`,
+    `**行内豁免 ${exempt} 行**；事件标签 \`TASK_NN\` ${labels} 处（**允许**，只报不判）。`,
 )
 for (const row of byBlock.slice(0, 15)) {
   console.log(`    ${String(row.n).padStart(3)} 处  ${row.title.slice(0, 64)}`)
