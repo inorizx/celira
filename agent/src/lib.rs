@@ -72,6 +72,7 @@ pub mod event_cards;
 pub mod file_app;
 pub mod file_view;
 pub mod foundation;
+pub mod handoff;
 pub mod holdings;
 pub mod host_loop;
 pub mod im_app;

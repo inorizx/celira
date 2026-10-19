@@ -1932,7 +1932,7 @@ const CORE_SOURCES: [&str; 2] = ["core.rs", "foundation.rs"];
 /// [`every_module_is_accounted_for_in_the_layering_ledger`] 机械检查——新模块会自动要一个说法，
 /// 账本里留着一个不存在的模块也会红。**代价的来历**：这份名单手抄了两次都漏项
 /// （2026-10-10 一次补 11 项；2026-10-11 落的两件又漏了），缺的从来不是记性。
-const BOUNDARY_MODULES: [&str; 46] = [
+const BOUNDARY_MODULES: [&str; 47] = [
     "provider_adapter",
     "file_app",
     "file_view",
@@ -2004,6 +2004,9 @@ const BOUNDARY_MODULES: [&str; 46] = [
     "sandbox",
     "skills_desktop",
     "self_concept",
+    // 交接（`<环境根>/handoff`）：与自识同层、同款——主体的自持物，装配期读回、挂在 Run 级插槽上。
+    // 它碰文件系统（读回 ＋ 落盘），因此照样进这条封闭名单。
+    "handoff",
     "timer_app",
     "wake",
     // **2026-10-18 补齐两项**：`every_module_is_accounted_for_in_the_layering_ledger` 当场抓出的
@@ -2127,7 +2130,7 @@ const SERDE_JSON_SOURCES: [&str; 20] = [
 /// **唯一**允许碰文件系统的模块"——那句话从第二个 App 起就不成立了（拥有自己存储的 App
 /// 自己碰文件系统），而它和这张表只隔一行，正是"描述句与事实打架"的典型形状。
 /// 表里每一行各自带理由，判据只认这张表。
-const FILE_SYSTEM_SOURCES: [&str; 18] = [
+const FILE_SYSTEM_SOURCES: [&str; 19] = [
     "file_app.rs",
     "file_view.rs",
     "composition.rs",
@@ -2169,6 +2172,9 @@ const FILE_SYSTEM_SOURCES: [&str; 18] = [
     // 而那一次的写路径落在 `os.rs` 里（通过本模块的 `incept`），不在这里直接开文件写。
     // 它仍然碰文件系统（读回 + 落盘），因此照样进这条封闭名单。
     "self_concept.rs",
+    // 交接（`<环境根>/handoff`）：与自识同款——读回由装配做、写由 `write_handoff` 那一次做
+    // （通过本模块的 `incept`）。它读的是主体自己的地盘、不需要授权，因此照样进这条封闭名单。
+    "handoff.rs",
     // TASK_77：**模型配置门**读环境根下的 `<环境根>/model_source.json`（**只读**，不写任何
     // 东西）。它在装配期判"这一次听谁的"（文件 / 进程侧），因此照样进这条封闭名单。
     "model_source.rs",
@@ -2974,7 +2980,7 @@ fn a_display_area_never_knows_an_app() {
     // 直接 import 了 `crate::store::StorageFailure`——那是**设计要求**（那张纸条的职责之一就是
     // 把"历史上最后一次存储故障"带给主体）。⇒ 本守卫的判据仍是原来那一条（**不许认识 App**），
     // 一个字没放宽、也没新增。
-    const DISPLAY_AREAS: [&str; 11] = [
+    const DISPLAY_AREAS: [&str; 12] = [
         "status_bar",
         "notification_bar",
         "pins_board",
@@ -2982,6 +2988,7 @@ fn a_display_area_never_knows_an_app() {
         "skills_desktop",
         "event_cards",
         "self_concept",
+        "handoff",
         "holdings",
         "machine",
         "previous_activity",
@@ -3699,7 +3706,7 @@ fn no_two_operator_readings_are_the_same() {
 #[test]
 fn her_visible_words_carry_no_new_metaphor() {
     /// 会进她视野的那批源文件（显示区 ＋ App ＋ 出厂说明 ＋ 装配与路由）。
-    const HER_SURFACE: [&str; 24] = [
+    const HER_SURFACE: [&str; 25] = [
         "activity_origin.rs",
         "composition.rs",
         "event_cards.rs",
@@ -3720,6 +3727,7 @@ fn her_visible_words_carry_no_new_metaphor() {
         "previous_activity.rs",
         "skills_desktop.rs",
         "self_concept.rs",
+        "handoff.rs",
         "status_bar.rs",
         "terminal_app.rs",
         "timer_app.rs",
@@ -4755,6 +4763,12 @@ fn the_self_concept_can_only_be_written_by_her_own_verb() {
     let mut total = 0usize;
     let mut owners: Vec<String> = Vec::new();
     for (name, text) in &sources {
+        // ⚠ **只看 `self_concept.rs`**（2026-10-19 收紧）：`incept` 是那个模块的**私有**函数，
+        // 别的文件里出现同一行调用写的是**它自己**那一份（如 `handoff.rs` 的交接）。
+        // 照旧实现会按**裸子串**命中 ⇒ 把一份写得完全正确的模块判成"多了一条改自识的路"。
+        if name.as_str() != "self_concept.rs" {
+            continue;
+        }
         let hits = text.matches(SELF_CONCEPT_WRITE_CALL).count();
         if hits == 0 {
             continue;
