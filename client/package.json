@@ -10,13 +10,14 @@
     "check:boundary": "node ../scripts/check-boundary.mjs",
     "check:docs": "node ../scripts/check-docs.mjs",
     "check:honesty": "node ../scripts/check-doc-honesty.mjs",
+    "check:current": "node ../scripts/check-doc-current.mjs",
     "test": "node --test --experimental-strip-types \"tests/*.test.ts\"",
     "preview": "vite preview",
     "shots:catalog": "node scripts/screenshot-catalog.mjs",
     "verify:ui": "node scripts/verify-ui.mjs",
     "verify:ui:app": "node --experimental-strip-types scripts/verify-ui-app.mjs",
     "probe": "node --experimental-strip-types scripts/probe.mjs",
-    "verify": "npm run check:boundary && npm run check:docs && npm run check:honesty && npm run lint && npm test && npm run build && npm run probe -- sweep && node scripts/screenshot-catalog.mjs"
+    "verify": "npm run check:boundary && npm run check:docs && npm run check:honesty && npm run check:current && npm run lint && npm test && npm run build && npm run probe -- sweep && node scripts/screenshot-catalog.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
