@@ -1,0 +1,137 @@
+# Celira CI —— **只跑自洽的门禁**：不连世界、不调模型、不碰真家。
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ## 为什么只有这些（这一节是这份文件的判据，别删）
+#
+# 仓库里有 16 支门禁脚本，但**它们的前提不一样**。全塞进来会让 CI 常年红，
+# 而**一个常年红的 CI 比没有 CI 更糟** —— 它会训练所有人忽略红色。所以按**前提**分：
+#
+# | 前提 | 例子 | 进 CI？ |
+# |---|---|---|
+# | 纯源码/文档判据（不起任何服务） | `check-docs` · `check-boundary` · `check-tokens` · `check-no-host` … | ✅ |
+# | 要真实 core ＋ Human token | `verify-ui.mjs` | ❌ 起不来 ⇒ 按仓库规矩报 `N/A`，**不在这里假装** |
+# | 要真模型调用（**花钱**） | `probe-loop` · `probe-recall` · `probe-vision` … | ❌ 人跑（触发速查见 `AGENTS.md`） |
+# | **基线是 HEAD、被测是工作树** | `check-doc-honesty.mjs` | ❌ **在 CI 里是 no-op**：干净检出 ⇒ 基线与被测逐字相同，它永远不可能红。**一个永远不会红的门禁比没有更糟**（它看起来像覆盖率，其实不是） |
+#
+# ⚠ **`npm run verify` 本身不进 CI**：它末尾挂着 `probe -- sweep`（要真服务）。
+#   这里跑的是它**自洽的那个子集**，不是它本身 —— 别把这一条读成"verify 过了"。
+#
+# ## 工具链
+#
+# **这里不写 Rust 版本**：权威是仓库根的 `rust-toolchain.toml`，rustup 自己会读并按需安装。
+# 写两处就会有两处不一致的那天，而那是本仓最反对的形状。
+#
+# ## 已知的边界（如实登记）
+#
+# · **这一刀没跑的**：`verify:ui` / `verify:ui:app`（要真实世界）、`probe-*`（要真家与模型）、
+#   以及上面那张表里 ❌ 的每一条 —— 它们的触发条件写在 `AGENTS.md` 的「验证与汇报」里，
+#   **不在 CI 里**，别以为 CI 绿就等于它们过了；
+# · **桌面壳那一步贵**：见 `app` 作业的注释（要先编四个 release 二进制）。
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# **最小权限**：这些作业只读仓库。凭据纪律的一部分 —— 不给任何作业多余的写权。
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 文档判据：秒级，零依赖（脚本只用 `node:fs` / `node:path`）──────────────
+  docs:
+    name: 文档判据
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # 四条判据：对外入口的称谓 · 证据锚索引 · 词表主名在词表之外活着 · `文件:行号` 引用解析得到
+      - run: node scripts/check-docs.mjs
+
+  # ── 前端：源码级判据 ＋ 测试 ＋ 构建。不需要任何服务。─────────────────────
+  client:
+    name: 前端
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      # 调用点 ⊆ 服务端路由（`scripts/check-boundary.mjs`）
+      - run: npm run check:boundary
+      # oxlint ＋ 七支源码守卫（令牌 / Host 不复生 / fixtures 边界 / 文案 / 滚动区 / 用例非空）
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # ── Rust：im 服务端与执行端。**两个独立 workspace**，必须分别点名。────────
+  rust:
+    name: Rust（im 服务端 · 执行端）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # **显式装**仓库钉的那一套（读 `rust-toolchain.toml`，所以这里不写版本）。
+      # ⚠ 不能省：rustup **正在废弃「命令自己按需安装」**
+      # （`auto-installation is deprecated for most rustup commands` ⇒
+      #  "scripts relying on this behavior may stop working in the future"）。
+      # ⇒ 先装、再跑，缓存键也就落在对的那一套上。
+      - run: rustup install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            agent -> agent/target
+      # 根 workspace 的成员只有 `im/server`（见根 `Cargo.toml`）
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all-targets
+      # `agent/` 是**自己 workspace 的根**（不属根 workspace）—— 必须单独点名，
+      # 「根 workspace 通过」不能代替它
+      - run: cargo fmt --manifest-path agent/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path agent/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path agent/Cargo.toml --all-targets
+
+  # ── 桌面壳：**必须在 Windows 上跑**。───────────────────────────────────────
+  #
+  # 判据：`app/src-tauri/tauri.conf.json` 的 `bundle.resources` 指着四个 **`.exe`**，
+  # 而壳的 build script **在解析资源时就会去找它们** —— Linux 上编出来的没有 `.exe`
+  # 后缀 ⇒ `resource path … doesn't exist`，**构建失败**。
+  #
+  # ⚠ **头两步就是这一步贵的原因**：`cargo check` **不会**自己编那四个二进制
+  #   （`app/README.md` §6 把这条卡点写下来了）。缓存命中后会快很多。
+  app:
+    name: 桌面壳（Windows）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 同 `rust` 作业：显式装钉住的那一套（理由见那一处注释）
+      - run: rustup install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            agent -> agent/target
+            app/src-tauri -> app/src-tauri/target
+      # ① 先把壳的 build script 要找的四个 release 二进制编出来
+      - run: cargo build --release
+      - run: cargo build --release --manifest-path agent/Cargo.toml
+      # ② 壳自己的判据（`app/README.md` 里 `npm run check` 跑的就是第三条）
+      - run: cargo fmt --manifest-path app/src-tauri/Cargo.toml --all -- --check
+      - run: cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets
+      - run: cargo test --manifest-path app/src-tauri/Cargo.toml --lib

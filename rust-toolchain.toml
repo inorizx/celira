@@ -1,0 +1,27 @@
+# 本项目**实际使用并验证过**的工具链 —— ⚠ 这不是 MSRV，两者是不同的东西：
+#
+#   · **这个文件**钉的是「**用哪一套**编」：rustup 读它，本地与 CI 因此编同一套；
+#   · **各 `Cargo.toml` 的 `rust-version`** 说的是「**最低**能编到哪」（`celira-app` 写
+#     1.89.0 —— 那把跨进程文件锁用的是 1.89 起稳定的 `File::try_lock`；`celira-agent`
+#     是 edition 2024 ⇒ 1.85+）。
+#
+# ## 为什么要钉
+#
+# `cargo clippy --all-targets -- -D warnings` 是 CI 的一道门禁（见 `.github/workflows/ci.yml`），
+# 而**新工具链会冒出旧工具链没有的 lint** ⇒ 不钉的话，「今天绿、明天红」会变成常态，
+# **而那不是代码坏了**。钉住之后，升级工具链是一次**显式的改动**：
+# 改下面这一行 → 本地把那三条 clippy（根 workspace / `agent/` / `app/src-tauri/`）跑绿 → 提交。
+#
+# ## 为什么不把版本也写进 workflow
+#
+# 写两处就会出现「两处不一致」这个经典故障 —— 而它正是本仓最反对的形状
+# （「每个事实只能有一个权威位置」）。⇒ **权威只有这一处**，workflow 里不写版本，
+# rustup 自己会读这个文件并按需安装。
+#
+# ## 与 `rust-version` 的关系
+#
+# 钉的版本**必须 ≥** 各 crate 声明的 `rust-version`；CI 若哪天要真守 MSRV，
+# 那是**另一条**作业（拿 1.89.0 编一次），不是这一行的职责。
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
