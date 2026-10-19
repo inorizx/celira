@@ -503,9 +503,9 @@ node home.js backup          # 默认复制到 <家>-backup-<时间戳>；--to <
 #      **不能**"解到 `D:\` 再改名"：那会把整包平铺进 `D:\` 根上，而 `D:\celira-<版本>-<平台>`
 #      根本不会出现。2026-10-12 真机实测（照旧写法做）：`bin/` `client-dist/` `docs/` `scripts/`
 #      `home.js` `celira-app.exe` `VERSION` `APP_MANUAL.md` 八项平铺到了 `D:\` 根上，
-#      而改名那一步报"`D:\celira-0.1.0-win-x64` 处不存在项"。
+#      而改名那一步报"`D:\celira-0.1.1-win-x64` 处不存在项"。
 New-Item -ItemType Directory D:\celira-app-new | Out-Null
-Expand-Archive dist-release\celira-0.1.0-win-x64.zip -DestinationPath D:\celira-app-new
+Expand-Archive dist-release\celira-0.1.1-win-x64.zip -DestinationPath D:\celira-app-new
 Rename-Item D:\celira-app D:\celira-app-old          # 旧的整份留着 ＝ 回退点
 Rename-Item D:\celira-app-new D:\celira-app
 # 3) 起：双击 D:\celira-app\celira-app.exe

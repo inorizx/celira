@@ -20,6 +20,17 @@
 
 ---
 
+## 目录
+
+- [它是什么](#它是什么) · [它不是什么](#它不是什么)
+- [快速开始](#快速开始windows-与-linux) · [点亮之后](#点亮之后) · [部署形态](#部署形态)
+- [两个扩展位](#两个扩展位) · [架构一屏](#架构一屏)
+- [仓库地图与命名](#仓库地图与命名) · [文档导航](#文档导航)
+- [状态](#状态) · [升级与回退](#升级与回退)
+- [发版（维护者）](#发版维护者) · [License](#license)
+
+---
+
 ## 它是什么
 
 - **两个产品，不是一个应用**。**IM 产品**是那个世界：一个逻辑 im 服务端（Rust 单二进制 + SQLite）
@@ -352,7 +363,7 @@ node home.js backup    # 默认复制到 <家>-backup-<时间戳>；--to <目录
 
 ```powershell
 .\scripts\make_release.ps1                            # tag 默认是 v<根 Cargo.toml 的版本>；Windows x64
-.\scripts\make_release.ps1 -Tag v0.1.0 -SkipPublish   # 只打包并本地校验，不发布
+.\scripts\make_release.ps1 -Tag v0.1.1 -SkipPublish   # 只打包并本地校验，不发布
 .\scripts\make_release.ps1 -Platform linux-x64 -SkipPublish   # Linux x64（在 Linux 上跑；-SkipBuild 复用已编好的二进制）
 ```
 

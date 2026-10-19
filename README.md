@@ -23,6 +23,17 @@ English | [简体中文](./README.zh-CN.md)
 
 ---
 
+## Contents
+
+- [What it is](#what-it-is) · [What it is not](#what-it-is-not)
+- [Quick start](#quick-start-windows-and-linux) · [After it lights up](#after-it-lights-up) · [Deployment shapes](#deployment-shapes)
+- [Two extension points](#two-extension-points) · [Architecture at a glance](#architecture-at-a-glance)
+- [Repository map and naming](#repository-map-and-naming) · [Documentation map](#documentation-map)
+- [Status](#status) · [Upgrading and rolling back](#upgrading-and-rolling-back)
+- [Releasing (maintainers)](#releasing-maintainers) · [License](#license)
+
+---
+
 ## What it is
 
 - **Two products, not one app.** The **IM product** is the world: one logical im server (a single
@@ -413,7 +424,7 @@ environment and notes. So "back up before rolling back" means the plain copy abo
 
 ```powershell
 .\scripts\make_release.ps1                            # tag defaults to v<Cargo.toml version>; Windows x64
-.\scripts\make_release.ps1 -Tag v0.1.0 -SkipPublish   # package and verify locally, publish nothing
+.\scripts\make_release.ps1 -Tag v0.1.1 -SkipPublish   # package and verify locally, publish nothing
 .\scripts\make_release.ps1 -Platform linux-x64 -SkipPublish   # Linux x64 (run on Linux; -SkipBuild reuses built binaries)
 ```
 

@@ -69,7 +69,7 @@
 **三个发布单元带同一个版本号，一次装配，一起发。** 用户只有一个号要记，不需要思考"我该下哪个"。
 
 **机械守卫现状**（`scripts/make_release.ps1`，不一致即 exit 2，不会产出混版包）：`tag == v<根 Cargo.toml 的 [workspace.package].version>`，且 `agent/Cargo.toml` 的 `version` 必须相等。
-**已核实的两处缺口**：`client/package.json` 的版本是 `0.0.0`，不在对账里；发布包目录名 / tag 与 `agent/` 版本可以互不相等——工作树实测 `celira-0.1.1-win-x64` 的包里，Agent 二进制自称 `0.1.0`。
+**还剩一处缺口**：`client/package.json` 的版本是 `0.0.0`，不在对账里（前端不是发布单元，见 §4）。⚠ 原先登记的第二处——「发布包目录名 / tag 与 `agent/` 版本可以互不相等」——**已由脚本收口**：`scripts/make_release.ps1` 对 `$Tag -ne $expectedTag` 与 `$agentVersion -ne $version` 各有一道 exit 2。
 
 **协议版本只做运行时的兼容判据，不当发布绑绳。** 版本号管发布，协议版本管运行，两者不互相冒充。
 
