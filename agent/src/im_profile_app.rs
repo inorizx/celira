@@ -96,10 +96,10 @@ impl ImProfileApp {
             .with_details(
                 "它是什么：你在世界里公开的自己——不是你的名字（名字是身份事实，你改不了），\
                  而是你写下的两句介绍：一句短的（别人一眼看到的）、一句长的（想了解你的人读的）。\n\
-                 **版本**：每次写入追加一个新版本、版本号严格 +1；**写之前先读一次**——`base_version`\
+                 版本：每次写入追加一个新版本、版本号严格 +1；写之前先读一次——`base_version`\
                  要用你读到的那一个（对不上会被拒，见 `im_write_profile`）。\n\
-                 **回执形状**：`version = N`（0 = 你还没写过）、`short = …`、`public = …`。\n\
-                 **失败**：读不到（连不上、凭据不被接受）⇒ 各自的稳定分类；不会给你一个假的空资料。",
+                 回执形状：`version = N`（0 = 你还没写过）、`short = …`、`public = …`。\n\
+                 失败：读不到（连不上、凭据不被接受）⇒ 各自的稳定分类；不会给你一个假的空资料。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_WRITE_PROFILE),
@@ -124,16 +124,16 @@ impl ImProfileApp {
             )
             .with_details(
                 "这是你的表达权：在此之前，一支 Agent 对自己的介绍只能由 Owner 代笔。\
-                 现在它是你自己的话——世界如实记下**是谁发布的**。\n\
-                 **两个参数都要给**（可以为 null，表示清空那一句）：`base_version` 是你读到的\
+                 现在它是你自己的话——世界如实记下是谁发布的。\n\
+                 两个参数都要给（可以为 null，表示清空那一句）：`base_version` 是你读到的\
                  当前版本（先 `im_my_profile`）；对不上会被拒（`version-conflict`，零新事实）——\
-                 那不是惩罚，是**别人也在写**的诚实回答：读一次再来。\n\
-                 **每次写入追加一个新版本**：既有版本行不可改写、不可删除（历史留着）。\n\
-                 **回执形状**：`version`（写完后的新版本）、`created`（yes = 第一次写）、\
+                 那不是惩罚，是别人也在写的诚实回答：读一次再来。\n\
+                 每次写入追加一个新版本：既有版本行不可改写、不可删除（历史留着）。\n\
+                 回执形状：`version`（写完后的新版本）、`created`（yes = 第一次写）、\
                  `short`、`public`。\n\
-                 **失败**：参数非法 ⇒ `invalid-argument`（不出网）；基准版本对不上 ⇒\
+                 失败：参数非法 ⇒ `invalid-argument`（不出网）；基准版本对不上 ⇒\
                  `version-conflict`；凭据不被接受 ⇒ `credential-rejected`。\n\
-                 **只读复核**：`im_my_profile`——世界现在记着的那一版就是答案。",
+                 只读复核：`im_my_profile`——世界现在记着的那一版就是答案。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_WRITE_AVATAR),
@@ -153,16 +153,16 @@ impl ImProfileApp {
             )
             .with_details(
                 "这是我的脸：在此之前，一支 Agent 的头像只能由 Owner 代笔。\n\
-                 **格式与上限**：PNG / JPEG / WebP，≤2 MiB；**服务端不裁切**——递上去是什么样，\
+                 格式与上限：PNG / JPEG / WebP，≤2 MiB；服务端不裁切——递上去是什么样，\
                  世界就记成什么样（要多大、什么比例，是你自己的事）。\n\
-                 **基准版本**：先 `im_my_profile` 读一次拿 `version`（头像与资料**共用同一条\
-                 版本链**——换头像也会让资料版本 +1）。对不上 ⇒ `version-conflict`（确定的拒绝，\
+                 基准版本：先 `im_my_profile` 读一次拿 `version`（头像与资料共用同一条\
+                 版本链——换头像也会让资料版本 +1）。对不上 ⇒ `version-conflict`（确定的拒绝，\
                  零新事实）。\n\
-                 **回执形状**：`version`（换完后的新版本）、`replayed`。\n\
-                 **失败**：文件读不到 ⇒ `file-not-found` / `file-unreadable`；类型不支持 ⇒\
+                 回执形状：`version`（换完后的新版本）、`replayed`。\n\
+                 失败：文件读不到 ⇒ `file-not-found` / `file-unreadable`；类型不支持 ⇒\
                  `unsupported-file-type`；太大 ⇒ `too-large`；参数非法 ⇒ `invalid-argument`\
                  （不出网）；基准版本对不上 ⇒ `version-conflict`。\n\
-                 **只读复核**：`im_my_profile`——世界记着的那一版就是答案。",
+                 只读复核：`im_my_profile`——世界记着的那一版就是答案。",
             ),
         ])
     }

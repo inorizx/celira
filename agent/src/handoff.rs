@@ -170,7 +170,7 @@ pub fn write_from_subject(
             HANDOFF_LABEL,
             format!(
                 "交接已写下（handoff = {} B，上限 {MAX_HANDOFF_BYTES} B）。\
-                 **下一次开场交付一次**：交付过就不再摆——所以没改的话，它不会每一段都重播。",
+                 下一次开场交付一次：交付过就不再摆——所以没改的话，它不会每一段都重播。",
                 text.len()
             ),
         )),

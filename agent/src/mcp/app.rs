@@ -280,7 +280,7 @@ impl McpApp {
         let declaration = access.declaration();
         let description = format!(
             "外部来源的 App：`{}` 那台 server 暴露的动词（宿主装机时声明，装了才在；用之前先展开）。\
-             调用是**转发**：窗口 {} 秒（逐动词可以调），回执正文 ≤{} KiB 且超限截断带标记，\
+             调用是转发：窗口 {} 秒（逐动词可以调），回执正文 ≤{} KiB 且超限截断带标记，\
              非文本内容只报类型与条数、不透传；子进程环境里洗掉凭据。效果档 = {}（宿主声明）。",
             declaration.name(),
             declaration.timeout_seconds(),
@@ -582,8 +582,8 @@ fn build_spec(
 
     let mut details = format!(
         "外部来源的动词（`{server}` 那台 server）：我们只转发，限制全部是机械的。效果档 = {}；\
-         转发窗口 {} 秒。**回执**：正文 ≤{} KiB（超限截断并明确标出），非文本内容只报类型与条数、\
-         **不透传**。对面的 `isError` 是**读数**不是失败分类——**转发出去了、答复回来了就是成功**。",
+         转发窗口 {} 秒。回执：正文 ≤{} KiB（超限截断并明确标出），非文本内容只报类型与条数、\
+         不透传。对面的 `isError` 是读数不是失败分类——转发出去了、答复回来了就是成功。",
         effect.as_str(),
         timeout_seconds,
         MAX_TEXT_BYTES / 1024,
@@ -598,7 +598,7 @@ fn build_spec(
     if let Some(reason) = &trouble {
         details.push_str(&format!(
             "这条动词的参数形状我们表达不了（{reason}）：参数表因此是空的，\
-             调用会被**本地回绝**（unsupported-schema）——本层搬运标量，\
+             调用会被本地回绝（unsupported-schema）——本层搬运标量，\
              以及按一段 JSON 文本给的对象与数组；其余形状搬不动。"
         ));
     }

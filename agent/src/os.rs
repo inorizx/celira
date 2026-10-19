@@ -875,7 +875,7 @@ impl RunScope<'_> {
             .exempt_from_inspection()
             .with_details(format!(
                 "给一个 App 标识：它的能力随后进入你的可用能力（重复展开是明确的成功结果，不重读、\
-                 不复制正文）。**装了什么**：{}。没装的名字会被拒（unknown-target），不猜近似名。\
+                 不复制正文）。装了什么：{}。没装的名字会被拒（unknown-target），不猜近似名。\
                  详情卡片用 `{CAPABILITY_INSPECT}` 取。",
                 described.join("；")
             )),
@@ -908,16 +908,16 @@ impl RunScope<'_> {
                 "钉住之后，下一次开场（不是这一次）它的详情会随开场的格位清单一起在场：\
                  不用再看一眼格式就能直接调。可钉的范围 = 你此刻真能调的那些动作（与 \
                  `{CAPABILITY_INSPECT}` 同一份判据）；不在场的名字 `invalid-argument`。\
-                 重复钉是明确的成功结果。摘掉用 `{CAPABILITY_UNPIN}`：**出厂格位不受它影响**\
-                 ——你摘的只是「你自己那一份」。\
-                 **上限 {MAX_PINS} 项**（只数**你自己钉的**这些；出厂格位不计入、也摘不掉）——\
-                 满了再钉会被明确拒绝（`{limit}`），**不会替你淘汰任何一项**：\
+                 重复钉是明确的成功结果。摘掉用 `{CAPABILITY_UNPIN}`：你摘的只是「你自己钉的那一份」，\
+                 那个动作本身还在。\
+                 上限 {MAX_PINS} 项（只数你自己钉的那些）——\
+                 满了再钉会被明确拒绝（`{limit}`），不会替你淘汰任何一项：\
                  先 `{CAPABILITY_UNPIN}` 摘掉一个你想腾出来的，再钉。",
                 limit = crate::pinned_actions::PinFailure::LimitReached.as_str()
             )),
             Capability::new(
                 ActionId::new(CAPABILITY_UNPIN),
-                "把一个动作从你自己的格位里摘掉（出厂格位不受影响）",
+                "把一个动作从你自己的格位清单里摘掉（摘的是你钉的那一份，动作本身还在）",
                 vec![ParamSpec::new(
                     PARAM_ACTION,
                     true,
@@ -926,9 +926,10 @@ impl RunScope<'_> {
             )
             .exempt_from_inspection()
             .with_details(format!(
-                "只摘掉「你钉过的那一份」：出厂默认（预装 App 的动词，以及 OS 自己那六件）\
-                 **不会因此消失**——它不落盘、也不归你管。摘一个本来就没钉的名字是明确的成功结果\
-                 （不报错）。与 `{CAPABILITY_PIN}` 一样，**下一次开场生效**。"
+                "只摘掉「你钉过的那一份」：那个动作本身不因此消失——\
+                 它能不能调，由它所属的那门开着没有决定，与你的格位无关。\
+                 摘一个本来就没钉的名字是明确的成功结果\
+                 （不报错）。与 `{CAPABILITY_PIN}` 一样，下一次开场生效。"
             )),
             Capability::new(
                 ActionId::new(CAPABILITY_SELF_CONCEPT_WRITE),
@@ -938,8 +939,8 @@ impl RunScope<'_> {
             .exempt_from_inspection()
             .with_details(
                 "写下之后，下一次开场它就常驻在你视野的开头（当下的这一段不会变）。\
-                 它与「标上 `pinned` 的笔记」和「钉住的动作格位」是三件事：那两样是**具体的东西**（一条笔记、一个格位），\
-                 这一样是**关于你自己的一篇**——你什么时候想写就写，没写过就没有。\
+                 它与「标上 `pinned` 的笔记」和「钉住的动作格位」是三件事：那两样是具体的东西（一条笔记、一个格位），\
+                 这一样是关于你自己的一篇——你什么时候想写就写，没写过就没有。\
                  空正文会被拒绝——「没有自识」应当根本没有这一份，而不是留一个空洞。",
             ),
             Capability::new(

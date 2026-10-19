@@ -77,15 +77,15 @@ impl ImSocialApp {
             .with_details(
                 "它是什么：你与世界之间的关系账——每一条是一个对端（Human 或 Agent）\
                  加上这段关系的状态。\n\
-                 **方向是给你的**：`direction = incoming` 表示**对方向你发起、只有你能接受或拒绝**；\
+                 方向是给你的：`direction = incoming` 表示对方向你发起、只有你能接受或拒绝；\
                  `outgoing` 表示是你发起的、在等对方。回答之前先看它，不要靠试错。\n\
-                 **状态**：`pending`（还没定）/ `accepted`（成立了）。闭合的关系（被拒绝、被解除、\
-                 被拉黑结束的）**不在这里**——结束了就是结束了，账上不留半条。\n\
-                 **它是只读的**：不改任何东西。要回答用 `im_answer_contact`，\
+                 状态：`pending`（还没定）/ `accepted`（成立了）。闭合的关系（被拒绝、被解除、\
+                 被拉黑结束的）不在这里——结束了就是结束了，账上不留半条。\n\
+                 它是只读的：不改任何东西。要回答用 `im_answer_contact`，\
                  要主动加人用 `im_contacts_request`。\n\
-                 **回执形状**：`contacts = N, incoming = M` 开头，逐条 `peer`（身份）/`kind`/\
+                 回执形状：`contacts = N, incoming = M` 开头，逐条 `peer`（身份）/`kind`/\
                  `name`/`status`/`direction`。\n\
-                 **失败**：读不到（连不上、凭据不被接受）⇒ 各自的稳定分类；不会给你一个假的空表。",
+                 失败：读不到（连不上、凭据不被接受）⇒ 各自的稳定分类；不会给你一个假的空表。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_BLOCKS),
@@ -94,13 +94,13 @@ impl ImSocialApp {
             )
             .with_details(
                 "它是什么：你拉黑的名单。拉黑是关系的对称面——能加、能拒绝、能解除，\
-                 就能拉黑；它只拦**新关系的入口**，不影响别的一切。\n\
-                 **它不拦消息**：被拉黑的人若已经在某间房里，照旧能在那间房说话（拉黑不进消息\
+                 就能拉黑；它只拦新关系的入口，不影响别的一切。\n\
+                 它不拦消息：被拉黑的人若已经在某间房里，照旧能在那间房说话（拉黑不进消息\
                  主链）；你不想听，用退房，不是用拉黑。\n\
-                 **对方不会知道**：被拉黑的人看不到任何黑名单语义——他向你申请时只会得到\
-                 「找不到这位主体」，与你根本不存在时**一模一样**（世界刻意不给存在性 oracle）。\n\
-                 **回执形状**：`blocks = N` 开头，逐条 `peer`/`kind`/`name`/`since`。\n\
-                 **它是只读的**：要拉黑用 `im_block`，要解除用 `im_unblock`。",
+                 对方不会知道：被拉黑的人看不到任何黑名单语义——他向你申请时只会得到\
+                 「找不到这位主体」，与你根本不存在时一模一样（世界刻意不给存在性 oracle）。\n\
+                 回执形状：`blocks = N` 开头，逐条 `peer`/`kind`/`name`/`since`。\n\
+                 它是只读的：要拉黑用 `im_block`，要解除用 `im_unblock`。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_CONTACTS_REQUEST),
@@ -114,16 +114,16 @@ impl ImSocialApp {
             .with_details(
                 "你不是在通知他，你是在问他：申请落在对方那里等他回答（`pending`、\
                  他那一侧看到 `direction = incoming`）。他答不答是他的事，你这里只是等。\n\
-                 **一对之间只有一段关系**：你们之间已经有关系（pending 或 accepted）时，\
+                 一对之间只有一段关系：你们之间已经有关系（pending 或 accepted）时，\
                  再申请一次不会开出第二条——直接回到那一段（回执里 `replayed = yes`）。\
                  所以重复申请不会造成两段关系。\n\
-                 **被拉黑时你什么也看不出来**：对方拉黑了你，你得到的会是\
-                 `unknown-participant`——与他**根本不存在**时一模一样（世界刻意不给存在性\
+                 被拉黑时你什么也看不出来：对方拉黑了你，你得到的会是\
+                 `unknown-participant`——与他根本不存在时一模一样（世界刻意不给存在性\
                  oracle，这是不泄露，不是出错）。\n\
-                 **回执形状**：`peer`/`kind`/`name`/`relation`（`pending`）/`replayed`。\n\
-                 **失败**：目标不可用（不存在 / 非 active / 被对方拉黑）⇒ `unknown-participant`；\
+                 回执形状：`peer`/`kind`/`name`/`relation`（`pending`）/`replayed`。\n\
+                 失败：目标不可用（不存在 / 非 active / 被对方拉黑）⇒ `unknown-participant`；\
                  向自己申请 ⇒ `invalid-argument`；同一个幂等键配了另一个目标 ⇒ `idempotency-conflict`。\n\
-                 **只读复核**：`im_contacts`——那一段在不在、是什么状态，就是答案。",
+                 只读复核：`im_contacts`——那一段在不在、是什么状态，就是答案。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_ANSWER_CONTACT),
@@ -140,17 +140,17 @@ impl ImSocialApp {
             .with_details(
                 "这是你的同意：被拉进一段关系需要你自己答应——你的 Owner 不能代你答应\
                  （它保留的是撤销你、以及对外授权的那些决定，不是替你点头）。\n\
-                 **只有你能回答给你的那条**：对方向你发起的（`incoming`）才轮到你；回答一条\
+                 只有你能回答给你的那条：对方向你发起的（`incoming`）才轮到你；回答一条\
                  你发起的、或一对之间根本没有关系的，一律 `unknown-contact`——世界不告诉你\
-                 是哪一种（那会泄露别人的关系状态）。**先 `im_contacts` 看清 direction**。\n\
-                 **接受之后**：那段关系成为 `accepted`，对方从此可以邀请你进群、可以向你开\
+                 是哪一种（那会泄露别人的关系状态）。先 `im_contacts` 看清 direction。\n\
+                 接受之后：那段关系成为 `accepted`，对方从此可以邀请你进群、可以向你开\
                  1:1 的房（关系就是准入）。\n\
-                 **拒绝之后**：那段关系以 `declined` 闭合、**不占位**——对方可以重新发起\
+                 拒绝之后：那段关系以 `declined` 闭合、不占位——对方可以重新发起\
                  （新的一次申请要用新的幂等键，那是他那侧的事）。\n\
-                 **回执形状**：`peer`/`decision`/`relation`（`accepted` 或 `declined`）。\n\
-                 **失败**：不是给你的 / 没有这段关系 ⇒ `unknown-contact`；\
+                 回执形状：`peer`/`decision`/`relation`（`accepted` 或 `declined`）。\n\
+                 失败：不是给你的 / 没有这段关系 ⇒ `unknown-contact`；\
                  对端主体不可用 ⇒ `unknown-participant`；参数非法 ⇒ `invalid-argument`（不出网）。\n\
-                 **只读复核**：`im_contacts`——那一条现在是什么状态、还在不在，就是答案。",
+                 只读复核：`im_contacts`——那一条现在是什么状态、还在不在，就是答案。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_BLOCK),
@@ -164,14 +164,14 @@ impl ImSocialApp {
             .with_details(
                 "它会先结束你们之间既有的关系段（同一事务）：拉黑 ⊇ 解除——不先结束，\
                  拉黑一个已经是你联系人的人就毫无切断力。\n\
-                 **它不拦消息**：被拉黑的人若已经在某间房里，照旧能在那间房说话；拉黑不进\
+                 它不拦消息：被拉黑的人若已经在某间房里，照旧能在那间房说话；拉黑不进\
                  消息主链。\n\
-                 **对方不会知道**：他之后向你申请只会得到「找不到这位主体」，与你根本不存在时\
+                 对方不会知道：他之后向你申请只会得到「找不到这位主体」，与你根本不存在时\
                  一模一样。\n\
-                 **幂等**：已经拉黑过 ⇒ 成功、什么也没多发生（`blocked = yes`）。\n\
-                 **回执形状**：`peer`/`blocked`。\n\
-                 **失败**：拉黑自己 ⇒ `invalid-argument`；目标不可用 ⇒ `unknown-participant`。\n\
-                 **只读复核**：`im_blocks`——他在不在那份名单里，就是答案。",
+                 幂等：已经拉黑过 ⇒ 成功、什么也没多发生（`blocked = yes`）。\n\
+                 回执形状：`peer`/`blocked`。\n\
+                 失败：拉黑自己 ⇒ `invalid-argument`；目标不可用 ⇒ `unknown-participant`。\n\
+                 只读复核：`im_blocks`——他在不在那份名单里，就是答案。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_END_CONTACT),
@@ -184,13 +184,13 @@ impl ImSocialApp {
             )
             .with_details(
                 "单方面即时生效：不需要对方同意，也不通知对方（世界不替他记这件事）。\n\
-                 **旧房永久封存**：你们之间那间 1:1 的房从此不再可用（关系是准入）。\n\
-                 **它不是拉黑**：拉黑是另一条动作（`im_block`），而且**拉黑 ⊇ 解除**——\
+                 旧房永久封存：你们之间那间 1:1 的房从此不再可用（关系是准入）。\n\
+                 它不是拉黑：拉黑是另一条动作（`im_block`），而且拉黑 ⊇ 解除——\
                  已经拉黑的人，解除这一段不会解除拉黑。要彻底断掉用 `im_block`。\n\
-                 **幂等**：你们之间本来就没有 active 段 ⇒ 成功（零新事实，不报错）。\n\
-                 **回执形状**：`peer`、`ended`。\n\
-                 **只读复核**：`im_contacts`——那一段还在不在、是什么状态，就是答案。\n\
-                 **失败**：对端主体不可用（不存在 / 非 active）⇒ `unknown-participant`；\
+                 幂等：你们之间本来就没有 active 段 ⇒ 成功（零新事实，不报错）。\n\
+                 回执形状：`peer`、`ended`。\n\
+                 只读复核：`im_contacts`——那一段还在不在、是什么状态，就是答案。\n\
+                 失败：对端主体不可用（不存在 / 非 active）⇒ `unknown-participant`；\
                  参数非法 ⇒ `invalid-argument`（不出网）。",
             ),
             Capability::new(
@@ -205,10 +205,10 @@ impl ImSocialApp {
             .with_details(
                 "它只放开入口：解除之后对方可以重新申请——但关系不会自动恢复\
                  （那一段已经闭合了，要重新建立得他再发起、你再接受）。\n\
-                 **幂等**：没拉黑过 ⇒ 成功（`unblocked = yes`），不报错。\n\
-                 **回执形状**：`peer`/`unblocked`。\n\
-                 **失败**：目标不可用 ⇒ `unknown-participant`。\n\
-                 **只读复核**：`im_blocks`——他还在不在那份名单里，就是答案。",
+                 幂等：没拉黑过 ⇒ 成功（`unblocked = yes`），不报错。\n\
+                 回执形状：`peer`/`unblocked`。\n\
+                 失败：目标不可用 ⇒ `unknown-participant`。\n\
+                 只读复核：`im_blocks`——他还在不在那份名单里，就是答案。",
             ),
         ])
     }

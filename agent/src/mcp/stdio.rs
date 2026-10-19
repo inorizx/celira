@@ -681,7 +681,7 @@ impl Transport for StdioTransport {
                     return Ok(CallReply::Refused {
                         code: None,
                         detail: "对面回的是 `input_required`：它要多问一句才肯办这件事（MRTR）。\
-                                 本版不实现那一格，因此这一次**没有办**。"
+                                 本版不实现那一格，因此这一次没有办。"
                             .to_string(),
                     });
                 }
