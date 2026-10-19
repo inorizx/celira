@@ -679,10 +679,14 @@ pub struct SessionRequest<'a> {
 /// （[`combine`]），内层先、外层后。没有注册表、没有名单、没有排序规则——每一层仍然只是
 /// "外层持内层"。
 ///
-/// **处境链的类型**：由外到内——状态栏（活状态）→ 通知栏（快照）→ 组件区（纸条板）→
-/// **动作 pin** → 技能桌面 → 事件卡片 → **持有物**（自己约下的时刻）→ **机器处境**（这一段在
+/// **处境链的类型**：由外到内——状态栏（活状态）→ 通知栏（快照）→ 组件区（**交接 ＋ 纸条板**
+/// 两块）→ **动作 pin** → 技能桌面 → 事件卡片 → **持有物**（自己约下的时刻）→ **机器处境**（这一段在
 /// 什么样的执行体里想：平台 + shell ＋ **可选的第三格**"由谁想"，2026-10-08）→ **主体是谁**
 /// （自识 ＋ 身份行，TASK_70）→ **上一段怎么了**（上一次活动有没有正常收场）→ 手动环境（起源那句）。
+///
+/// ⚠️ **层数**：十一层（硬上限见 `tests/minimal_agent.rs` 的
+/// `the_opening_view_chain_has_a_hard_ceiling`）。交接**不是一层**——它是组件区那一格里的
+/// 第二块（词表 §9「组件区 = pin 投影 ＋ 交接快照」，与状态栏那一层摆两块同款）。
 ///
 /// 给它一个名字是因为它已经长到一行写不下（TASK_68 P3 加了一层，TASK_70 又加了一层，
 /// 持有物那一刀再加一层，机器处境那一刀再加一层），而且这个名字就是"这一层由什么组成"的
@@ -690,8 +694,9 @@ pub struct SessionRequest<'a> {
 ///
 /// ⚠️ 内几层（起源 ＋ 上一段 ＋ 主体是谁 ＋ 机器处境）与**持有物**紧贴：批次是**内层先、外层后**
 /// 递交，因此主体开场读到的顺序是「起源那句 → **上一段怎么了** → **主体是谁** → **这台机器是
-/// 什么** → **我等着什么** → 技能桌面 → ……」——先知道"这次为什么醒"，再知道"我是谁、我在哪台
-/// 机器上"，然后立刻知道自己安排过什么。
+/// 什么** → **我等着什么** → 技能桌面 → 事件卡片 → 钉住的动作 → **组件区（交接 → 纸条板）** →
+/// 通知栏 → 状态行」——先知道"这次为什么醒"，再知道"我是谁、我在哪台机器上"，然后立刻知道自己
+/// 安排过什么。
 type SituationChain = StatusBar<
     NotificationBar<
         PinsBoard<
@@ -721,6 +726,16 @@ struct OpeningMaterials {
     holdings: Option<Vec<crate::holdings::HoldingRow>>,
     /// 自识（三态：缺席 / 在 / 读不出来）。
     self_concept: crate::self_concept::SelfConcept,
+    /// **交接**（三态：缺席 / 在 / 读不出来）——上一次活动写给这一次开场的自己那一篇。
+    ///
+    /// ⚠ **它与自识不是一回事**（虽然形状同款）：自识回答「我是谁」（常驻），交接回答
+    /// 「这一段我干到哪、下一段接着做什么」（**有确定的交付时刻**：紧邻的下一次开场）。
+    handoff: crate::handoff::Handoff,
+    /// **这一份交接已经交付过了吗**（`true` ⇒ 开场一个字都不说）。
+    ///
+    /// 判据见 [`handoff_delivered`]：**交付过 ⟺ 紧邻上一次活动的开场里摆过它**——两格都是
+    /// 账里已有的事实，**零新事实、零新写者**。
+    handoff_delivered: bool,
     /// 出厂说明（四态）。**不进处境链**——它是系统消息的静态头，由会话自己携带。
     orientation: crate::orientation::Orientation,
     /// **开场纸条要说的两条事实**：有一段没有正常收场、以及历史上最后一次存储故障。
@@ -777,7 +792,11 @@ fn read_opening_materials(
     environment_root: &Path,
     material_root: &Path,
     previous: PreviousReading,
+    last_opening: &[(String, String)],
 ) -> OpeningMaterials {
+    // **交接**：读一次，交付判据用同一份（判据见 [`handoff_delivered`]）。
+    let handoff = crate::handoff::read(environment_root);
+    let handoff_delivered = handoff_delivered(&handoff, last_opening);
     OpeningMaterials {
         // **纸条板**：素材由**便签 App 自己交**（`pinned_material`，方向 `app → 显示区`）。
         // 装配这一层不翻它的存储、不认识它的记录类型。
@@ -801,10 +820,38 @@ fn read_opening_materials(
             TerminalApp::held_material(environment_root).ok(),
         ),
         self_concept: crate::self_concept::read(environment_root),
+        handoff,
+        handoff_delivered,
         orientation: crate::orientation::read(environment_root),
         // **上一段有没有收场**：由装配点在读准入时顺手带回（不在这里再读一次）。
         previous,
     }
+}
+
+/// **这一份交接交付过没有**：判据一句话——**交付过 ⟺ 紧邻上一次活动的开场里摆过它**。
+///
+/// 两格都是**账里已经有的事实**（零新事实、零新游标、零新写者）：
+///
+/// - 这一份的正文 = 装配期从 `<环境根>/handoff` 读回来的那一态（[`crate::handoff::read`]）；
+/// - 上一次开场摆过什么 = 装配点在读**开场读数**时顺手带回来的那一批块
+///   （`store::OpeningReadings::last_opening_blocks`，即那一条 `run-start` 注入的
+///   `blocks[].text`）——**不新开读取点**。
+///
+/// ⚠ **按身份比，不按"上一次摆过一块交接没有"**：交接是能被重写的（B4.1「再写 → 新 handoff
+/// 成为最新（下次开场交付新的）」）——只看"摆过一块"会把**重写后的新的一份**读成"已经交付过"
+/// ⇒ 那一份**永远不摆**。改过一个字节就是新的一份，因此这里比的是**正文**。
+///
+/// ⚠ **看不见 ⇒ 读作没交付过**：读不出来、上一次活动的开场落在封口的上一卷里（活动段封口
+/// 1 MiB 一次）、上一次那一块没给出去——一律算"没交付过" ⇒ 至多**重播一次**。方向就是设计定的
+/// 那一条（B4.2：**丢失不可接受、重复可容忍**），**绝不静默跳过**。
+fn handoff_delivered(handoff: &crate::handoff::Handoff, last_opening: &[(String, String)]) -> bool {
+    // 三态里只有"在"才谈得上交付：缺席（没写过）与读不出来都不是"交付过"。
+    let crate::handoff::Handoff::Present(text) = handoff else {
+        return false;
+    };
+    last_opening
+        .iter()
+        .any(|(label, seen)| label == crate::handoff::HANDOFF_LABEL && seen == text)
 }
 
 /// **把持有物的两支成员合成一份**（2026-10-11：第二支 = 主体自己起的东西）。
@@ -1002,6 +1049,11 @@ fn situation_chain(
                 materials.pinned.as_deref(),
                 // 纸条板上那一格的年龄用**同一轮装配的钟**（与持有物同一条纪律，见上一行的注释）。
                 now_millis,
+                // **这一格的第二块：交接**（词表 §9「组件区 = pin 投影 ＋ 交接快照」）。
+                // 它**不占一层**（C8 的硬上限 11 层一个字不动）：三态与"一次播放"由
+                // `crate::handoff` 解释，摆在这一格的哪儿由 `pins_board` 决定。
+                materials.handoff.clone(),
+                materials.handoff_delivered,
                 PinnedActions::new(
                     materials.pinned_actions.as_deref(),
                     SkillsDesktop::new(
@@ -1453,7 +1505,15 @@ impl<'a> RunSession<'a> {
         )?;
         // 开场素材：**读法只有一份**（见 [`read_opening_materials`]）。三态 / 四态语义在那一处
         // 各自保持——读失败与"没有"分得开，这里一个都不压平。
-        let materials = read_opening_materials(&environment_root, material_root, previous);
+        //
+        // ⚠ 最后那一格（**上一次活动的开场摆了哪几块**）是**交接交付判据**要的那一份事实：
+        // 它与准入、"最后一次存储故障"同属**那一次读**（`store::OpeningReadings`）⇒ 不新开读取点。
+        let materials = read_opening_materials(
+            &environment_root,
+            material_root,
+            previous,
+            &readings.last_opening_blocks,
+        );
 
         let mut agent = Agent::new(agent_id.clone());
         let run = Run::begin_with_input(&mut agent, run_id, limits, input)?;

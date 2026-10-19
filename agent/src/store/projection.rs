@@ -189,8 +189,8 @@ pub fn rehydrate(record: &TraceRecord) -> Result<Option<TraceEntry>, RehydrateEr
                 return refused_entry(turn.as_ref(), blocks).map(Some);
             }
             let stage = match stage.as_str() {
-                "run-start" => crate::core::InjectionStage::RunStart,
-                "turn" => crate::core::InjectionStage::Turn,
+                RUN_START_STAGE => crate::core::InjectionStage::RunStart,
+                TURN_STAGE => crate::core::InjectionStage::Turn,
                 other => return Err(RehydrateError::UnknownStage(other.to_string())),
             };
             let turn = decoded_turn(*turn)?;
@@ -578,10 +578,12 @@ pub fn params_pairs(params: &ActionParams) -> Vec<(String, String)> {
         .collect()
 }
 
+/// 两个注入阶段落到盘上的名字。**编码与解码共用同一对常量**（权威在
+/// [`crate::store::RUN_START_STAGE`] 那一处，本件不另写一遍字面量）。
 fn stage_str(stage: crate::core::InjectionStage) -> &'static str {
     match stage {
-        crate::core::InjectionStage::RunStart => "run-start",
-        crate::core::InjectionStage::Turn => "turn",
+        crate::core::InjectionStage::RunStart => RUN_START_STAGE,
+        crate::core::InjectionStage::Turn => TURN_STAGE,
     }
 }
 

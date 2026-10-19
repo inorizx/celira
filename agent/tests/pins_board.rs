@@ -5,6 +5,7 @@
 //! （第一封请求体里就有这一块、第二轮没有）；动作侧的判据在 `tests/notes_app.rs`。
 
 use celira_agent::activity_origin::ActivityOrigin;
+use celira_agent::handoff::Handoff;
 use celira_agent::pins_board::{
     MAX_RENDERED, PINS_BOARD_LABEL, PREVIEW_BYTES, PinnedRow, PinsBoard,
 };
@@ -45,8 +46,10 @@ fn row_both(
 /// 装配那一轮的钟**固定**——年龄读数用它（不另取系统钟），因此同一份素材逐字节相同。
 const NOW: Option<u64> = Some(1_000_000);
 
+/// 组件区那一格的两块：这一组用例只判 **pin 投影**那一块的读数形状，
+/// 因此交接那一块一律取"没写过"（[`Handoff::Absent`]）——它一个字都不占位。
 fn board(rows: Option<&[PinnedRow]>) -> PinsBoard<ActivityOrigin> {
-    PinsBoard::new(rows, NOW, ActivityOrigin::new())
+    PinsBoard::new(rows, NOW, Handoff::Absent, false, ActivityOrigin::new())
 }
 
 #[test]

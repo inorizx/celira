@@ -18,6 +18,16 @@
 //! 读起来像"这一段还是那一段"。那一格由**调用方**告诉本模块（[`HandoffBoard::new`] 的
 //! `delivered`）：本模块不自己去账里翻，也不落任何新事实（**零新写者**）。
 //!
+//! ## 它摆在哪一格
+//!
+//! **组件区**（`pins_board.rs`）的第二块——与主体贴在墙上的那些纸条**同一格**：词表 §9 那一行
+//! 的定义就是「**组件区 = pin 投影 ＋ 交接快照**」，而"上一次的主体留给下一次的自己的内容"
+//! 正是这一格在回答的问题（**最典型的组件就是交接**）。
+//!
+//! ⇒ 本模块**不占处境链的一层**（C8 那条硬上限 11 层一个字不动）：它只交出**一块**（0 或 1 块），
+//! 由组件区摆在 pin 投影**前面**——一块只播一次的内容，不该在批次超限时让位给"下一段还会重摆"
+//! 的那些。
+//!
 //! ## 写权归自己
 //!
 //! 与自识同款（主人 2026-09-21 裁决）：`write_handoff` 是**主体的自主动词**，
@@ -26,8 +36,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::core::combine;
-use crate::core::{ContentBatch, ContentBlock, ContextSource, InjectionContext};
+use crate::core::{ContentBatch, ContentBlock};
 
 /// 交接那一块在注入里的标签。
 pub const HANDOFF_LABEL: &str = "handoff";
@@ -180,32 +189,28 @@ pub fn write_from_subject(
 /// 三态各自的呈现见模块头。⚠ **`delivered` 那一格是"一次播放"的开关**：
 /// `true` ⇒ **一个字都不说**（这一份已经交付过了）；调用方负责从**已有的事实**里算出它
 /// （本模块不落新事实、也不自己去翻账）。
+///
+/// ⚠ **它不是处境链里的一层**：它只交出**一块**，由**组件区**（`pins_board.rs`）与 pin 投影
+/// 摆在同一格里（见模块头"它摆在哪一格"）——因此这里没有内层来源，也没有 `ContextSource`。
 #[derive(Debug)]
-pub struct HandoffBoard<Inner> {
+pub struct HandoffBoard {
     /// 装配期读回来的那一态。
     handoff: Handoff,
     /// 这一份**已经交付过**了吗（`true` ⇒ 不再摆）。
     delivered: bool,
-    inner: Inner,
 }
 
-impl<Inner> HandoffBoard<Inner> {
+impl HandoffBoard {
     /// 用装配期读回来的那一态与"交付过没有"装配。
-    pub fn new(handoff: Handoff, delivered: bool, inner: Inner) -> Self {
-        Self {
-            handoff,
-            delivered,
-            inner,
-        }
-    }
-
-    /// 读完之后的**装配期**构造：从环境根读一次（同一份读法，两处装配点共用）。
-    pub fn from_environment(environment_root: &Path, delivered: bool, inner: Inner) -> Self {
-        Self::new(read(environment_root), delivered, inner)
+    pub fn new(handoff: Handoff, delivered: bool) -> Self {
+        Self { handoff, delivered }
     }
 
     /// 这一次要递交的块（**可能 0 或 1 块**——缺席的不占位）。
-    fn own_batch(&self) -> ContentBatch {
+    ///
+    /// ⚠ **三态与"一次播放"只在这里解释**：组件区负责摆在哪、本件负责摆什么，
+    /// 两处各管各的，谁也不复制谁的判据。
+    pub fn opening_batch(&self) -> ContentBatch {
         let mut blocks = Vec::new();
         match &self.handoff {
             // **一次播放**：交付过就不再摆（否则一份没改的交接会每一段都重播）。
@@ -220,23 +225,6 @@ impl<Inner> HandoffBoard<Inner> {
             )),
         }
         ContentBatch::of_or_not_delivered(blocks, HANDOFF_LABEL)
-    }
-
-    /// 内层来源（只读）。
-    pub fn inner(&self) -> &Inner {
-        &self.inner
-    }
-}
-
-impl<Inner: ContextSource> ContextSource for HandoffBoard<Inner> {
-    /// **开场一次**：与内层的开场事实一起递交（快照不是活状态，之后不重摆）。
-    fn on_run_start(&mut self, context: &InjectionContext) -> ContentBatch {
-        combine(self.inner.on_run_start(context), self.own_batch())
-    }
-
-    /// 轮级照旧交给内层：这一件只在开场露面。
-    fn before_turn(&mut self, context: &InjectionContext) -> ContentBatch {
-        self.inner.before_turn(context)
     }
 }
 
@@ -258,8 +246,8 @@ mod tests {
     fn a_handoff_that_was_never_written_is_absent_and_says_nothing() {
         let root = temp_root("absent");
         assert_eq!(read(&root), Handoff::Absent);
-        let board = HandoffBoard::new(Handoff::Absent, false, ());
-        let batch = board.own_batch();
+        let board = HandoffBoard::new(Handoff::Absent, false);
+        let batch = board.opening_batch();
         assert!(batch.blocks().is_empty(), "缺席的交接不许占位：{batch:?}");
     }
 
@@ -269,8 +257,8 @@ mod tests {
         let root = temp_root("unreadable");
         std::fs::create_dir_all(root.join(HANDOFF_FILE)).expect("造目录顶替那一份");
         assert_eq!(read(&root), Handoff::Unreadable);
-        let board = HandoffBoard::new(read(&root), false, ());
-        let batch = board.own_batch();
+        let board = HandoffBoard::new(read(&root), false);
+        let batch = board.opening_batch();
         assert_eq!(batch.blocks().len(), 1);
         assert!(
             batch.blocks()[0].text().contains("这一次没读到"),
@@ -285,8 +273,8 @@ mod tests {
         let text = "我干到第三步：正在等对面回话。下一段接着问。";
         write_from_subject(&root, text).expect("写");
         assert_eq!(read(&root), Handoff::Present(text.to_string()));
-        let board = HandoffBoard::new(read(&root), false, ());
-        let batch = board.own_batch();
+        let board = HandoffBoard::new(read(&root), false);
+        let batch = board.opening_batch();
         assert_eq!(batch.blocks().len(), 1);
         assert_eq!(batch.blocks()[0].text(), text, "原文摆出，前后不加东西");
     }
@@ -296,8 +284,8 @@ mod tests {
     fn a_delivered_handoff_is_not_shown_again() {
         let root = temp_root("delivered");
         write_from_subject(&root, "这一段要接着做 X").expect("写");
-        let board = HandoffBoard::new(read(&root), true, ());
-        let batch = board.own_batch();
+        let board = HandoffBoard::new(read(&root), true);
+        let batch = board.opening_batch();
         assert!(batch.blocks().is_empty(), "交付过的不许再摆：{batch:?}");
     }
 

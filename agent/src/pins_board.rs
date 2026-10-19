@@ -1,9 +1,27 @@
-//! 组件区（Pin Board）：**主体策展、系统渲染**——Run 开场把主体贴在墙上的纸条摆出来。
+//! 组件区（Pin Board）：**上一次的主体留给下一次的自己的内容**——Run 开场摆出来。
+//!
+//! ## 这一格摆两块（词表 §9 的定义）
+//!
+//! | 块 | 谁写的 | 什么时候摆 |
+//! |---|---|---|
+//! | `pinned-notes`（pin 投影） | 主体自己贴的（`notes_pin` / `notes_unpin`） | **每段开场都摆** |
+//! | `handoff`（交接快照） | 主体在**上一次活动**里写给下一次开场的自己 | **只摆一次**（交付过就不再摆） |
+//!
+//! 词表 §9 那一行的定义就是「**组件区 = pin 投影 ＋ 交接快照**」，而 `RUNTIME_FOUNDATION_DESIGN.md`
+//! §B2 把开场插槽的授权内容写成「pin 高亮点（既有）＋ 最新未交付 handoff」——**两块、一层**：
+//! 与状态栏那一层同款（`status-bar` ＋ `reading-guide`），处境链的层数因此一层都不加（C8）。
+//!
+//! ⚠ **顺序就是让位规则**：交接那一块在**前**（[`combine`] 的 `other`，永不放弃），pin 投影在后
+//! （`own`，批次超限时让位）。判据不是"新的在前"，而是**只有一份的那一块不能让**：交接一次播放，
+//! 这一段让掉就等于这一段没有（下一段才补上）；而 pin 投影下一段开场还会重摆。
+//!
+//! ⚠ **三态与"一次播放"归 `handoff` 那一件解释**：本件只决定它摆在这一格的哪儿，不复制它的判据。
 //!
 //! ## 与通知栏的分工（一句话）
 //!
 //! **通知栏 = 世界的账，系统照的**（每间房有几条新的，零正文，宿主读投影）；
-//! **组件区 = 主体的纸条，主体贴的**（自己 `notes_pin` 贴、`notes_unpin` 摘，系统只渲染预览）。
+//! **组件区 = 上一次的主体留给下一次的自己的字**（纸条自己 `notes_pin` 贴、`notes_unpin` 摘；
+//! 交接是上一次活动里写给这一次的——系统只渲染预览 / 摆出原文）。
 //!
 //! ## 它是什么、不是什么
 //!
@@ -42,6 +60,7 @@
 
 use crate::core::combine;
 use crate::core::{ContentBatch, ContentBlock, ContextSource, InjectionContext};
+use crate::handoff::{Handoff, HandoffBoard};
 
 /// 组件区内容块的标签（呈现时的区域名）。
 pub const PINS_BOARD_LABEL: &str = "pinned-notes";
@@ -83,10 +102,10 @@ pub struct PinnedRow {
     pub text: String,
 }
 
-/// 组件区：一块开场快照 + 内层来源。
+/// 组件区：开场那两块（pin 投影 ＋ 交接快照）+ 内层来源。
 ///
 /// 它**不持有**任何跨活动状态（摆完就完了）、不认识历史 / 行动 / 模型 / 账本——因此它不可能
-/// 替主体判断"哪张该贴"或"该不该去读全文"。
+/// 替主体判断"哪张该贴"、"该不该去读全文"，也不可能替主体决定交接交付给谁。
 #[derive(Debug)]
 pub struct PinsBoard<Inner> {
     /// 装配期由便签 App 交上来的素材。
@@ -99,15 +118,27 @@ pub struct PinsBoard<Inner> {
     ///
     /// `None` = 钟读不出来（1970 之前）⇒ 年龄那一格如实写 `unknown`，**不编一个数**。
     now_millis: Option<u64>,
+    /// **这一格的第二块**：上一次活动写给这一次开场的交接。
+    ///
+    /// 三态（写了才有 / 读不到如实说）与"一次播放"都归 `handoff` 那一件解释——本件只决定
+    /// 它摆在这一格的哪儿（见模块头），因此这里拿到的不是"要不要摆"，而是那一块本身。
+    handoff: HandoffBoard,
     inner: Inner,
 }
 
 impl<Inner> PinsBoard<Inner> {
-    /// 用 App 交上来的那一份装配：纸条行（可缺）+ 装配那一轮的钟 + 内层来源。
-    pub fn new(pinned: Option<&[PinnedRow]>, now_millis: Option<u64>, inner: Inner) -> Self {
+    /// 用装配期交上来的四样装配：纸条行（可缺）＋ 装配那一轮的钟 ＋ 交接那一块 ＋ 内层来源。
+    pub fn new(
+        pinned: Option<&[PinnedRow]>,
+        now_millis: Option<u64>,
+        handoff: Handoff,
+        delivered: bool,
+        inner: Inner,
+    ) -> Self {
         Self {
             pinned: pinned.map(|rows| rows.to_vec()),
             now_millis,
+            handoff: HandoffBoard::new(handoff, delivered),
             inner,
         }
     }
@@ -150,7 +181,12 @@ impl<Inner> PinsBoard<Inner> {
     }
 
     fn own_batch(&self) -> ContentBatch {
-        ContentBatch::of_or_not_delivered(vec![self.line()], PINS_BOARD_LABEL)
+        // **交接在前**（`other`，永不放弃）：它一次播放，让掉就等于这一段没有；
+        // pin 投影在后（`own`，超限时让位）——它下一段开场还会重摆。判据见模块头。
+        combine(
+            self.handoff.opening_batch(),
+            ContentBatch::of_or_not_delivered(vec![self.line()], PINS_BOARD_LABEL),
+        )
     }
 
     /// 内层来源（只读）。
@@ -239,7 +275,13 @@ mod tests {
             title: "标题".to_string(),
             text: "正文".to_string(),
         }];
-        let board = PinsBoard::new(Some(&rows), None, ActivityOrigin::new());
+        let board = PinsBoard::new(
+            Some(&rows),
+            None,
+            Handoff::Absent,
+            false,
+            ActivityOrigin::new(),
+        );
 
         // 那一块原本多大（标签 + 正文），读数要原样报出来。
         let expected = PINS_BOARD_LABEL.len() + board.reading().len();
@@ -253,6 +295,43 @@ mod tests {
             format!("超限未给（原始 {expected} B）")
         );
         assert!(!batch.is_source_failure(), "它不是来源失败");
+    }
+
+    /// **这一格摆两块：交接在前、pin 投影在后**（词表 §9「组件区 = pin 投影 ＋ 交接快照」）。
+    ///
+    /// 顺序不是"新的在前"，而是[`combine`] 的让位规则：交接一次播放（`other`，永不放弃），
+    /// pin 投影下一段还会重摆（`own`，超限时让位）。
+    #[test]
+    fn the_handoff_is_placed_before_the_pinned_notes() {
+        let rows = vec![row("note-1", None)];
+        let board = PinsBoard::new(
+            Some(&rows),
+            None,
+            Handoff::Present("我干到第三步，下一段接着问。".to_string()),
+            false,
+            ActivityOrigin::new(),
+        );
+        let batch = board.own_batch();
+        assert_eq!(batch.blocks().len(), 2, "这一格两块: {batch:?}");
+        assert_eq!(batch.blocks()[0].label(), crate::handoff::HANDOFF_LABEL);
+        assert_eq!(batch.blocks()[0].text(), "我干到第三步，下一段接着问。");
+        assert_eq!(batch.blocks()[1].label(), PINS_BOARD_LABEL);
+    }
+
+    /// **交付过的那一份不再摆**：这一格只剩 pin 投影（三态与一次播放归 `handoff` 那一件）。
+    #[test]
+    fn a_delivered_handoff_leaves_the_pinned_notes_alone() {
+        let rows = vec![row("note-1", None)];
+        let board = PinsBoard::new(
+            Some(&rows),
+            None,
+            Handoff::Present("已经交付过的那一份".to_string()),
+            true,
+            ActivityOrigin::new(),
+        );
+        let batch = board.own_batch();
+        assert_eq!(batch.blocks().len(), 1, "只剩 pin 投影: {batch:?}");
+        assert_eq!(batch.blocks()[0].label(), PINS_BOARD_LABEL);
     }
 
     fn row(id: &str, touched: Option<u64>) -> PinnedRow {
@@ -272,7 +351,14 @@ mod tests {
     fn the_age_field_says_touched_not_created() {
         let rows = vec![row("note-1", Some(1_000_000))];
         // 装配那一轮的钟比它晚 100.001 秒 ⇒ 整秒报 100s。
-        let text = PinsBoard::new(Some(&rows), Some(1_100_001), ActivityOrigin::new()).reading();
+        let text = PinsBoard::new(
+            Some(&rows),
+            Some(1_100_001),
+            Handoff::Absent,
+            false,
+            ActivityOrigin::new(),
+        )
+        .reading();
         assert!(text.contains("touched-ago=100s"), "{text}");
         assert!(!text.contains("created"), "不许把它说成「创建于」: {text}");
     }
@@ -287,7 +373,14 @@ mod tests {
         ];
         for (touched, now) in cases {
             let rows = vec![row("note-1", touched)];
-            let text = PinsBoard::new(Some(&rows), now, ActivityOrigin::new()).reading();
+            let text = PinsBoard::new(
+                Some(&rows),
+                now,
+                Handoff::Absent,
+                false,
+                ActivityOrigin::new(),
+            )
+            .reading();
             assert!(
                 text.contains("age=unknown"),
                 "({touched:?},{now:?}) ⇒ {text}"
@@ -303,7 +396,14 @@ mod tests {
             row("note-1", Some(1_000_000)),
             row("note-2", Some(1_000_000)),
         ];
-        let text = PinsBoard::new(Some(&rows), Some(1_050_000), ActivityOrigin::new()).reading();
+        let text = PinsBoard::new(
+            Some(&rows),
+            Some(1_050_000),
+            Handoff::Absent,
+            false,
+            ActivityOrigin::new(),
+        )
+        .reading();
         assert!(text.starts_with("pinned = 2, ~"), "{text}");
         assert_eq!(text.matches("touched-ago=50s").count(), 2, "{text}");
         assert_eq!(

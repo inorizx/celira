@@ -1037,6 +1037,18 @@ pub(super) const PAUSED_STAGE: &str = "storage-failure";
 /// 暂停标记使用的标签。
 const PAUSED_LABEL: &str = "paused";
 
+/// **Run 级那一拍的阶段名**（盘上取值）：一次活动的开场注入就是这一条。
+///
+/// 它**不是本件自己的标记**（那是 [`PAUSED_STAGE`]）——它是 Core 那一侧的轨迹条目落到盘上的
+/// 名字：编码在 `payload_of`（`stage_str`）、解码在 `rehydrate`，两处都取**这一个**名字
+/// （从前那两处各写一遍字面量，本刀收成一处）。
+pub(super) const RUN_START_STAGE: &str = "run-start";
+
+/// **Turn 级那一拍的阶段名**（盘上取值）：某一轮真正调用模型之前的注入。
+///
+/// 与 [`RUN_START_STAGE`] 同族、同一条纪律（编解码共用这一处名字）。
+pub(super) const TURN_STAGE: &str = "turn";
+
 /// 一个环境目录被上一个写者留下"保存失败暂停"标记了吗？
 ///
 /// 这个判断读的是**已确认记录**，因此重启不能绕过保护。返回原因文本。
@@ -1127,7 +1139,7 @@ pub struct StorageFailure {
     pub acknowledged: bool,
 }
 
-/// 开场那**一次读**的读数：准入 ＋ 历史上最后一次存储故障。
+/// 开场那**一次读**的读数：准入 ＋ 历史上最后一次存储故障 ＋ 上一次活动的开场。
 ///
 /// 为什么合成一次读（2026-10-06）：这两格都要走同一份已确认前缀，而那份账本可能很长
 /// （合成历史实测：解析约 60–70 ms/MB，线性——见 `tests/durability_reading.rs`）——各读一遍
@@ -1138,6 +1150,21 @@ pub struct OpeningReadings {
     pub admission: Admission,
     /// 历史上最后一次存储故障（从来没有过 ⇒ `None`）。
     pub last_storage_failure: Option<StorageFailure>,
+    /// **紧邻上一次活动的开场摆了哪几块**（标签 ＋ 正文，逐字节原样，按摆出的顺序）。
+    ///
+    /// 它就是账里**已经有**的那条事实（`stage=run-start` 的注入，正文在 `blocks[].text`）：
+    /// 本件只把它带回来，**不落任何新事实、不新开读取点**。
+    ///
+    /// ⚠ **它为什么在这里**：交接（`handoff`）的交付判据是「**交付过 ⟺ 紧邻上一次活动的开场里
+    /// 摆过它**」。那一格要按**身份**（正文）比，不能只看"上一次摆过一块交接"——交接是能被
+    /// 重写的（B4.1「再写 → 新 handoff 成为最新」），一个布尔会把重写后的新的一份读成"已经交付
+    /// 过" ⇒ 那一份**永远不摆**。本件**不认识任何显示区的标签**（`handoff` 是显示区自己的词）
+    /// ⇒ 它交回**整批**，由装配层去认自己关心的那一块。
+    ///
+    /// ⚠ **看不见就是空**：活动段封口（1 MiB 一次）之后，上一次活动的开场可能落在上一卷里，
+    /// 而本件只读活动段 ⇒ 这一格为空 ⇒ 装配层读作"没交付过" ⇒ 至多**重播一次**。方向就是设计
+    /// 定的那一条（B4.2：**丢失不可接受、重复可容忍**）——**绝不静默跳过**。
+    pub last_opening_blocks: Vec<(String, String)>,
 }
 
 /// 开场读数（**一次解析**，见 [`OpeningReadings`]）。
@@ -1150,7 +1177,34 @@ fn opening_readings_at(root: &Path, tail: TailPolicy) -> Result<OpeningReadings,
         admission: admission_from(&parts, &records)?,
         last_storage_failure: last_storage_failure_of(&records)?
             .or_else(|| previous.and_then(|part| part.paused.clone())),
+        last_opening_blocks: last_opening_blocks_of(&records),
     })
+}
+
+/// **紧邻上一次活动的开场那一批块**（见 [`OpeningReadings::last_opening_blocks`]）。
+///
+/// 取**记录里序号最大的那一段活动**（记录本身按序号排）——在开场这一刻它就是"紧邻的上一次活动"：
+/// 本段活动这时还没有任何记录。⚠ **不按活动 id 取最大**：`run-12` 按 id 排在 `run-4` **前面**，
+/// 那不是先后（与"最近那一段"同一条判据）。
+///
+/// 一段活动只有**一条** Run 级注入（`is_started` 那条机械事实保证恰好一次）⇒ 这里照旧
+/// **只留最后一条**，与"最后一条存储故障"同一条读法（不重写前面那些）。
+fn last_opening_blocks_of(records: &[TraceRecord]) -> Vec<(String, String)> {
+    let Some(last_run) = records.last().map(|record| record.run().clone()) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(String, String)> = Vec::new();
+    for record in records {
+        if record.run() != &last_run {
+            continue;
+        }
+        if let TracePayload::Injection { stage, blocks, .. } = record.entry()
+            && stage == RUN_START_STAGE
+        {
+            found = blocks.clone();
+        }
+    }
+    found
 }
 
 /// 历史上最后一次存储故障（从已经解析过的记录算）。
