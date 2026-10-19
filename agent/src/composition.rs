@@ -733,8 +733,8 @@ struct OpeningMaterials {
     handoff: crate::handoff::Handoff,
     /// **这一份交接已经交付过了吗**（`true` ⇒ 开场一个字都不说）。
     ///
-    /// 判据见 [`handoff_delivered`]：**交付过 ⟺ 紧邻上一次活动的开场里摆过它**——两格都是
-    /// 账里已有的事实，**零新事实、零新写者**。
+    /// 判据见 [`handoff_delivered`]：**交付过 ⟺ 紧邻上一次活动的开场里摆过它，而且那一段真的想过**
+    /// ——三格都是账里已有的事实，**零新事实、零新写者**。
     handoff_delivered: bool,
     /// 出厂说明（四态）。**不进处境链**——它是系统消息的静态头，由会话自己携带。
     orientation: crate::orientation::Orientation,
@@ -793,10 +793,11 @@ fn read_opening_materials(
     material_root: &Path,
     previous: PreviousReading,
     last_opening: &[(String, String)],
+    last_activity_thought: bool,
 ) -> OpeningMaterials {
     // **交接**：读一次，交付判据用同一份（判据见 [`handoff_delivered`]）。
     let handoff = crate::handoff::read(environment_root);
-    let handoff_delivered = handoff_delivered(&handoff, last_opening);
+    let handoff_delivered = handoff_delivered(&handoff, last_opening, last_activity_thought);
     OpeningMaterials {
         // **纸条板**：素材由**便签 App 自己交**（`pinned_material`，方向 `app → 显示区`）。
         // 装配这一层不翻它的存储、不认识它的记录类型。
@@ -828,27 +829,40 @@ fn read_opening_materials(
     }
 }
 
-/// **这一份交接交付过没有**：判据一句话——**交付过 ⟺ 紧邻上一次活动的开场里摆过它**。
+/// **这一份交接交付过没有**：判据一句话——**交付过 ⟺ 紧邻上一次活动的开场里摆过它，而且那一段真的想过**。
 ///
 /// 两格都是**账里已经有的事实**（零新事实、零新游标、零新写者）：
 ///
 /// - 这一份的正文 = 装配期从 `<环境根>/handoff` 读回来的那一态（[`crate::handoff::read`]）；
 /// - 上一次开场摆过什么 = 装配点在读**开场读数**时顺手带回来的那一批块
 ///   （`store::OpeningReadings::last_opening_blocks`，即那一条 `run-start` 注入的
-///   `blocks[].text`）——**不新开读取点**。
+///   `blocks[].text`）——**不新开读取点**；
+/// - **那一段想过没有** = 同一份读数里的 `last_activity_thought`（账里有 `model-response`）。
 ///
 /// ⚠ **按身份比，不按"上一次摆过一块交接没有"**：交接是能被重写的（B4.1「再写 → 新 handoff
 /// 成为最新（下次开场交付新的）」）——只看"摆过一块"会把**重写后的新的一份**读成"已经交付过"
 /// ⇒ 那一份**永远不摆**。改过一个字节就是新的一份，因此这里比的是**正文**。
 ///
+/// ⚠ **"想过"那一格守的是方向**（B4.2：**丢失不可接受、重复可容忍**）：注入落账与第一次模型调用
+/// 之间有一个窄窗口——**注入已落账、而这一段一个回合都没想成**（进程没了，或那一次调用失败收场）
+/// ⇒ **主体没拿到**那一份。少了这一格，判据会在那个窗口里读作"交付过"、把那一份**沉底**（丢失）；
+/// 有了它，那个窗口落到**重播**那一侧（多看一遍，非语义错误）。
+///
 /// ⚠ **看不见 ⇒ 读作没交付过**：读不出来、上一次活动的开场落在封口的上一卷里（活动段封口
-/// 1 MiB 一次）、上一次那一块没给出去——一律算"没交付过" ⇒ 至多**重播一次**。方向就是设计定的
-/// 那一条（B4.2：**丢失不可接受、重复可容忍**），**绝不静默跳过**。
-fn handoff_delivered(handoff: &crate::handoff::Handoff, last_opening: &[(String, String)]) -> bool {
+/// 1 MiB 一次）、上一次那一块没给出去——一律算"没交付过" ⇒ 至多**重播一次**。**绝不静默跳过**。
+fn handoff_delivered(
+    handoff: &crate::handoff::Handoff,
+    last_opening: &[(String, String)],
+    last_activity_thought: bool,
+) -> bool {
     // 三态里只有"在"才谈得上交付：缺席（没写过）与读不出来都不是"交付过"。
     let crate::handoff::Handoff::Present(text) = handoff else {
         return false;
     };
+    // 上一次没想成 ⇒ 那一份没进过它的视野 ⇒ 不算交付过（重播，不沉底）。
+    if !last_activity_thought {
+        return false;
+    }
     last_opening
         .iter()
         .any(|(label, seen)| label == crate::handoff::HANDOFF_LABEL && seen == text)
@@ -1506,13 +1520,15 @@ impl<'a> RunSession<'a> {
         // 开场素材：**读法只有一份**（见 [`read_opening_materials`]）。三态 / 四态语义在那一处
         // 各自保持——读失败与"没有"分得开，这里一个都不压平。
         //
-        // ⚠ 最后那一格（**上一次活动的开场摆了哪几块**）是**交接交付判据**要的那一份事实：
-        // 它与准入、"最后一次存储故障"同属**那一次读**（`store::OpeningReadings`）⇒ 不新开读取点。
+        // ⚠ 最后那两格（**上一次活动的开场摆了哪几块** ＋ **那一段想过没有**）是**交接交付判据**
+        // 要的那一份事实：它们与准入、"最后一次存储故障"同属**那一次读**（`store::OpeningReadings`）
+        // ⇒ 不新开读取点。
         let materials = read_opening_materials(
             &environment_root,
             material_root,
             previous,
             &readings.last_opening_blocks,
+            readings.last_activity_thought,
         );
 
         let mut agent = Agent::new(agent_id.clone());

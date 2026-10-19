@@ -1165,6 +1165,17 @@ pub struct OpeningReadings {
     /// 而本件只读活动段 ⇒ 这一格为空 ⇒ 装配层读作"没交付过" ⇒ 至多**重播一次**。方向就是设计
     /// 定的那一条（B4.2：**丢失不可接受、重复可容忍**）——**绝不静默跳过**。
     pub last_opening_blocks: Vec<(String, String)>,
+    /// **紧邻上一次活动想过没有**（账里有它的 `model-response` 记录 ⇒ `true`）。
+    ///
+    /// ⚠ **它为什么在这里**：交付判据要的不是"注入落过账"，而是"**那一段真的想过**"——
+    /// 开场那条注入落账与第一次模型调用之间有一个窄窗口：**注入已落账、而这一段一个回合都没想成**
+    /// （进程没了，或那一次调用失败收场）⇒ **主体没有拿到**那一份。少了这一格，交付判据会在那个窗口里
+    /// 读作"交付过"、把那一份**沉底**——那是**丢失**方向，而设计定的方向是"丢失不可接受、
+    /// 重复可容忍"（B4.2）。
+    ///
+    /// ⚠ 与 [`Self::last_opening_blocks`] **同一条读法**：都取"紧邻上一次活动"（序号最大的那一段），
+    /// 都从**同一次解析**里算出来，**不新开读取点、不落新事实**。
+    pub last_activity_thought: bool,
 }
 
 /// 开场读数（**一次解析**，见 [`OpeningReadings`]）。
@@ -1178,19 +1189,28 @@ fn opening_readings_at(root: &Path, tail: TailPolicy) -> Result<OpeningReadings,
         last_storage_failure: last_storage_failure_of(&records)?
             .or_else(|| previous.and_then(|part| part.paused.clone())),
         last_opening_blocks: last_opening_blocks_of(&records),
+        last_activity_thought: last_activity_thought_of(&records),
     })
+}
+
+/// **紧邻上一次活动**（记录里序号最大的那一段）——在开场这一刻它就是"上一次"：
+/// 本段活动这时还没有任何记录。
+///
+/// ⚠ **不按活动 id 取最大**：`run-12` 按 id 排在 `run-4` **前面**，那不是先后（与"最近那一段"
+/// 同一条判据）。两条开场读数（`last_opening_blocks` / `last_activity_thought`）都从它算起，
+/// 因此"上一次"只有一个定义。
+fn last_run_of(records: &[TraceRecord]) -> Option<RunId> {
+    records.last().map(|record| record.run().clone())
 }
 
 /// **紧邻上一次活动的开场那一批块**（见 [`OpeningReadings::last_opening_blocks`]）。
 ///
-/// 取**记录里序号最大的那一段活动**（记录本身按序号排）——在开场这一刻它就是"紧邻的上一次活动"：
-/// 本段活动这时还没有任何记录。⚠ **不按活动 id 取最大**：`run-12` 按 id 排在 `run-4` **前面**，
-/// 那不是先后（与"最近那一段"同一条判据）。
+/// **紧邻上一次活动的开场那一批块**（见 [`OpeningReadings::last_opening_blocks`]）。
 ///
 /// 一段活动只有**一条** Run 级注入（`is_started` 那条机械事实保证恰好一次）⇒ 这里照旧
 /// **只留最后一条**，与"最后一条存储故障"同一条读法（不重写前面那些）。
 fn last_opening_blocks_of(records: &[TraceRecord]) -> Vec<(String, String)> {
-    let Some(last_run) = records.last().map(|record| record.run().clone()) else {
+    let Some(last_run) = last_run_of(records) else {
         return Vec::new();
     };
     let mut found: Vec<(String, String)> = Vec::new();
@@ -1205,6 +1225,19 @@ fn last_opening_blocks_of(records: &[TraceRecord]) -> Vec<(String, String)> {
         }
     }
     found
+}
+
+/// **紧邻上一次活动想过没有**（见 [`OpeningReadings::last_activity_thought`]）。
+///
+/// 判据是账里的机械事实：那一段活动有没有一条 `model-response` 记录。**有一条就算想过**——
+/// 开场那批内容随第一次模型调用进了主体的视野，此后哪一轮想成都算（那一份确实进过视野）。
+fn last_activity_thought_of(records: &[TraceRecord]) -> bool {
+    let Some(last_run) = last_run_of(records) else {
+        return false;
+    };
+    records.iter().any(|record| {
+        record.run() == &last_run && matches!(record.entry(), TracePayload::ModelResponse { .. })
+    })
 }
 
 /// 历史上最后一次存储故障（从已经解析过的记录算）。

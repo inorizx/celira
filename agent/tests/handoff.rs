@@ -16,13 +16,15 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use celira_agent::clock::ClockHandle;
-use celira_agent::composition::{RunSession, SessionDeclarations, SessionRequest};
+use celira_agent::composition::{RunSession, SessionDeclarations, SessionDrive, SessionRequest};
 use celira_agent::context_reading::ContextReading;
 use celira_agent::core::{
     Action, ActionId, ActionParams, ActionPort, InjectionStage, Limits, ModelError, ModelOutput,
     ModelPort, RunInput, TraceEntry, View,
 };
-use celira_agent::foundation::{AgentId, OperationId, ResultState, RunId, Turn};
+use celira_agent::foundation::{
+    AgentId, OperationId, Outcome, ResultState, RunId, SystemEnding, Turn,
+};
 use celira_agent::handoff::{HANDOFF_FILE, HANDOFF_LABEL, MAX_HANDOFF_BYTES};
 use celira_agent::os::{MinimalOs, RunExpansion};
 use celira_agent::pins_board::PINS_BOARD_LABEL;
@@ -566,10 +568,67 @@ fn an_opening_that_is_sealed_away_is_repeated_rather_than_skipped() {
     }
 }
 
+/// **上一次活动"没想成" ⇒ 那一份再摆一次，不沉底**（B4.2 的方向：丢失不可接受、重复可容忍）。
+///
+/// 判据要的不是"开场那条注入落过账"，而是"**那一段真的想过**"：注入落账与第一次模型调用之间
+/// 有一个窄窗口——**注入已落账、而这一段一个回合都没想成**（进程没了，或那一次调用失败收场）
+/// ⇒ 她**没拿到**那一份。少了这一格，判据会在那个窗口里读作"交付过"、把它**沉底**（丢失方向）。
+///
+/// 这一条构造的正是那个窗口：第二段的模型**一次都答不上来**（直接失败收场）⇒ 第三段**重播**。
+#[test]
+fn a_handoff_is_shown_again_when_the_previous_activity_never_thought() {
+    let dir = TempDir::new("never-thought");
+    let mut environment = dir.environment();
+    let text = "上一次没想成，这一份应当再摆一次。";
+
+    // 第一段：写下它（这一段想成了 ⇒ 它下一次该被交付）。
+    {
+        let mut session = open(&dir, &mut environment, RUN_ONE);
+        let mut model = ScriptedModel::new(vec![
+            ModelOutput::act(handoff_write(text)),
+            ModelOutput::say("等"),
+        ]);
+        assert!(session.drive(&mut model).expect("驱动").is_unsettled());
+    }
+
+    // 第二段：开场摆出它——但这一段**一次都没想成**（模型调用失败收场）。
+    {
+        let mut session = open(&dir, &mut environment, RUN_TWO);
+        let mut model = ScriptedModel::new(Vec::new());
+        let ended = session.drive(&mut model).expect("驱动");
+        assert!(
+            matches!(
+                ended,
+                SessionDrive::Ended(Outcome::System(SystemEnding::ModelFailed(_)))
+            ),
+            "这一段应当以模型失败收场: {ended:?}"
+        );
+        let openings = injections(&session);
+        assert_eq!(
+            handoff_blocks(opening_blocks(&openings)).len(),
+            1,
+            "开场照旧摆出它（注入与判据都成立）: {openings:#?}"
+        );
+    }
+
+    // 第三段：**再摆一次**——上一次没想成，那一份就不算交付过。
+    {
+        let mut session = open(&dir, &mut environment, RUN_THREE);
+        drive_once(&mut session);
+        let openings = injections(&session);
+        let found = handoff_blocks(opening_blocks(&openings));
+        assert_eq!(
+            found.len(),
+            1,
+            "上一次没想成 ⇒ 这一份不沉底（重播，不是丢失）: {openings:#?}"
+        );
+        assert_eq!(found[0].1, text);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 她的写动词 `write_handoff`：写权归自己，域规则归那一份事实的所有者
 // ---------------------------------------------------------------------------
-
 /// **上限是硬墙、账单贴在写入杠杆处**（与 `write_self_concept` 同款、同一条纪律）。
 ///
 /// 判错即红：上限只写在文档里而不在代码里 ⇒ 超限那条会写进去；拒绝不带读数 ⇒ 红；
