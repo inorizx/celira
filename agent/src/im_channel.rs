@@ -55,6 +55,11 @@ pub const PARAM_BASE_VERSION: &str = "base_version";
 ///
 /// 它是搬运用词，不是协议复述：协议词（状态码、错误码字符串、响应体）一个都不外泄——主体只看到
 /// "这次读取属于哪一类失败"。同一种故障两次发生**逐字节相同**（分类之外不带任何动态细节）。
+///
+/// ⚠ **它不是模型那一张失败表**：适配层那几个讲的是"模型这一层失败了"，而一次 im 读不通
+/// 不是模型失败，也不该写进 `run-ended.failure`——两张词表各归各自的主语。
+/// ⚠ 它也是**封闭**的：`as_str()` 与解码端逐条对称（`tests/action_failure_wordlist.rs` 钉着），
+/// 新取值必须同一刀补齐两边。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImFailure {
     /// 连不上、超时、响应读不出来（传输层）。
@@ -127,8 +132,11 @@ pub enum ImFailure {
     VersionConflict,
     /// 退房时**我是 owner**：必须先转让再退出（契约：409 `owner_transfer_required`）。
     ///
-    /// ⚠️ **今天 Agent 不可能成为群 owner**（转让目标不许是 Agent），所以这一格是按契约错误面
-    /// 如实映射的**防御格**，不是可达路径——它存在只是为了不把"明确被拒"说成 `unknown`。
+    /// ⚠️ 它是**可达路径，不是防御格**（2026-10-13 起）：Agent 能开群房、开完就是 owner
+    /// （`im_create_group`），owner 退房前必须先转让 ⇒ 这一格走到的是真实状态，不是理论分支。
+    /// 转让目标 Human 或 Agent 都行；「Agent 也能当 owner」由服务端黑盒
+    /// `an_agent_can_own_and_govern_a_group_room` 走真进程证明过。它仍只为一件事存在：
+    /// 不把"明确被拒"说成 `unknown`。
     OwnerTransferRequired,
     /// **owner 移不掉自己**（契约 `owner_not_removable`，2026-10-13 补）：它不是
     /// `not-a-member`——他不是"不在里面"，而是**不能把自己请出去**；出路是先转让

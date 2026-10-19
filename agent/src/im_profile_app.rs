@@ -1,4 +1,8 @@
-//! im-profile：Celira IM 的**表达面**（资料包）——读自己写下的资料、写自己的资料、换自己的头像。
+//! im-profile：Celira IM 的**表达面**（资料包）——读自己写下的资料、写自己的资料、换自己的
+//! 头像。**三条**（一个只读 ＋ 两个写，各配一项只读复核 = 读自己的资料）。
+//!
+//! ⚠ **群内呈现那一刀不在这里**：`im_write_presentation`（我在某一间群房里叫什么、什么角色、
+//! 负责什么）归**通信面** `im`——同一条表达权按**动词**分开住，别按主题把它搬进本包。
 //!
 //! 它是 2026-10-02 从 `im` 里拆出来的那一组动词：动作 id、参数表、回执文案、失败分类、
 //! wire 字段与幂等键规则**一字不改**，只是换了拥有者。它**不预装**：装配了，但要主体
@@ -369,7 +373,7 @@ impl crate::app_contract::AppPort for ImProfileApp {
 // 参数解析（工具面先拒绝 ⇒ 非法值一次都不出网）与回执渲染
 // ---------------------------------------------------------------------------
 
-/// 头像字节上限（契约：≤2 MiB，服务端不裁切）。
+/// 头像字节上限（契约：≤2 MiB，服务端不裁切；三种类型是 PNG / JPEG / WebP）。
 const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
 
 /// 头像文件的形状校验：非空、≤ [`MAX_FILE_PARAM_BYTES`] 字节（**路径那一族**的上限——
@@ -380,7 +384,8 @@ fn valid_avatar_file(params: &ActionParams) -> Option<&str> {
         .filter(|file| !file.is_empty() && file.len() <= MAX_FILE_PARAM_BYTES)
 }
 
-/// 从文件名认图片类型：**白名单逐字**（契约只认这三种；认不出就是类型不支持）。
+/// 从文件名认图片类型：**白名单逐字**——`.png` / `.jpg`|`.jpeg` / `.webp` 三种（契约只认这三种，
+/// 服务端也不按内容嗅探；认不出就是类型不支持）。
 fn avatar_content_type(file_name: &str) -> Option<&'static str> {
     let lower = file_name.to_ascii_lowercase();
     if lower.ends_with(".png") {
@@ -441,7 +446,8 @@ fn multipart_avatar_body(
     body
 }
 
-/// 自己的资料：`version = N`（0 = 还没写过）+ 两句介绍。
+/// 自己的资料：`version = N`（0 = 还没写过）＋ 两句介绍 ＋ `published_by`（这一版是谁发布的：
+/// **它自己还是 Owner**——表达权的署名，不是禁令）。
 fn render_profile(body: &serde_json::Value) -> String {
     let profile = body.get("profile");
     let field = |name: &str| {

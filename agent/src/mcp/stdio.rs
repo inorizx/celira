@@ -721,6 +721,10 @@ fn as_object(text: &str) -> Option<Value> {
 /// 结构该有自己的格子，那是另一件事（见 `mcp` 模块文档里登记的那两格）。
 ///
 /// ⇒ 缺 `message` 时**如实只报码**："对面没留话"与"我们读到了话"因此分得开。
+///
+/// ⚠ **这句话不被解析，也不参与分类**：分类只看结构字段（`code`、`data.supported`），从不读
+/// 它的正文——把对面一句自由文本读成"它就是那个原因"，就是**我们替它说话**。同一把尺子的
+/// 另一面：它也**不被改写成我们的话**，对面说了什么就带什么（只消毒、只截断）。
 fn describe_error(error: &Value) -> String {
     let code = error.get("code").and_then(Value::as_i64);
     let raw = match error.get("message").and_then(Value::as_str) {

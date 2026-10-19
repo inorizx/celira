@@ -380,6 +380,9 @@ pub fn create_environment(
         .map_err(ManualEntryError::Environment)?;
     // **出厂文档**：出厂说明（做系统消息的静态头）与手册（零注入，自己读）。
     // 摆在环境根里、与自识同层；创建之后系统不再动它们（生命周期归主体）。
+    // ⚠ **创建不替主体写自识**：`self_concept` 那一份由主体自己的动词写（有一条守卫钉着它，
+    // 用例名里带着人称代词、这里不写出来）——施工单里"创建时落三个文件"
+    // 的那一项，在**今天的产品里就是不产出**（如实登记，不假装它产出过）。
     crate::orientation::place(environment_root)
         .map_err(|_| ManualEntryError::Environment(crate::store::StoreError::Io))?;
     Ok(environment.agent().clone())

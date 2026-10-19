@@ -415,6 +415,8 @@ fn error_with_data(
 /// - **`data.supported` 在** ⇒ 它仍然是"探得出 modern、而它说的版本我们一个都不会"
 ///   （`unsupported-version`）。少了它，这一格会落回**含糊的** `handshake-failure`
 ///   ——那是"原因不明"，不是"版本不支持"（`MCP_SERVER_GUIDE.md` §9 登记过这一条）。
+///   ⚠ 第一版夹具**只给 `code`、漏了 `data.supported`** ⇒ 用例当场红在分类上：
+///   **那是用例造错了格子，不是实现错了**（分类照设计含糊，两格缺一不可）。
 /// - **`message` 不在** ⇒ 这正是要演的那一格：**「对面没留话」必须与「我们读不到」分得开**。
 ///   spec 对拒 `initialize` 只写 SHOULD 给诊断 ⇒ 真机上有 server 就是不给——我们这一侧
 ///   必须如实"没有"，而不是编一句话、也不是留一块空的诊断。

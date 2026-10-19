@@ -1073,6 +1073,11 @@ impl RunScope<'_> {
         // 失败分两半交出去（与 `ParamShape` 同一条纪律）：**分类是词表**（逐字节稳定，
         // 落进盘上的行动结果），**对面那句话是内容**（随单贴在旁边）。
         // ⚠ 对面没留话 ⇒ **逐字节维持今天的行为**（只报分类，不产生空块）。
+        //
+        // ⚠ **不新造载体**：Core 早就有这一格（`failure_with_content`，文档原文「分类是词表，
+        // 读数是内容」），`ParamShape` 也早在用——这里只是把**同一条解法**补到展开这条路径上。
+        // ⚠ **App 交上来的 class 不进 [`ExpansionFailure`]**：那张表仍是 OS 自己那五个词，
+        // 一个取值不加；它照原样进回执与行动结果，OS 不解释、也不解码它。
         if let Err(refusal) = self.os.apps[index].present() {
             let class = refusal.class().to_string();
             return match refusal.detail() {

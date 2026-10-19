@@ -1,8 +1,13 @@
-//! im-social：Celira IM 的**关系面**（社交包）——看关系与黑名单、发起申请、回答申请、拉黑与解除。
+//! im-social：Celira IM 的**关系面**（社交包）——看关系账与黑名单、发起申请、回答申请、拉黑与
+//! 取消拉黑、结束一段关系。**七条**（两个只读 ＋ 五个写，每个写各配一项只读复核）。
 //!
 //! 它是 2026-10-02 从 `im` 里拆出来的那一组动词：动作 id、参数表、回执文案、失败分类、
 //! wire 字段与幂等键规则**一字不改**，只是换了拥有者。它**不预装**：装配了，但要主体
 //! 展开那一下才上场（与 files / timer 同款）。
+//!
+//! **为什么这一半必须跟关系一起放开**：关系是主体之间的事实，而一项权利若在**执行端够不着**，
+//! 就等于没有（「角色不可达 = 没有」「事实够不着 = 没有」——同一条纪律的第三次）。所以"能加"
+//! 与"能拒、能撤"必须同时在场：只给一半，主体就只看得见一段自己动不了的关系。
 //!
 //! 共用的通道机制在 [`crate::im_channel`]（App 之间不得有实现依赖）。
 
@@ -433,7 +438,8 @@ impl crate::app_contract::AppPort for ImSocialApp {
         Self::own_capabilities()
     }
 
-    /// 四个写动词各配一项只读复核（前两个看 `im_contacts`、后两个看 `im_blocks`）——
+    /// 五个写动词各配一项只读复核（看关系账的三个：`im_contacts_request` /
+    /// `im_answer_contact` / `im_end_contact`；看黑名单的两个：`im_block` / `im_unblock`）——
     /// 装配期的自洽检查会盯住这件事（写效应必配复核）。
     ///
     /// - `im_contacts_request`：**同参数第二次不产生新的一段**（一对之间只有一段关系，
@@ -442,6 +448,8 @@ impl crate::app_contract::AppPort for ImSocialApp {
     /// - `im_answer_contact`：**一次决定**——接受之后再接受是幂等成功（零新事实），拒绝之后
     ///   那段已闭合（第二次得到 `unknown-contact`）。同一先例。
     /// - `im_block` / `im_unblock`：**同参数第二次是成功 no-op**（幂等 204，零新事实）⇒ 同上。
+    /// - `im_end_contact`：**同参数第二次是成功 no-op**（没有 active 段也是幂等 204，零新事实）
+    ///   ⇒ 同上；复核是关系账（那一段还在不在）。
     fn declared_effects(&self) -> Vec<crate::app_contract::EffectDeclaration> {
         use crate::app_contract::{EffectClass, EffectDeclaration};
         vec![
@@ -478,7 +486,7 @@ impl crate::app_contract::AppPort for ImSocialApp {
     /// 来源档 = **这一段回执里携带的内容从哪个口子进来**。
     ///
     /// 两个读动词带回的是**世界上别人与我之间的关系事实**，而且每一段都能指回一个明确的
-    /// 对端，因此是 [`crate::app_contract::SourceClass::WorldSigned`]；四个写动词只回报服务端
+    /// 对端，因此是 [`crate::app_contract::SourceClass::WorldSigned`]；五个写动词只回报服务端
     /// 对这次动作的确认（关系状态 + 对端身份是**世界记下的事实**，不是别人对我说的话）⇒
     /// [`crate::app_contract::SourceClass::System`]。
     fn declared_sources(&self) -> Vec<crate::app_contract::SourceDeclaration> {
