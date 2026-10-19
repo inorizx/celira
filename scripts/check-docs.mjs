@@ -8,13 +8,15 @@
  * **判据本身已经立好了，但没有任何机械判据拿它跟文档比。**
  * 这与 `check-boundary.mjs` 记的是同一类洞，只是那一次漏在端点上、这一次漏在词上：
  *
- * - **判据一（称谓）**：`docs/runtime/AGENT_VOCABULARY.md` §9.1④ 立了"对外入口首现必须定义那个
- *   第三人称代词"。2026-10-17 实测：`EXTENDING.md` 21 处、`agent/SKILL_PACK_GUIDE.md` 42 处、
- *   `agent/MCP_SERVER_GUIDE.md` 20 处**都没有定义**——仓外读者不知道它指谁，还会额外读出
- *   **性别**与**单一连续人格**两个本仓没做过的断言（理由见 `client/DESIGN_SYSTEM.md` 与
- *   `client/scripts/check-voice.mjs` 的文件头）。三处补上之后，**没有任何东西拦着下一刀再漏**。
- *   同一个仓已经付过一次学费：`check-voice.mjs` 头里写着"清理是**一次性**的：没有守卫，
- *   下一刀就会自然写回来"。
+ * - **判据一（称谓）**：`docs/runtime/AGENT_VOCABULARY.md` §9.1④ 立了"**对外入口一处也不许出现**
+ *   那个第三人称代词"（2026-10-19 从"首现必须定义一次"**收紧**）。理由：仓外读者不知道它指谁，
+ *   还会额外读出**性别**与**单一连续人格**两个本仓没做过的断言（理由见 `client/DESIGN_SYSTEM.md`
+ *   与 `client/scripts/check-voice.mjs` 的文件头；**产品面**那一条已经由那个守卫管着）。
+ *   2026-10-17 实测过漏的形状：`EXTENDING.md` 21 处、`agent/SKILL_PACK_GUIDE.md` 42 处、
+ *   `agent/MCP_SERVER_GUIDE.md` 20 处。当时的解法是"文件头定义一次"——**而那只是把两个断言
+ *   摊开写明**；对仓外读者，**零代词**才是那个不需要解释的写法 ⇒ 那三份改用 `Agent`，
+ *   定义那三行随之删掉。同一个仓付过一次学费：`check-voice.mjs` 头里写着"清理是**一次性**的：
+ *   没有守卫，下一刀就会自然写回来"。
  * - **判据二（证据锚索引）**：`outputs/README.md` 规矩 4 立了"活文档引用本目录，一处引用一经
  *   写下，就是那份文件**不得删除**的理由"。2026-10-17 实测抓到一处漏登记
  *   （`AGENT_FILES_HOME_WORKORDER_2026-10-14.md` 被 `agent/README.md` 两处与
@@ -39,8 +41,8 @@
  *
  * ## 判据方向（写死，别反过来）
  *
- * 1. **对外入口 ∧ 正文用了那个代词 ⇒ 文件头必须定义一次**。零处代词的文件免（不需要定义
- *    一个它没用的词）。
+ * 1. **对外入口 ⇒ 那个代词一处也不许出现**（零容忍）。**内部文档不受它管**——那里读者是主人与
+ *    维护者、共享上下文，那个代词是**承重的内部行话**（见下面两张表）。
  * 2. **被活文档按名字引用的 `outputs/*.md` ⊆ `outputs/README.md` 的索引**。
  *    反方向（登记了、文件却不在盘上）**不报红**——那可能是已焚，也可能是"删了没记账"，
  *    **脚本分不出这两者**（已焚的名字也登记在索引里）。这一条要靠人读"已焚"那张表。
@@ -53,11 +55,12 @@
  *
  * ## 它量得到什么、量不到什么（如实登记）
  *
- * - 量得到：对外入口有没有**定义过**那个代词；被引用的 outputs 文件有没有**登记**；
+ * - 量得到：对外入口**有没有出现**那个代词（零容忍）；被引用的 outputs 文件有没有**登记**；
  *   两张入口表与磁盘上的候选文档**是否恰好一一对上**（新加一个入口文档会自动要一个理由）；
  *   词表主名在**词表之外**还出不出现（"表名与实现分家"的下限探测）；
  *   词表里的 `文件:行号` 引用**指不指得到**。
- * - 量**不到**：定义写得**对不对**（脚本只认"代词与『指』同现"这个形状，认不出定义写歪了）；
+ * - 量**不到**：**引文**里的那个字——对外入口若引了主人的原话、而原话里就有它，这条判据**照旧报红**：
+ *   正确做法是**别引那一句**（改成转述），因为**引文不许改**（改引文＝伪造证据）；
  *   索引里那条**该不该**是证据锚；`outputs/README.md` 的 §1 与 §2 有没有归错类；
  *   **词表之外那个同名字指的是不是同一个东西**（`includes` 只回答"这个字符串还在不在别处
  *   出现"），也量不到那个名字用得**对不对**；
@@ -84,8 +87,6 @@ import { fileURLToPath } from 'node:url'
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 /** 被禁的那个人称代词，**写成转义**（见文件头：本文件自己不许出现它）。 */
 const PRONOUN_SHE = '\u5979'
-/** 「文件头」= 前多少行。定义块住在文件头的引言里，不在正文。 */
-const HEAD_WINDOW = 20
 /** 只看这些扩展名——它们是"会引用 outputs 的活文档"的面。 */
 const EXTS = ['.md', '.rs', '.ts', '.tsx', '.js', '.mjs', '.py']
 
@@ -157,20 +158,25 @@ function walk(dir, out = []) {
   return out
 }
 
-/** 判据一：对外入口用了那个代词 ⇒ 文件头必须定义一次。 */
+/**
+ * 判据一：**对外入口一处也不许出现**那个代词（零容忍）。
+ *
+ * 报**一处**问题、里面列出每一行——判据是"零"，因此读的人要的是"哪几行"。
+ * ⚠ 它**不认"文件头定义过"**：定义只是把性别与单一连续人格那两个断言摊开写明（见文件头）。
+ */
 function checkPronoun(rel, text, isOutward) {
   if (!isOutward || !text.includes(PRONOUN_SHE)) return []
-  const head = text.split(/\r?\n/).slice(0, HEAD_WINDOW).join('\n')
-  const defined =
-    new RegExp(`${PRONOUN_SHE}[^。\\n]{0,40}指`).test(head) ||
-    new RegExp(`(称谓|指)[^。\\n]{0,40}${PRONOUN_SHE}`).test(head)
-  if (defined) return []
+  const hits = []
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (line.includes(PRONOUN_SHE)) {
+      hits.push(`  ${rel}:${index + 1} —— ${line.trim().slice(0, 100)}`)
+    }
+  })
   return [
-    `${rel}：正文用了那个第三人称代词，但文件头（前 ${HEAD_WINDOW} 行）没有定义它指谁 ⇒ ` +
-      `仓外读者不知道它指谁，还会读出性别与"单一连续人格"两个本仓没做过的断言。` +
-      `加一行（照另外三份对外入口的样子）：` +
-      `⚠ **称谓**：本文用「${PRONOUN_SHE}」指**你的那一支 Agent**——叙述视角，不是名字，也不断言性别。` +
-      `用法判据见 docs/runtime/AGENT_VOCABULARY.md §9.1④。`,
+    `${rel}：**对外入口里出现了那个第三人称代词**（${hits.length} 处）⇒ 仓外读者不知道它指谁，` +
+      `还会读出性别与"单一连续人格"两个本仓没做过的断言。**改成 \`Agent\`**（它就是这个项目的词），` +
+      `并把解释它的那行「称谓」声明删掉（不再有要解释的东西）。` +
+      `判据见 docs/runtime/AGENT_VOCABULARY.md §9.1④。\n${hits.join('\n')}`,
   ]
 }
 
@@ -381,13 +387,15 @@ function selfCheck() {
     `正文：${PRONOUN_SHE}开场看到一行读数。`
 
   if (checkPronoun('<self-check>', noDef, true).length !== 1)
-    missed.push('称谓判据自检：没定义的那条**必须**被抓到')
-  if (checkPronoun('<self-check>', withDef, true).length !== 0)
-    missed.push('称谓判据自检：定义过的那条**不许**报红')
+    missed.push('称谓判据自检：对外入口里出现那个代词**必须**被抓到')
+  if (checkPronoun('<self-check>', withDef, true).length !== 1)
+    missed.push('称谓判据自检：**写明定义也照样红**（零容忍——定义只是把断言摊开写明）')
+  if (!checkPronoun('<self-check>', noDef, true)[0].includes('<self-check>:1'))
+    missed.push('称谓判据自检：报的那一条必须**点名行号**（读的人要的是"哪几行"）')
   if (checkPronoun('<self-check>', noDef, false).length !== 0)
     missed.push('称谓判据自检：内部文档**不许**被这条判据管')
   if (checkPronoun('<self-check>', '这里一个代词都没有。', true).length !== 0)
-    missed.push('称谓判据自检：零代词的文件**不许**被要求定义')
+    missed.push('称谓判据自检：零代词的对外入口**不许**报红')
 
   const refs = findOutputsRefs(
     // ⚠ 夹具**拼**出来、不写字面量：本文件也在扫描面里（`.mjs`），写「outputs/ + 文件名」这种
