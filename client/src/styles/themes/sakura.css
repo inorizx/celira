@@ -133,14 +133,14 @@
     0 6px 18px color-mix(in srgb, var(--primary) 16%, transparent);
 }
 
-/* 夜间白边改为提亮一级的表面色：popover（随配色染色）混入 16% 主色推导，
-   不写死色值——叠加配色变体时勾边色相跟随氛围转向 */
+/* 夜间：**只留描边，不发光**（2026-10-20 主人真机："这边界还在发光"）。
+   原来那圈 `0 6px 18px 主色 22%` 在暗底上就是一圈**辉光**（发光不表达任何状态 ⇒ 按光学预算是 0）；
+   贴纸感要的是"贴上去的一层纸"，那是一道清楚的**描边**，不是光晕。
+   ⇒ 去掉软影，描边收到 1px 并降到 14%（色相仍从 `--popover` 混主色推导，配色变体照样跟）。 */
 .dark[data-theme='sakura'] .bg-card,
 .dark[data-theme='sakura'] .bg-popover,
 .dark[data-theme='sakura'] .bg-bubble-peer {
-  box-shadow:
-    0 0 0 2.5px color-mix(in srgb, var(--primary) 16%, var(--popover)),
-    0 6px 18px color-mix(in srgb, var(--primary) 22%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 14%, var(--popover));
 }
 
 /* sakura · matcha（日） */
