@@ -10,6 +10,18 @@
 //! - 翻译的方向只有两条：`View -> wire request`（内到外）与
 //!   `wire response -> ModelOutput / ModelError`（外到内）。
 //!
+//! ## 本模块有两件事：chat wire ＋ 两条 wire 共用的语义核
+//!
+//! 1. **chat completions 的 wire**：请求体、响应解析、占用读数——本文件私有；
+//! 2. **两条线协议共用的语义核**：决策契约措辞、保留工具名与名字规则、`decode_invoke` /
+//!    `decode_arguments`、finish / hold 的收场编码、`View` 渲染、失败折叠。`responses_adapter`
+//!    从这一份派生（它从本文件 import 的那二十来个符号就是这份核），两条 wire 的**报文形状
+//!    仍各自私有**。
+//!
+//! ⚠ **这条边界今天只分到「文件」这一级**：核住在 chat 那个文件里，读起来像「chat 的私有件被
+//! 借走了」。**第三条 wire 出现时把这份核挖成独立模块**；那天之前不挖——两家协议时中间层是
+//! 负资产，第三家才回本（判据在 `responses_adapter.rs` 的头）。
+//!
 //! ## 协议是 OpenAI 兼容的，端点与模型名**可配**（TASK_38）
 //!
 //! 本层说的是 OpenAI 兼容的 chat completions——它是这个领域的通用语（DeepSeek / GLM / Qwen /
