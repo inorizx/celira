@@ -45,7 +45,7 @@ export function CodeBlockFallback({ code, error, streaming = false }: CodeBlockF
         <CopyButton code={code} />
       </div>
       <pre className="overflow-x-auto p-3 text-caption">
-        <code className="font-mono text-[0.9em]">{code}</code>
+        <code className="font-mono text-code">{code}</code>
       </pre>
     </div>
   )

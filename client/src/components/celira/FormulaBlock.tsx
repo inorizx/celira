@@ -41,7 +41,7 @@ export function FormulaBlock({ tex, displayMode = false, streaming = false }: Fo
   }, [tex, displayMode, streaming])
 
   if (streaming) {
-    return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]">{`${displayMode ? '$$' : '$'}${tex}${displayMode ? '$$' : '$'}`}</code>
+    return <code className="rounded bg-muted px-1 py-0.5 font-mono text-code">{`${displayMode ? '$$' : '$'}${tex}${displayMode ? '$$' : '$'}`}</code>
   }
   if (html) {
     return (
@@ -52,7 +52,7 @@ export function FormulaBlock({ tex, displayMode = false, streaming = false }: Fo
     )
   }
   if (failed) {
-    return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]">{tex}</code>
+    return <code className="rounded bg-muted px-1 py-0.5 font-mono text-code">{tex}</code>
   }
   return (
     <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">

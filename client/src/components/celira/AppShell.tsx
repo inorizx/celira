@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { UnreadBadge } from '@/components/celira/UnreadBadge'
 import { SELF_ID } from '@/fixtures/data'
 import { getParticipant } from '@/api/participantDirectory'
 import { toParticipant } from '@/api/participantProjection'
@@ -124,9 +125,7 @@ export function AppShell() {
                   >
                     <Icon className="size-5" />
                     {id === 'messages' && totalUnread > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-micro text-primary-foreground">
-                        {unreadLabel}
-                      </span>
+                      <UnreadBadge label={unreadLabel} className="absolute -top-0.5 -right-0.5" />
                     )}
                   </NavLink>
                 </TooltipTrigger>
@@ -206,9 +205,11 @@ export function AppShell() {
                 <span className="relative">
                   <tab.icon className="size-5" />
                   {tab.id === 'messages' && totalUnread > 0 && (
-                    <span className="absolute -top-1.5 -right-2 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-micro text-primary-foreground">
-                      {unreadLabel}
-                    </span>
+                    <UnreadBadge
+                      label={unreadLabel}
+                      size="sm"
+                      className="absolute -top-1.5 -right-2"
+                    />
                   )}
                 </span>
                 <span className="w-full truncate px-0.5 text-center text-micro">{tab.label}</span>

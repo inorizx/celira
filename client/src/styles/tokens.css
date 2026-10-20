@@ -11,6 +11,14 @@
 :root {
   --radius: 0.625rem;
 
+  /* 气泡的**阅读尺度**（2026-10-20）：三档写在这里，`MessageBubble` 只挂 `.measure-bubble`。
+     以前它散在组件里的三个 `max-w-[85%] / md:max-w-[70%] / xl:max-w-[76%]` 上 ——
+     改"聊天列窄不窄"要改组件里的类名，改不到全局。判据：中文一行 30–40 字最舒服，
+     所以 76% 档在 1152px 的列宽上约 38 字（见 `.dark` 上面那段关于列宽的注释）。 */
+  --measure-bubble: 85%;
+  --measure-bubble-md: 70%;
+  --measure-bubble-wide: 76%;
+
   --background: #f7f6fb;
   --foreground: #1a1826;
   --card: #ffffff;
@@ -179,6 +187,32 @@
   --text-micro: 0.625rem;
   --text-micro--line-height: 1.3;
   --text-micro--font-weight: 500;
+  /* 行内代码与代码块的字号（2026-10-20 收成一处）：原来三处写死 `text-[0.9em]`。
+     用 **em 不用 rem**：代码要跟着**周围正文**缩放（引用块里的代码、标题下的代码各随父级），
+     也让下面 `data-font-size` 那几档自动生效，不必再加一条覆盖。只给字号，不给行高 ——
+     行内代码压在自己的段落里，行高归段落管。 */
+  --text-code: 0.9em;
+}
+
+/**
+ * 气泡行宽的三档（令牌即上面 `:root` 里那三个 `--measure-bubble*`）。
+ *
+ * 为什么是普通类而不是工具类：`@utility` 里写不了媒体查询，而这三档**本来就是三个断点**
+ * （窄屏 85%、`md` 70%、`xl` 76%）。所以这里只做一件事：把断点映射到令牌上 ——
+ * 想调"聊天列该多宽"，改上面那三个百分比即可，不用碰 `MessageBubble`。
+ */
+.measure-bubble {
+  max-width: var(--measure-bubble);
+}
+@media (min-width: 48rem) {
+  .measure-bubble {
+    max-width: var(--measure-bubble-md);
+  }
+}
+@media (min-width: 80rem) {
+  .measure-bubble {
+    max-width: var(--measure-bubble-wide);
+  }
 }
 
 .hljs-keyword,

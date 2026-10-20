@@ -197,7 +197,7 @@ const components = (
             <CopyCodeButton code={text} />
           </div>
           <pre className="overflow-x-auto p-3 text-caption">
-            <code className="font-mono text-[0.9em]">{children}</code>
+            <code className="font-mono text-code">{children}</code>
           </pre>
         </div>
       )
@@ -205,7 +205,7 @@ const components = (
     return (
       <code
         className={cn(
-          'rounded px-1 py-0.5 font-mono text-[0.9em]',
+          'rounded px-1 py-0.5 font-mono text-code',
           onSelf ? 'bg-bubble-self-foreground/20' : 'bg-muted',
         )}
       >

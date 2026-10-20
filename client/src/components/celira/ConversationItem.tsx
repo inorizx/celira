@@ -1,5 +1,6 @@
 import { BadgeCheck, BellOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { UnreadBadge } from '@/components/celira/UnreadBadge'
 import type { Room } from '@/api/domain'
 import { ParticipantAvatar } from './ParticipantAvatar'
 import { AgentBadge } from './AgentBadge'
@@ -103,9 +104,7 @@ export function ConversationItem({ room, active = false, onSelect, groupRooms, m
             (room.muted ? (
               <span className="size-2 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden />
             ) : (
-              <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-micro text-primary-foreground">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
+              <UnreadBadge count={unreadCount} className="shrink-0" />
             ))}
         </div>
       </div>
