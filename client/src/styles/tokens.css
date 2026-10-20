@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+﻿@import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
@@ -19,13 +19,6 @@
   --popover-foreground: #1a1826;
   --primary: #6d5bc2;
   --primary-foreground: #ffffff;
-  /* **主行动的实心底**与它上面那层墨（2026-10-20 主人："这个按钮会不会有点暗"）。
-     为什么把「实心底」从 `primary` 里分出来：同一个色要同时当**白字底**与**浅底上的文字**
-     （导航选中、勾、官方徽章都用 `text-primary`），两头的约束方向相反 —— 底色偏浅才不压人，
-     文字偏深才看得清。⇒ 默认值跟随 `primary`（**所有主题包与配色变体自动一致**），
-     只有默认浅色主题在下面那一处改成"浅紫底 + 深墨"。 */
-  --primary-fill: var(--primary);
-  --primary-fill-foreground: var(--primary-foreground);
   --secondary: #f1eef9;
   --secondary-foreground: #3f3a52;
   --muted: #f1eef9;
@@ -61,20 +54,6 @@
   --code-type: #a94e72;
   --code-variable: #34304c;
   --code-meta: #6e6983;
-}
-
-/**
- * **默认浅色主题**的主行动实心底：浅紫 + 深墨（对比 5.9:1）。
- *
- * 只命中"没有主题包、也没有配色变体"的那一格（默认主题不带 `data-theme`，或显式写了 `celira`）——
- * 其它主题包/配色变体的 `--primary-fill` 仍然是 `var(--primary)`，跟着它们自己的主色走
- * （⚠ 所以 `:not([data-variant])` 不能少：配了变体却还留着默认紫底，就是两套主色打架）。
- * 判据在 `:root` 那两条的注释里（"底色偏浅才不压人，文字偏深才看得清"）。
- */
-:root:not([data-theme]):not([data-variant]),
-[data-theme='celira']:not(.dark):not([data-variant]) {
-  --primary-fill: #a284f4;
-  --primary-fill-foreground: #1c1730;
 }
 
 .dark {
@@ -146,9 +125,6 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-overlay: var(--overlay);
-  /* 主行动的**实心底**（按钮那一层）；`primary` 仍是墨色（文字/图标/小徽章）。 */
-  --color-primary-fill: var(--primary-fill);
-  --color-primary-fill-foreground: var(--primary-fill-foreground);
 
   --color-brand: var(--brand);
   --color-agent: var(--agent);

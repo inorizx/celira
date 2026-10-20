@@ -28,7 +28,7 @@
 
 ## 语义令牌速查
 
-- 品牌：`brand`（Logo 紫）、`primary`（主行动的**墨色**：文字/图标/小徽章）、`primary-fill` ＋ `primary-fill-foreground`（主行动的**实心底**与它上面那层字 —— 默认浅色主题是浅紫底深墨，判据在 `tokens.css` 那两条注释里）
+- 品牌：`brand`（Logo 紫）、`primary`（主行动）
 - 表面：`background` / `card` / `popover` / `muted` / `accent` / `border` / `input` / `ring`
 - Agent 身份：`agent`（青色文字/描边）、`agent-surface`（Agent 头像与徽章底色）
 - 气泡：`bubble-self-from/foreground`（自己，**纯色**；2026-10-20 起正文字段不再用渐变）、`bubble-self-to`（只给头像与预设小样的渐变用）、`bubble-peer/foreground`（对方）

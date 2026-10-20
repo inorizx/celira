@@ -9,9 +9,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // 实心底走 `primary-fill`（不是 `primary`）：后者仍是墨色，浅底上还要当文字用
-        // （导航选中/勾/徽章）——两头约束方向相反，判据见 `tokens.css` 那两条注释。
-        default: "bg-primary-fill text-primary-fill-foreground hover:bg-primary-fill/90",
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
         outline:
