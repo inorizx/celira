@@ -37,6 +37,13 @@
 //!
 //! **不显示会过期的投影**：轮次余量、剩余预算这类"随时间失真"的读数一条都不出现；只显示
 //! 盘上事实可判读的东西。
+//!
+//! ⚠ **"它为什么停在这里"只有一份判断，而这个二进制本来就拿得到**：算 `RunState` 用的是手里那个
+//! `EnvironmentReader`，读这一格用的是**同一个**（`recovery::stopped_in_place` 收的就是它）⇒
+//! 操作者那一行与主体开场那张 `previous-activity` 纸条说的是**同一件事**（同一个读数、同一份账）。
+//! 从前为这一格登记的豁免理由是"宿主打那行时还没装配"——**不成立**：reader 本来就在手上，接上它
+//! **不新读一份账、也不新造第二种判断**。判据「人不许比系统知道得更少」的权威在
+//! `recovery::StoppedInPlace` 那一处——这一侧只是接上它。
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -256,7 +263,8 @@ impl ActivityLine {
             outcome,
             failure,
             unresolved,
-            // 别的类目没有这一格：只有"没走完"的活动才谈得上"它为什么停在这里"。
+            // 别的类目没有这一格：只有"没走完"的活动才谈得上"它为什么停在这里"，而收场 / 阻断 /
+            // 未知**本来就有自己的读数**（`outcome=` / `reason=` / `unresolved=`），再加一格就是说两遍。
             stopped: match category {
                 CategoryLabel::Unfinished => stopped,
                 _ => None,
@@ -359,6 +367,11 @@ fn render(
         // ⚠ **2026-10-13 加**：这一段**为什么**停在这里。取值就是事实里本来就有的那几个词
         // （`held` / `yielded` / `no-response` / `unreadable`）——操作者从此分得出
         // 「它自己停下的」与「被杀在半路」，而不是只读到一句"停在半路"。
+        //
+        // ⚠ **段的名字与顺序是对外契约**：`run=` 这一行有两份外部解析器**按顺序**吃
+        // （`scripts/home/host_status_parse.js` 与壳的 `app/src-tauri/src/home_doors.rs`；
+        // 两边都是**认不出的段 ⇒ 整份读数失败**，不安静跳过）⇒ 新段只能**加在行尾**，
+        // 前面几段的顺序一个都不许动。
         if let Some(stopped) = &line.stopped {
             let _ = write!(row, " stopped={}", stopped.as_str());
         }

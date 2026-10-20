@@ -10,6 +10,23 @@
 //! 与"能拒、能撤"必须同时在场：只给一半，主体就只看得见一段自己动不了的关系。
 //!
 //! 共用的通道机制在 [`crate::im_channel`]（App 之间不得有实现依赖）。
+//!
+//! **它刻意不含的那几格（是边界，不是漏补）**：
+//!
+//! - **看对端的资料卡**：世界的资料读面是**房内**作用域——那一条读法要求对那间房有 active
+//!   成员周期（`GET /v1/backend/rooms/{room_id}/members/{participant_id}/profile`），
+//!   而**关系不是可见性的依据**（关系 ≠ 可见）。⇒ 关系成立但不同房时，本包只给得出关系账里
+//!   那一行名字（`im_contacts` 的 `name`）；要看得更全，**开一间 1:1 的房把对端拉进来**。
+//!   本包**不**补一条"按关系作用域读资料"的动词：那等于给 Agent 一条 Human 没有的路
+//!   （裁决见 `agent/README.md` §3.89）。
+//! - **按名字找人**：本包没有"搜索 / 找陌生人"的动词——世界刻意**不给存在性 oracle**（"不存在 /
+//!   非 active / 被对端拉黑"合成同一个 404）。⇒ 加人之前得先有一个对端的标识，它来自已经看见的
+//!   那一格（`im_room_members` 的成员清单、`im_contacts` 的 `peer` 都是这样的来源）；本包不提供
+//!   "试一个名字看看在不在"的入口。
+//!
+//! ⚠ **`im_end_contact` 那四条契约语义是给主体读的判据，不是备注**：单方面生效 · 不通知对端 ·
+//! 旧房永久封存 · 它不是拉黑——它们决定"要不要按下去"，**必须**留在 `with_details` 里；删短它
+//! 等于让主体在不了解后果时动手。
 
 use crate::clock::localize_rfc3339;
 use crate::core::{
@@ -39,6 +56,7 @@ pub const CAPABILITY_UNBLOCK: &str = "im_unblock";
 /// **解除一段关系**（2026-10-13）：标准 IM 里"加好友"的另一半——能加就得能删。
 /// 走 Agent 侧那条**既有**端点（`DELETE /v1/backend/contacts/{participant_id}`，
 /// 批次三第二刀那五条关系端点之一；当年那批同样写着「不动执行端」）。
+/// ⚠ **端点早就在 ⇒ 这条动作不解封任何契约、也不改 im 服务端**：缺的只是这一侧的那个动词。
 pub const CAPABILITY_END_CONTACT: &str = "im_end_contact";
 
 /// 关系面的**对端主体**参数名（取自 `im_contacts`；拉黑/解除也用它）。
@@ -340,6 +358,8 @@ impl ImSocialApp {
     ///
     /// 契约（批次三第二刀）：**单方面即时生效**、**不通知对端**、旧房**永久封存**。
     /// 它不是拉黑——**拉黑 ⊇ 解除**，两条各自独立（与 `im_block` 同一条口径）。
+    /// **同参数第二次是成功 no-op**（幂等 204、零新事实）⇒ 这一格判 `repeatable-write`；
+    /// 复核是**关系账**（那一段还在不在、是什么状态），不是黑名单。
     fn end_contact(&self, params: &ActionParams) -> ActionOutcome {
         let Some(participant) = valid_participant(params) else {
             return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());

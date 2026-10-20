@@ -1906,8 +1906,25 @@ impl ImApp {
 
     /// **移除一个成员**（`DELETE /v1/backend/rooms/{room}/members/{participant}`，不带键）。
     ///
-    /// 与 Human 侧那条**同一 application 用例、同一套错误码**（只换认证面）——契约把
-    /// 「房不在 / 我不是成员 / 目标不是 active 成员」合成同一个 404，本层也不分解。
+    /// 与 Human 侧那条**同一 application 用例、同一套错误码**（只换认证面）。
+    ///
+    /// **谁能移除谁**（判据在契约那一层，本层不复制它、只把对面的答复如实分类）：动作的执行者
+    /// 必须是这间房的 **owner**；被移除者必须是它的 **active 成员——含 Human 成员**（2026-09-27
+    /// 裁决原文「移除权含 Human 成员」；Agent owner 与 Human owner 同一条规则）。**owner 移不掉
+    /// 自己**（409 `owner_not_removable`——它自成一格，不并进「不在里面」）；也不删消息、不改房、
+    /// 不动别的成员资格。
+    ///
+    /// **不带键**是这条端点的形状，不是省事：世界那侧的重放在「对方已经不在里面」上收口 ⇒ 404、
+    /// 零新事实——**幂等由「对方还在不在」承担**（复核面与档位见 `declared_effects`）。
+    ///
+    /// ⚠ **契约在 404 上有两个码，本层只落一个词**：房层面（未知 / bad-id / 我不是 owner /
+    /// 不是群房）是 `room_not_found`，目标层面（对方不在里面，含已经被移出）是 `member_not_found`；
+    /// 本层按状态码分类、两格都落 [`ImFailure::UnknownRoom`]（`unknown-room`）——**拆不拆是另一刀**，
+    /// 这一格不猜（契约与本层都没列出的码 ⇒ `unknown`，不就近映射）。
+    ///
+    /// ⚠ **如实登记**：服务端把「我不是 owner」也并进上面那一格 404（这条路上今天不回 403），
+    /// 因此它落的是 `unknown-room`；门牌上「我不是 owner ⇒ `not-a-member`」那句**今天不会出现**
+    /// ——403 那一格留着只是对称，改门牌文案属另一刀。
     fn remove_member(&self, params: &ActionParams) -> ActionOutcome {
         let (Some(room), Some(participant)) = (valid_room(params), valid_participant(params))
         else {
@@ -1923,11 +1940,14 @@ impl ImApp {
             }
             Reply::Refused(400) => ActionOutcome::failure(ImFailure::InvalidArgument.as_str()),
             Reply::Refused(401) => ActionOutcome::failure(ImFailure::CredentialRejected.as_str()),
-            // 403 = 我不是这间房的 owner。
+            // 403 = 我不是这间房的 owner。⚠ 服务端今天把非 owner 并进下面那一格 404 ——
+            // 这条路上 403 实际到不了，这一格留着只是对称（见本函数的文档注释）。
             Reply::Refused(403) => ActionOutcome::failure(ImFailure::NotAMember.as_str()),
             // 409 = **owner 移不掉自己**（契约 `owner_not_removable`）——它与"我不在里面"是两件事，
             // 因此走自己的词（出路是先转让），不并进 `not-a-member`。
             Reply::Refused(409) => ActionOutcome::failure(ImFailure::OwnerNotRemovable.as_str()),
+            // 404 = 房层面（未知 / bad-id / 我不是 owner / 不是群房）或目标层面（对方不在里面）：
+            // 契约是两个码（`room_not_found` / `member_not_found`），本层不拆，都落这一格。
             Reply::Refused(404) => ActionOutcome::failure(ImFailure::UnknownRoom.as_str()),
             Reply::Refused(_) | Reply::Broken => ActionOutcome::unknown(),
         }
@@ -1935,8 +1955,21 @@ impl ImApp {
 
     /// **转让房主**（`POST /v1/backend/rooms/{room}/owner-transfer`，带幂等键）。
     ///
-    /// 契约：目标必须是本房的 active 成员（Human 或 Agent 都行）；转给自己 ⇒ 400
-    /// `invalid_transfer_target`；同 key 重放 ⇒ `replayed = yes`。
+    /// **谁能转让给谁**（判据在契约那一层）：只有**现在的 owner** 能转；目标必须是这间房的
+    /// **active 成员——Human 或 Agent 都行**（owner 是房内的治理角色，不是参与者种类）；
+    /// 转给自己 ⇒ 400 `invalid_transfer_target`。一次转让是**不可拆的一笔**：转完立刻换人，
+    /// 双方的成员资格都还在（换的是角色，不是入群）。
+    ///
+    /// 它同时是 owner 退房那条路：`im_leave_room` 会如实回 `owner-transfer-required`——转完
+    /// 才能正常退出自己开的房。
+    ///
+    /// **带键**是为了让重放被认出来：同 key 重放是 200 ＋ `replayed = yes`（零新事实），同一个
+    /// 键配另一个目标才是 409 `idempotency-conflict`。
+    ///
+    /// ⚠ **契约在 404 上有两个码，本层只落一个词**：房层面（未知 / bad-id / 调用者不是它的
+    /// active owner / 不是群房）是 `room_not_found`，目标层面（不是 active 成员）是
+    /// `member_not_found`；本层两格都落 [`ImFailure::UnknownRoom`]（`unknown-room`）——拆不拆是
+    /// 另一刀，这一格不猜。
     fn transfer_owner(&self, operation: &OperationId, params: &ActionParams) -> ActionOutcome {
         let (Some(room), Some(participant)) = (valid_room(params), valid_participant(params))
         else {
@@ -1958,8 +1991,10 @@ impl ImApp {
             )]),
             Reply::Refused(400) => ActionOutcome::failure(ImFailure::InvalidArgument.as_str()),
             Reply::Refused(401) => ActionOutcome::failure(ImFailure::CredentialRejected.as_str()),
+            // 403 与上面那条同形：非 owner 今天并进 404（见本函数的文档注释），这一格到不了。
             Reply::Refused(403) => ActionOutcome::failure(ImFailure::NotAMember.as_str()),
-            // 404 = 房不在 / 目标不是本房的 active 成员（契约合成一个码）。
+            // 404 = 房层面（房不在 / 我不是它的 active 成员）或目标层面（不是 active 成员）：
+            // 契约是两个码（`room_not_found` / `member_not_found`），本层不拆，都落这一格。
             Reply::Refused(404) => ActionOutcome::failure(ImFailure::UnknownRoom.as_str()),
             Reply::Refused(409) => ActionOutcome::failure(ImFailure::IdempotencyConflict.as_str()),
             Reply::Refused(_) | Reply::Broken => ActionOutcome::unknown(),
@@ -2719,14 +2754,17 @@ fn render_group_created(value: &serde_json::Value) -> String {
     }
 }
 
-/// 成员清单那条端点的回执（`{members: [{participant: {id, display_name, …}, membership: {role, joined_at, …}}, …]}`）。
+/// 移除的回执：**如实说做了什么**——房与目标两个标识，并明说那间房与它的历史都还在、对方会
+/// 知道（移除只关对方那一份成员周期，不是删房删史；它在世界里是一条公共事实）。
 ///
-/// 读不懂就**如实说读不懂**（不编成员出来）：那说明这一版世界的回执形状变了，用 `im_rooms`
-/// 与 `im_room_live` 交叉看。
+/// 204 没有可读的体 ⇒ 这里**不解析任何东西、也不补一句"到底移掉了没有"**：那一问的答案是
+/// 成员清单（`im_room_members`，也是本动作的复核面），回执不冒充它。
 fn render_removed(room: &str, participant: &str) -> String {
     format!("room = {room}\nremoved = {participant}\n（那间房与它的历史都还在；他会知道）")
 }
 
+/// 转让的回执：**如实说做了什么**——房、接手的那个成员，以及世界回的 `replayed`（`?` 表示那
+/// 一格没读懂，**不猜 yes**；同 key 重放零新事实，这里原样搬给主体）。
 fn render_transferred(room: &str, participant: &str, value: &serde_json::Value) -> String {
     let replayed = value
         .get("idempotency_replayed")
@@ -2736,6 +2774,10 @@ fn render_transferred(room: &str, participant: &str, value: &serde_json::Value) 
     format!("room = {room}\nowner = {participant}\nreplayed = {replayed}")
 }
 
+/// 成员清单那条端点的回执（`{members: [{participant: {id, display_name, …}, membership: {role, joined_at, …}}, …]}`）。
+///
+/// 读不懂就**如实说读不懂**（不编成员出来）：那说明这一版世界的回执形状变了，用 `im_rooms`
+/// 与 `im_room_live` 交叉看。
 fn render_members(value: &serde_json::Value) -> String {
     let Some(members) = value.get("members").and_then(|members| members.as_array()) else {
         return "members = ?\n（这一版世界的回执形状我没读懂：成员清单没读出来）\n".to_string();
