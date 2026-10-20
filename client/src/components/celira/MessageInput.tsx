@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { FileText, Image as ImageIcon, Keyboard, Mic, Paperclip, Plus, SendHorizonal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -633,7 +633,93 @@ export function MessageInput({
           </div>
         )}
         {/* 移动端为微信式平铺栏：无外胶囊，[语音切换][文本域][表情][⊕/发送]；桌面保持胶囊 */}
-        <div className="flex items-end gap-2 rounded-xl border border-input bg-card px-3 py-2.5 transition-colors focus-within:border-ring max-md:gap-1 max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:px-1.5 max-md:py-1">
+        {/* 桌面：**一个表面 ＋ 下面一条工具行**（微信那种"工具在左、输入区高"的形状）。
+           判据来自真机（2026-10-20）：工具放左边、文字又在同一行 ⇒ 草稿一长，文字被挤到右侧，
+           左边工具**上方那一块永远打不进字**（主人："光标都在另一边了"）。⇒ 文字占满整行、
+           工具条落到下面一行；移动端本来就是平铺一条，`max-md:` 那串把它拆回同一行。 */}
+        <div className="flex flex-col gap-0.5 rounded-xl border border-input bg-card px-2 pt-1.5 pb-1 transition-colors focus-within:border-ring max-md:flex-row max-md:items-end max-md:gap-1 max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:px-1.5 max-md:py-1">
+          {voiceMode ? (
+            isMobileUi ? (
+              <button
+                type="button"
+                aria-label={recording ? '松开发送，移出取消' : '按住说话'}
+                disabled={uploading}
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  void startVoiceRecording()
+                }}
+                onPointerUp={() => {
+                  if (recording) void finishVoiceRecording()
+                }}
+                onPointerLeave={() => {
+                  if (recording) cancelVoiceRecording()
+                }}
+                onPointerCancel={() => {
+                  if (recording) cancelVoiceRecording()
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+                className={cn(
+                  'min-h-9 w-full touch-none rounded-lg border px-3 py-2 text-center text-body transition-colors select-none max-md:order-1 max-md:flex-1',
+                  recording
+                    ? 'border-ring bg-accent text-accent-foreground'
+                    : 'border-input bg-background text-muted-foreground',
+                )}
+              >
+                {recording ? `松开 发送 · ${recordSeconds}″` : '按住 说话'}
+              </button>
+            ) : recording ? (
+              <div className="flex min-h-9 w-full items-center justify-center gap-3 rounded-lg border border-ring bg-accent px-3 py-1.5 select-none">
+                <span className="flex items-center gap-1.5 text-caption text-accent-foreground">
+                  <span className="size-2 animate-pulse rounded-full bg-presence-failed" />
+                  录音中 {recordSeconds}″
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  aria-label="停止并发送语音"
+                  onClick={() => void finishVoiceRecording()}
+                >
+                  停止并发送
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="取消录音"
+                  onClick={cancelVoiceRecording}
+                >
+                  取消
+                </Button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                aria-label="点击开始录音"
+                disabled={uploading}
+                onClick={() => void startVoiceRecording()}
+                className="min-h-9 w-full cursor-pointer rounded-lg border border-input bg-background px-3 py-2 text-center text-body text-muted-foreground transition-colors select-none hover:text-foreground"
+              >
+                点击 开始录音
+              </button>
+            )
+          ) : (
+            <Textarea
+              ref={textareaRef}
+              variant="bare"
+              value={value}
+              onChange={(e) => updateValue(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+              onKeyDown={onKeyDown}
+              placeholder=""
+              aria-label={`发送到 ${room.name}`}
+              rows={1}
+              // `variant="bare"`（不是在这串类名里逐条覆盖）：`dark:bg-input/30` 在原子件的
+              // 基线上、与 `bg-transparent` 同权重 ⇒ 谁在 CSS 里靠后就谁赢，删不干净；
+              // 而"容器就是表面"这件事该由**变体**说，判据见 `ui/textarea.tsx`。
+              className="min-h-9 w-full resize-none px-1.5 py-1.5 max-md:order-1 max-md:min-h-6 max-md:flex-1"
+            />
+          )}
+          {/* 工具条：桌面上是文字下面那一行；移动端 `contents` 把它拆回同一条平铺行。 */}
+          <div className="flex items-center gap-0.5 max-md:contents">
           {voiceSupported && attachmentMode !== 'unavailable' && (
             <Button
               variant="ghost"
@@ -708,86 +794,7 @@ export function MessageInput({
               disabled={pendingAttachments.length >= MAX_ATTACHMENTS}
             />
           </div>}
-          {voiceMode ? (
-            isMobileUi ? (
-              <button
-                type="button"
-                aria-label={recording ? '松开发送，移出取消' : '按住说话'}
-                disabled={uploading}
-                onPointerDown={(e) => {
-                  e.preventDefault()
-                  void startVoiceRecording()
-                }}
-                onPointerUp={() => {
-                  if (recording) void finishVoiceRecording()
-                }}
-                onPointerLeave={() => {
-                  if (recording) cancelVoiceRecording()
-                }}
-                onPointerCancel={() => {
-                  if (recording) cancelVoiceRecording()
-                }}
-                onContextMenu={(e) => e.preventDefault()}
-                className={cn(
-                  'min-h-9 flex-1 touch-none rounded-lg border px-3 py-2 text-center text-body transition-colors select-none max-md:order-1',
-                  recording
-                    ? 'border-ring bg-accent text-accent-foreground'
-                    : 'border-input bg-background text-muted-foreground',
-                )}
-              >
-                {recording ? `松开 发送 · ${recordSeconds}″` : '按住 说话'}
-              </button>
-            ) : recording ? (
-              <div className="flex min-h-9 flex-1 items-center justify-center gap-3 rounded-lg border border-ring bg-accent px-3 py-1.5 select-none">
-                <span className="flex items-center gap-1.5 text-caption text-accent-foreground">
-                  <span className="size-2 animate-pulse rounded-full bg-presence-failed" />
-                  录音中 {recordSeconds}″
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  aria-label="停止并发送语音"
-                  onClick={() => void finishVoiceRecording()}
-                >
-                  停止并发送
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label="取消录音"
-                  onClick={cancelVoiceRecording}
-                >
-                  取消
-                </Button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                aria-label="点击开始录音"
-                disabled={uploading}
-                onClick={() => void startVoiceRecording()}
-                className="min-h-9 flex-1 cursor-pointer rounded-lg border border-input bg-background px-3 py-2 text-center text-body text-muted-foreground transition-colors select-none hover:text-foreground"
-              >
-                点击 开始录音
-              </button>
-            )
-          ) : (
-          <Textarea
-            ref={textareaRef}
-            variant="bare"
-            value={value}
-            onChange={(e) => updateValue(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-            onKeyDown={onKeyDown}
-            placeholder=""
-            aria-label={`发送到 ${room.name}`}
-            rows={1}
-            // `variant="bare"`（不是在这串类名里逐条覆盖）：`dark:bg-input/30` 在原子件的
-            // 基线上、与 `bg-transparent` 同权重 ⇒ 谁在 CSS 里靠后就谁赢，删不干净；
-            // 而"容器就是表面"这件事该由**变体**说，判据见 `ui/textarea.tsx`。
-            className="min-h-6 flex-1 resize-none py-2 pl-1.5 max-md:order-1"
-          />
-          )}
+          <div className="flex-1 max-md:hidden" />
           <Button
             size="icon"
             className={cn('shrink-0 max-md:order-3', !value.trim() && 'max-md:hidden')}
@@ -797,6 +804,7 @@ export function MessageInput({
           >
             <SendHorizonal className="size-4" />
           </Button>
+          </div>
         </div>
           {inputError && (
             <p role="alert" className="mt-1.5 text-caption text-presence-failed">
