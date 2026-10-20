@@ -292,6 +292,12 @@ impl crate::ports::room::RoomStore for DenyRoom {
     ) -> Result<crate::domain::room::AttentionLevel, RoomStoreError> {
         Err(RoomStoreError::Database(denied()))
     }
+    async fn attention_wake_targets(
+        &self,
+        _room_id: &crate::domain::room::RoomId,
+    ) -> Result<Vec<crate::domain::participant::ParticipantId>, RoomStoreError> {
+        Err(RoomStoreError::Database(denied()))
+    }
     async fn list_backend_rooms(
         &self,
         _agent_id: &crate::domain::participant::ParticipantId,

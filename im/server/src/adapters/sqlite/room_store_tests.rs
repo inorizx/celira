@@ -18,7 +18,8 @@ use crate::domain::agent::IdempotencyKey;
 use crate::domain::human_session::{HumanSession, SessionId, TokenHash};
 use crate::domain::participant::{DisplayName, Participant, ParticipantId};
 use crate::domain::room::{
-    MembershipClosedBy, MembershipId, MembershipRole, MembershipStatus, PeerRead, RoomId,
+    AttentionLevel, MembershipClosedBy, MembershipId, MembershipRole, MembershipStatus, PeerRead,
+    RoomId,
 };
 use crate::domain::time::UtcMillis;
 use crate::domain::token::OpaqueToken;
@@ -3384,4 +3385,90 @@ async fn peer_read_tells_whether_the_other_side_read_my_last_message() {
         Some(PeerRead::Unread),
         "新房第一条就是我说的话 ⇒ 对方没读过 ⇒ unread"
     );
+}
+/// **提醒档的唤醒目标**（契约 `CORE_V1_IM_CONTRACT.md` §9.1 的「通知条件」，
+/// 窄解冻切片 1b）：只列该房 **active Agent 成员**里档为 `all` 的那些——
+/// **缺行也算 `all`**（不预建行）；`mentions` 档的**不在**；Human 永不在
+/// （Human 侧的提醒不经过服务端 gate）；非成员不在。纯读：调用前后零写、
+/// 零事件、零唤醒。
+#[tokio::test]
+async fn attention_wake_targets_default_to_all_and_skip_mentions() {
+    let f = fixture().await;
+    let alice = bootstrap_human(&f.identity, "Alice")
+        .await
+        .unwrap()
+        .participant;
+    let agent_a = create_agent(&f, &alice, "Agent A", "attn-a").await;
+    let agent_b = create_agent(&f, &alice, "Agent B", "attn-b").await;
+    let agent_c = create_agent(&f, &alice, "Agent C", "attn-c").await;
+
+    let group = create_group(&f, &alice, "提醒档群", "attn-g").await;
+    for (n, agent) in [("1", &agent_a), ("2", &agent_b)] {
+        room_application::invite_group_member(
+            &f.room,
+            &alice,
+            group.as_str(),
+            agent.as_str(),
+            &format!("attn-inv-{n}"),
+        )
+        .await
+        .expect("invite agent");
+    }
+
+    let mut targets = f
+        .room
+        .attention_wake_targets(&group)
+        .await
+        .expect("wake targets");
+    targets.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    // 缺行 = all ⇒ 两位 Agent 都在；Human owner 与未入群的 Agent C 都不在。
+    let mut expected = vec![agent_a.clone(), agent_b.clone()];
+    expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    assert_eq!(
+        targets, expected,
+        "缺行必须投影成 all，且只列 active Agent 成员"
+    );
+    assert!(
+        !targets.contains(&agent_c),
+        "没入群的那支 Agent 不在唤醒目标里"
+    );
+    assert!(
+        !targets.contains(&alice.id),
+        "Human 不在 Wake 目标里（Human 侧的提醒不经过服务端 gate）"
+    );
+
+    // A 自己写 mentions ⇒ 它不在唤醒目标里，B 仍在。
+    f.room
+        .set_room_attention(&agent_a, &group, AttentionLevel::Mentions)
+        .await
+        .expect("agent A mutes itself");
+    let targets = f
+        .room
+        .attention_wake_targets(&group)
+        .await
+        .expect("wake targets");
+    assert_eq!(
+        targets,
+        vec![agent_b.clone()],
+        "档 = mentions 的 Agent 不该被那条易失通知叫醒"
+    );
+
+    // A 写回 all ⇒ 又回到两位。
+    f.room
+        .set_room_attention(&agent_a, &group, AttentionLevel::All)
+        .await
+        .expect("agent A unmutes itself");
+    let targets = f
+        .room
+        .attention_wake_targets(&group)
+        .await
+        .expect("wake targets");
+    assert_eq!(targets.len(), 2);
+
+    // 纯读：本方法一行都没写过（两条档行是上面显式写的，Agent C 始终没有行）。
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM room_attention")
+        .fetch_one(f.store.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 1, "只有 A 那一行；B 缺行仍然算 all");
 }

@@ -2172,6 +2172,33 @@ impl crate::ports::room::RoomStore for SqliteRoomStore {
             }
         }
     }
+
+    async fn attention_wake_targets(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Vec<ParticipantId>, RoomStoreError> {
+        // 提醒档的唤醒目标（契约 §9.1 的「通知条件」）：该房 **active Agent 成员**
+        // 里档位为 `all` 的那些。**缺行 = all** ⇒ LEFT JOIN + COALESCE，与两条
+        // 列表的投影**同一段判据**（`ATTENTION_SQL`）。
+        //
+        // 纯读、不开事务：唤醒是可丢的提示，读到的就是"此刻已提交的档"。
+        // **不排除被 @ 的人**——它本来就该在结果里；mention 穿透由调用方把
+        // `agent_events` 反查出来的目标并进来（两处各自一个权威，不复制判据）。
+        let mut conn = self.pool.acquire().await.map_err(db_error)?;
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT m.participant_id FROM room_memberships m \
+             JOIN participants p ON p.id = m.participant_id \
+             LEFT JOIN room_attention ra ON ra.room_id = m.room_id AND ra.participant_id = m.participant_id \
+             WHERE m.room_id = ? AND m.active_marker = 1 AND p.kind = 'agent' \
+               AND COALESCE(ra.level, 'all') = 'all' \
+             ORDER BY m.participant_id",
+        )
+        .bind(room_id.as_str())
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(db_error)?;
+        Ok(rows.into_iter().map(ParticipantId).collect())
+    }
 }
 
 /// 测试专用取消 seam（仅 test 构建编译，生产构建零存在）：arm 后，下一次

@@ -477,6 +477,26 @@ pub trait RoomStore: Send + Sync {
         level: AttentionLevel,
     ) -> Result<AttentionLevel, RoomStoreError>;
 
+    /// 提醒档的**唤醒目标**（契约 `CORE_V1_IM_CONTRACT.md` §9.1 的「通知条件」，
+    /// 本切片的唯一语义变更）：这间房里**按档该被那条易失通知叫醒**的 active
+    /// Agent 成员——即档位为 `all` 的那些（**缺行也算 `all`**，不预建行）。
+    ///
+    /// ⚠ 三件事**不在**本方法里，由调用方合成：
+    /// - **mention 穿透**：被结构化 mention 的 Agent **不论档**都要叫醒——那一半
+    ///   的权威是已提交的 `agent_events`（`EventStore::event_targets`），不在
+    ///   这里复制一份 targeting 规则；
+    /// - **Human 侧**：Human 的档不经过这里——那条易失提示是 WS 的
+    ///   `events.available`，它同时是同步信号（§9.1 的归属一句，2026-10-20 记账：
+    ///   Human 侧的服务端 gate 是另一件事，见 `CORE_V1_ACCEPTANCE.md` §6.1）；
+    /// - **谁被 @**：不在本方法里判（见上一条的 mention 穿透）。
+    ///
+    /// 纯读：零写语义、零事件、零幂等记录、零唤醒。失败由调用方按「唤醒可丢」
+    /// 处理（绝不翻转已提交的消息）。
+    async fn attention_wake_targets(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Vec<ParticipantId>, RoomStoreError>;
+
     /// Agent 通讯录纯读投影（切片 B1，CORE_V1_AGENT_DIRECTORY.md §4）：
     /// 该 agent 为 active member 的全部 Room 的机械目录行，按最近活动时间
     /// 倒序（无消息房回退房间创建时间）、再按房间 ID 升序。零写语义、零

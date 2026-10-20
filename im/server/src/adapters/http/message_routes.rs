@@ -27,7 +27,7 @@ use crate::adapters::http::AppState;
 use crate::adapters::http::agent_routes::{KeyError, idempotency_key_from_headers};
 use crate::adapters::http::auth::CurrentAuth;
 use crate::adapters::http::backend_auth::BackendAuth;
-use crate::adapters::http::backend_stream_routes::wake_agents;
+use crate::adapters::http::backend_stream_routes::{wake_agents, wake_agents_for_new_message};
 use crate::adapters::http::human_event_routes::wake_humans;
 use crate::adapters::http::middleware::RequestId;
 use crate::adapters::http::routes::{error_response, store_error_response};
@@ -370,15 +370,9 @@ async fn send_message_route(
                 &request_id,
             )
             .await;
-            // Backend SSE 门铃（窄解冻切片 §8）：按已提交 agent_events 事实
-            // 反查 target Agent 定向唤醒，同一 best-effort 纪律。
-            wake_agents(
-                &state,
-                AgentEventKind::Created,
-                message.id.as_str(),
-                &request_id,
-            )
-            .await;
+            // Backend SSE 门铃（窄解冻切片 §8 + 提醒档 1b）：**新消息**按
+            // 提醒档算目标——被 mention 的一定响，其余看档（缺行 = all ⇒ 响）。
+            wake_agents_for_new_message(&state, &room_id, message.id.as_str(), &request_id).await;
             // 主体进行态：这条消息**取代**说话人自己在这间房的「正在写」。
             // 易失、best-effort：房间 id 解析失败只跳过（进行态会按 TTL 自己
             // 过期），绝不影响已提交的消息。
@@ -579,13 +573,7 @@ async fn send_backend_message_route(
                 &request_id,
             )
             .await;
-            wake_agents(
-                &state,
-                AgentEventKind::Created,
-                message.id.as_str(),
-                &request_id,
-            )
-            .await;
+            wake_agents_for_new_message(&state, &room_id, message.id.as_str(), &request_id).await;
             // 主体进行态：这条消息**取代**说话人自己在这间房的「正在写」。
             // 易失、best-effort：房间 id 解析失败只跳过（进行态会按 TTL 自己
             // 过期），绝不影响已提交的消息。

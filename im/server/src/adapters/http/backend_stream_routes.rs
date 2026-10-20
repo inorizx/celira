@@ -16,9 +16,14 @@
 //!   （REST 权威）；Core 不为 Backend 持久化连接状态、不写 SQLite、
 //!   不进 Human Event 表 / Human WS 语义。轮询（§3.4）仍是完整合法路径。
 //!
-//! 本模块还提供 post-commit 定向唤醒助手 `wake_agents`：Human Message
-//! 提交/撤回成功后用已提交 agent_events 事实反查 target Agent 再定向通知；
-//! 查询或通知失败只记录脱敏 warn，不得把已提交事务伪装失败（与
+//! 本模块还提供两条 post-commit 定向唤醒助手：
+//! - `wake_agents`：**撤回**这类"由 Agent Event 驱动"的通知，用已提交
+//!   agent_events 事实反查 target Agent；
+//! - `wake_agents_for_new_message`：**一条新消息提交后**（契约
+//!   `CORE_V1_IM_CONTRACT.md` §9.1 的「通知条件」）——被 mention 的一定响，
+//!   其余按**提醒档**（档 = `all`，含缺行，才响）。
+//!
+//! 两者查询或通知失败都只记录脱敏 warn，不得把已提交事务伪装失败（与
 //! `wake_humans` 同一纪律）。
 
 use std::collections::HashMap;
@@ -46,6 +51,7 @@ use crate::application::backend;
 use crate::domain::agent_event::AgentEventKind;
 use crate::domain::message::MessageId;
 use crate::domain::participant::ParticipantId;
+use crate::domain::room::RoomId;
 use crate::ports::live::ConnectionPresence;
 use crate::protocol::error::codes;
 
@@ -272,19 +278,19 @@ async fn stream_route(
 /// 通知失败只记录带 canonical request_id 的脱敏 warn，已提交的事务与响应
 /// 不受影响（唤醒是 best-effort 提示，耐久 Event 才是恢复来源）；notifier
 /// panic 用最小隔离捕获（与 wake_humans 同一纪律）。
+///
+/// ⚠ **新消息**不要走这里——走 [`wake_agents_for_new_message`]：`message.created`
+/// 的 Agent Event 仍只在**被结构化 mention** 时生成（契约
+/// `CORE_V1_AGENT_PROTOCOL.md` §3.1 一字不动），而门铃要不要响由**提醒档**
+/// 决定（契约 `CORE_V1_IM_CONTRACT.md` §9.1 的「唯一语义变更」）。本函数留给
+/// **撤回**这类"由 Agent Event 驱动"的通知。
 pub(crate) async fn wake_agents(
     state: &AppState,
     kind: AgentEventKind,
     message_id: &str,
     request_id: &str,
 ) {
-    let Some(message_id) = MessageId::parse_canonical(message_id) else {
-        tracing::warn!(
-            operation = "backend_stream.wake_agents",
-            error_kind = "domain_id_parse",
-            request_id = %request_id,
-            "post-commit agent wake skipped: message id failed canonical parse; durable events unaffected"
-        );
+    let Some(message_id) = parse_wake_message_id(message_id, request_id) else {
         return;
     };
     let targets = match state.event.event_targets(&kind, &message_id).await {
@@ -299,11 +305,108 @@ pub(crate) async fn wake_agents(
             return;
         }
     };
+    notify_agents(state, &targets, request_id);
+}
+
+/// **一条新消息提交后**的门铃目标（契约 `CORE_V1_IM_CONTRACT.md` §9.1，
+/// 2026-10-20 窄解冻切片 1b）——本切片的**唯一语义变更**，一条判据两层：
+///
+/// 1. **被结构化 mention ⇒ 一定响**（不论档）：那一半是已提交 `agent_events`
+///    的既有反查（`event_targets`），本切片的判据加在它**之上**；
+/// 2. 其余按**提醒档**：档 = `all`（**含缺行**）⇒ 响；档 = `mentions` ⇒ 不响。
+///    那一半是 `attention_wake_targets` 的纯读投影。
+///
+/// ⇒ **缺行 = `all`**，所以默认就是「群里有消息也会叫醒主体」——这是主人
+/// 2026-10-20 的裁定：不能因为模型贵就把提醒做小气；代价那一侧由**合并窗口**
+/// 承担（头一声铃之后 20 秒内合成一次开段，见 `agent/src/host_loop.rs`）。
+///
+/// **零事实**：这里只决定那条**易失**通知发给谁——不写任何表、不改
+/// `agent_events`、不改消息主链。两次反查各自失败只脱敏记录并**保留另一半**
+/// （唤醒可丢，消息不可丢）。
+pub(crate) async fn wake_agents_for_new_message(
+    state: &AppState,
+    room_id: &str,
+    message_id: &str,
+    request_id: &str,
+) {
+    let Some(message_id) = parse_wake_message_id(message_id, request_id) else {
+        return;
+    };
+
+    // (1) mention 穿透：已提交 agent_events 反查（与撤回同一条路径）。
+    let mut targets = match state
+        .event
+        .event_targets(&AgentEventKind::Created, &message_id)
+        .await
+    {
+        Ok(targets) => targets,
+        Err(_) => {
+            tracing::warn!(
+                operation = "backend_stream.wake.mentioned",
+                error_kind = "storage_unavailable",
+                request_id = %request_id,
+                "post-commit mention wake target lookup failed; attention path unaffected"
+            );
+            Vec::new()
+        }
+    };
+
+    // (2) 按档：该房 active Agent 成员里档为 all 的那些（缺行也算）。
+    match RoomId::parse_canonical(room_id) {
+        Some(room_id) => match state.room.attention_wake_targets(&room_id).await {
+            Ok(ringable) => {
+                for id in ringable {
+                    if !targets.contains(&id) {
+                        targets.push(id);
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::warn!(
+                    operation = "backend_stream.wake.attention",
+                    error_kind = "storage_unavailable",
+                    request_id = %request_id,
+                    "post-commit attention wake target lookup failed; mention path unaffected"
+                );
+            }
+        },
+        // 消息已提交 ⇒ 房间 id 本就规范；走到这里说明调用方传错了。唤醒照丢，
+        // 消息与耐久事实不受影响。
+        None => tracing::warn!(
+            operation = "backend_stream.wake.attention",
+            error_kind = "domain_id_parse",
+            request_id = %request_id,
+            "post-commit attention wake skipped: room id failed canonical parse"
+        ),
+    }
+
+    notify_agents(state, &targets, request_id);
+}
+
+/// 唤醒入口共用的消息 id 规范化：解析失败只脱敏记录并跳过本次唤醒。
+fn parse_wake_message_id(message_id: &str, request_id: &str) -> Option<MessageId> {
+    match MessageId::parse_canonical(message_id) {
+        Some(message_id) => Some(message_id),
+        None => {
+            tracing::warn!(
+                operation = "backend_stream.wake_agents",
+                error_kind = "domain_id_parse",
+                request_id = %request_id,
+                "post-commit agent wake skipped: message id failed canonical parse; durable events unaffected"
+            );
+            None
+        }
+    }
+}
+
+/// 门铃的**唯一**通知出口：目标算好之后到这儿为止（best-effort，notifier
+/// panic 用最小隔离捕获，不翻转已提交成功）。
+fn notify_agents(state: &AppState, targets: &[ParticipantId], request_id: &str) {
     if targets.is_empty() {
         return;
     }
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        state.backend_notifier.notify(&targets);
+        state.backend_notifier.notify(targets);
     }));
     if result.is_err() {
         tracing::warn!(

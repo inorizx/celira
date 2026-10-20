@@ -269,6 +269,14 @@ async fn stream_ends_within(stream: &mut SseStream) -> bool {
     )
 }
 
+/// 「这段时间里**没有**唤醒帧」——短窗探测（保活注释是 20s，窗口内不会
+/// 混进注释；超时即证明这条流安静）。
+async fn silent_within(stream: &mut SseStream) -> bool {
+    tokio::time::timeout(Duration::from_millis(700), stream.next())
+        .await
+        .is_err()
+}
+
 fn assert_no_facts(frame: &Bytes, secrets: &[&str]) {
     let text = String::from_utf8_lossy(frame);
     for secret in secrets {
@@ -377,6 +385,137 @@ async fn stream_yields_initial_and_post_commit_wake_without_facts() {
         "frame: {wake_text:?}"
     );
     assert_no_facts(&wake, &[&ready.token, &ready.room_id, "doorbell-probe"]);
+}
+
+/// **提醒档决定门铃响不响**（契约 `CORE_V1_IM_CONTRACT.md` §9.1 的「通知条件」，
+/// 窄解冻切片 1b）——两条判据、一个小群、两条真门铃流：
+///
+/// 1. **缺行 = `all`** ⇒ 群里有人说话（**没人 @ 它**）也叫醒；
+/// 2. 档 = `mentions` ⇒ 没人 @ 它时**不响**；被 @ 时**一定响**（穿透，不论档）。
+///
+/// ⚠ 断言只看门铃流上**有没有那一帧**（`events.available`），不看耐久事实——
+/// `agent_events` 的生成规则一字未动（`message.created` 仍只在被 @ 时生成），
+/// 所以"档 = all 却没被 @ "这种情况门铃响而事件为空，是设计（宿主醒来后读
+/// 通知栏那条投影，不靠事件驱动）。
+#[tokio::test]
+async fn attention_level_decides_whether_the_doorbell_rings() {
+    let f = fixture().await;
+    // 两个 Agent 各有一条凭据（`ready` 顺带建了自己的 direct 房，这里不用它）。
+    let always = ready(&f, "Always").await;
+    let muted = ready(&f, "Muted").await;
+
+    // 一个群，把两个 Agent 都拉进来。
+    let (status, json) = send(
+        &f.router,
+        Method::POST,
+        "/v1/groups",
+        Some(&format!("Bearer {}", f.human_token)),
+        &[
+            ("content-type", "application/json"),
+            ("idempotency-key", "attn-group-1"),
+        ],
+        Some(
+            serde_json::json!({"name": "提醒档测试群"})
+                .to_string()
+                .into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create group: {json}");
+    let group = json["room"]["id"].as_str().unwrap().to_owned();
+    for (n, agent_id) in [("1", &always.agent_id), ("2", &muted.agent_id)] {
+        let (status, json) = send(
+            &f.router,
+            Method::POST,
+            &format!("/v1/rooms/{group}/members"),
+            Some(&format!("Bearer {}", f.human_token)),
+            &[
+                ("content-type", "application/json"),
+                ("idempotency-key", &format!("attn-invite-{n}")),
+            ],
+            Some(
+                serde_json::json!({"participant_id": agent_id})
+                    .to_string()
+                    .into_bytes(),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "invite {n}: {json}");
+    }
+
+    // `muted` 把自己那一行写成 mentions（**缺行 = all**，所以 `always` 一行都不用写）。
+    let (status, json) = send(
+        &f.router,
+        Method::PUT,
+        &format!("/v1/backend/rooms/{group}/attention"),
+        Some(&format!("Bearer {}", muted.token)),
+        &[("content-type", "application/json")],
+        Some(
+            serde_json::json!({"level": "mentions"})
+                .to_string()
+                .into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "set mentions: {json}");
+
+    // 两条真门铃流（各自 Agent 自己的凭据）。
+    let (status, _h, mut always_stream) =
+        open_stream(&f.router, Some(&format!("Bearer {}", always.token))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _h, mut muted_stream) =
+        open_stream(&f.router, Some(&format!("Bearer {}", muted.token))).await;
+    assert_eq!(status, StatusCode::OK);
+    let _ = next_frame(&mut always_stream)
+        .await
+        .expect("initial wake (always)");
+    let _ = next_frame(&mut muted_stream)
+        .await
+        .expect("initial wake (muted)");
+
+    // ① 群里一条**不 @ 任何人**的消息：all 档次响、mentions 档不响。
+    send_human_message(
+        &f.router,
+        &f.human_token,
+        &group,
+        "群里有人说话",
+        "attn-m-1",
+    )
+    .await;
+    let wake = next_frame(&mut always_stream)
+        .await
+        .expect("档 = all（缺行）⇒ 没被 @ 也要叫醒");
+    assert!(
+        String::from_utf8_lossy(&wake).contains("events.available"),
+        "frame must be the fact-free doorbell"
+    );
+    assert!(
+        silent_within(&mut muted_stream).await,
+        "档 = mentions ⇒ 没被 @ 时门铃不该响"
+    );
+
+    // ② 同一条群消息被 @ 到：mentions 档**一定响**（mention 穿透，不论档）。
+    let (status, json) = send(
+        &f.router,
+        Method::POST,
+        &format!("/v1/rooms/{group}/messages"),
+        Some(&format!("Bearer {}", f.human_token)),
+        &[
+            ("content-type", "application/json"),
+            ("idempotency-key", "attn-m-2"),
+        ],
+        Some(
+            serde_json::json!({"body": "叫一下你", "mentions": [muted.agent_id]})
+                .to_string()
+                .into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "mention message: {json}");
+    let wake = next_frame(&mut muted_stream)
+        .await
+        .expect("被 @ 到 ⇒ 不论档都要叫醒");
+    assert!(String::from_utf8_lossy(&wake).contains("events.available"));
 }
 
 /// Credential 撤销后：下一次唤醒前 re-auth 失败 → 流立即结束（fail
