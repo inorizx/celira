@@ -775,13 +775,17 @@ export function MessageInput({
           ) : (
           <Textarea
             ref={textareaRef}
+            variant="bare"
             value={value}
             onChange={(e) => updateValue(e.target.value, e.target.selectionStart ?? e.target.value.length)}
             onKeyDown={onKeyDown}
             placeholder=""
             aria-label={`发送到 ${room.name}`}
             rows={1}
-            className="min-h-6 flex-1 resize-none border-none bg-transparent p-0 py-2 pl-1.5 shadow-none focus-visible:ring-0 max-md:order-1"
+            // `variant="bare"`（不是在这串类名里逐条覆盖）：`dark:bg-input/30` 在原子件的
+            // 基线上、与 `bg-transparent` 同权重 ⇒ 谁在 CSS 里靠后就谁赢，删不干净；
+            // 而"容器就是表面"这件事该由**变体**说，判据见 `ui/textarea.tsx`。
+            className="min-h-6 flex-1 resize-none py-2 pl-1.5 max-md:order-1"
           />
           )}
           <Button
