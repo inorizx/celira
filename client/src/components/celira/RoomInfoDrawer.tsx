@@ -123,7 +123,7 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
   const live = useAppStore((s) => s.roomLiveByRoom[room.id])
   // 标题下那句话与 `ChatHeader` **同一句**：唯一裁决面在 `api/roomHeadline.ts`。
   // 分解（几个 Agent / 几个人）不进句子 —— 它的家就是下面的成员列表
-  // （「Agent — N」「Human — N」两组，每行一枚徽标）。
+  // （「Agent · N」「人 · N」两组，每行一枚徽标）。
   const headline = roomHeadline({
     kind: room.kind,
     members: allMembers,
@@ -257,8 +257,11 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
               )}
               {agents.length > 0 && (
                 <section>
+                  {/* 这两行小标题是**用户可见面**：`Agent` 是本产品的词（头像徽标也这么写），
+                      而 `Human` 是契约里 `kind` 的取值 —— 界面上说「人」。
+                      （2026-10-20：与头部那一行同一刀，别让契约词漏到屏幕上。） */}
                   <div className="mb-2 text-micro tracking-wider text-muted-foreground uppercase">
-                    Agent — {agents.length}
+                    Agent · {agents.length}
                   </div>
                   <ul className="space-y-2">
                     {agents.map((m) => {
@@ -318,7 +321,7 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
               )}
               <section>
                 <div className="mb-2 text-micro tracking-wider text-muted-foreground uppercase">
-                  Human — {humans.length}
+                  人 · {humans.length}
                 </div>
                 <ul className="space-y-2">
                   {humans.map((m) => (
