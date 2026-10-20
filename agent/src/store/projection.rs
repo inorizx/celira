@@ -641,7 +641,8 @@ pub(super) fn system_str(ending: crate::foundation::SystemEnding) -> &'static st
 const SUBJECT_PREFIX: &str = "subject";
 const SYSTEM_PREFIX: &str = "system";
 
-/// 主体收场的**稳定显示文本**（`subject:completed`）。
+/// 主体收场的**稳定显示文本**（今天写下去的那一个是 `subject:ended`；四个旧值照旧**读得回来**，
+/// 历史上那些记录显示的是它们各自的词）。
 ///
 /// **一处权威**（2026-10-06）：盘上的词表（[`SUBJECT_ENDINGS`] / [`system_str`]）与这个显示形状
 /// 只在这里各写一遍。从前它有**四处私有副本**（`agent_host_status` / `host_loop` /

@@ -531,6 +531,12 @@ impl TimerApp {
 pub const LABEL_LIMIT: &str = "label_bytes_limit";
 
 /// 参数面**封闭**：缺必填、多了不认识的，都说清是哪一个（**不猜近似名**）。
+///
+/// ⚠ **它是同族读数的第三份拼法**（前两份：`os.rs` 的 `ParamShape`，读数 `missing` /
+/// `unexpected` / `accepted`；`mcp/app.rs` 的 `ArgumentRefusal`，读数 `parameter` / `reason` /
+/// `expected`）。这一份的**款不一样**：分类拆成两个词（`missing-parameter` /
+/// `unknown-parameter`，与 OS 那份只用一个词不同），读数里那份允许名单写作 `allowed`。
+/// **今天不合并**：合并的判据是**第三个消费者**，而这一份的消费者只有 timer 一个。
 fn require_params(
     params: &ActionParams,
     required: &[&str],

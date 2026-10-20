@@ -175,6 +175,11 @@ impl Source {
 }
 
 /// 进程侧在命令行上声明的模型来源（旗标那四件；原始取值）。
+///
+/// ⚠ **思考强度与"收不收得到媒体材料"不在这四件里**（2026-10-08 / 2026-10-17）：那两格**只在文件
+/// 那一档有**（清单条目 / 老形状四件套；思考强度还可以由绑定覆盖，见 [`Binding`]）——**进程侧
+/// （默认档与换家档）没有这两格**：不开命令行旗标、不读环境变量，也不进 [`declared_by_flags`] 的
+/// "谁在说话"裁决。判据与"钥匙属机器、用什么想归主体"同一条：它们是**主体的配置**，不是启动参数。
 pub struct FlagDeclarations<'a> {
     pub endpoint: Option<&'a str>,
     pub model: Option<&'a str>,
@@ -266,7 +271,8 @@ pub fn read_file(root: &Path) -> Result<FileSource, String> {
         // **显式 `null` 与"没写这一格"同义**（2026-10-08 实测：JS 那个写者落盘时写的是
         // `"reasoning_effort": null`）。它是 JSON 里说"这一格没有值"的自然写法，而"没有值"
         // 与"缺席"是同一件事（都不发那个键）⇒ 认它。⚠ 这不是放宽封闭表：**取值**照旧只有
-        // 表里那六个，别的形状（数字 / 对象 / 数组）一律拒绝。
+        // `REASONING_EFFORTS` 里那几档（计数以那张表为准，不在这里另写一个数），别的形状
+        // （数字 / 对象 / 数组）一律拒绝。
         Some(serde_json::Value::Null) => None,
         Some(serde_json::Value::String(text)) if !text.trim().is_empty() => Some(
             check_reasoning_effort(text, &format!("模型配置文件（{}）", path.display()))?,

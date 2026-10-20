@@ -536,6 +536,11 @@ const PARTICIPANT_ID_FIELD: &str = "participant_id";
 const MAX_NAME_BYTES: usize = 256;
 
 /// 主体标识上限（服务端的标识是 UUID 形状；给足余量，只为挡住病态输入）。
+///
+/// ⚠ 它**不是** [`MAX_ID_BYTES`]（标识那一族的 64）：参与者这一格刻意更宽，而关系面
+/// （[`crate::im_social_app`]）那一处用自己的判断、取的是族界 ⇒ **同一类参数今天有两个数**，
+/// 且**不合并**（App 之间不得有实现依赖）。契约 `CORE_V1_AGENT_SPEAK.md` §8 那句"房间 /
+/// 参与者 / 消息目标共用"读的是**族名**，不是逐参数的现状——按契约冻结纪律，那一句不改。
 const MAX_PARTICIPANT_BYTES: usize = 128;
 /// 读游标路径后缀（写：推进我在这个房间的读位置，切片 M1）。
 const READ_CURSOR_SUFFIX: &str = "/read-cursor";
@@ -2639,7 +2644,6 @@ fn render_presentation_written(body: &serde_json::Value) -> String {
     )
 }
 
-/// 说话的请求体校验：房间标识非空且 ≤ [`MAX_ID_BYTES`] 字节。
 /// `im_create_group` 的群名：非空、单行（不含控制字符）、在上限之内。
 ///
 /// 与 notes 的标题规则同一条理由：它要出现在通讯录那一行里，带换行的名字会伪造出另一行。
@@ -2753,6 +2757,16 @@ fn render_invited(room: &str, value: &serde_json::Value) -> String {
     }
 }
 
+/// 房间标识的机械校验：**非空 ＋ ≤ [`MAX_ID_BYTES`] 字节**（超限 ⇒ `invalid-argument`，
+/// **一次都不出网**；正反两条用例在 `tests/im_app.rs`）。
+///
+/// **房间这一个参数只有一个实现**：本 App 里凡是带房间标识的动词都走它——读历史那条路曾经
+/// 自己另写一版（只判了非空），理由与收口经过见 [`ImApp::read_history`] 的注释；
+/// `MAX_FILE_PARAM_BYTES` 那条"同一种形状只有一个答案"在这里同样成立。
+///
+/// **形状不在这里判**：标识是世界的词（今天的形状是 36 个字符的 UUID v4），这一层只挡住
+/// "明显不是标识"的输入，认不认识这间房归世界（它会答 403 / 404）。因此这里的界比世界真正
+/// 签发的形状宽——宽出来的那一段不构成放宽，合法的房号一个都不会被拦。
 fn valid_room(params: &ActionParams) -> Option<&str> {
     params
         .get(PARAM_ROOM)
