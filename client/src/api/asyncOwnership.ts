@@ -157,6 +157,43 @@ export function mergeLatestPage(existing: Message[], latest: Message[]): Message
 }
 
 /**
+ * ★ **一页时间线落进某一间房**：先问「这间房的窗口读过没有」，再决定怎么落
+ * （2026-10-20 真机事故：小可 11:29 那条跑到 01:34 那一段**前面**）。
+ *
+ * ## 病（不是合并函数坏了，是它被喂了不合法的输入）
+ *
+ * 页面启动**不预加载**任何房间的时间线（缓存是"点开那一间"才读的）。于是：
+ * ① 门铃先送来一条新消息，直播间那条路写 `messagesByRoom[room] = [那一条]`
+ * —— 那是**片段**，不是时间线；② 用户开房，服务端整页 1..6 才到；
+ * ③ `mergeLatestPage` 的口径是"已有顺序不动、没见过的追尾"（它没错，那是
+ * 为"翻过更早的历史"写的）⇒ 那**一条**被当成时间线的**开头**，最新那条顶在最上面 ✗。
+ *
+ * ## 判据（一句话：**片段不是窗口**）
+ *
+ * - `loaded === true`（这间房读到过一整页，可能还翻过更早）⇒ 照旧 `mergeLatestPage`；
+ * - `loaded === false`（从没读到过）⇒ **这一页就是全部**：照它的顺序**替换**。
+ *   顺序仍归 Core —— 这里**一个字都不排序**，也不从别处推断顺序；
+ * - 不管哪一支：`existing` 里比这一页还新、页里**还没有**的那些（刚发出去的乐观那条、
+ *   比这一页迟到的那条）必须**留住**，排在页尾。
+ *
+ * ⚠ 这条判据替换不掉 `mergeLatestPage`，也不能被它替换：后者服务"翻过历史"，
+ * 前者服务"只有片段"。两件事混在一起就会重现这次事故（顺序那一半在 `mergeOlderPage` 里同理）。
+ */
+export function applyRoomPage(input: {
+  existing: Message[]
+  page: Message[]
+  loaded: boolean
+}): Message[] {
+  const { existing, page, loaded } = input
+  if (loaded) return mergeLatestPage(existing, page)
+  // 服务端这一页还没包含的那些（乐观那条 / 比这一页迟到的）：它们是**更新**的，
+  // 排页尾。⚠ 不按 `createdAt` 排 —— 顺序不在浏览器复制。
+  const known = new Set(page.map((m) => m.id))
+  const newerThanPage = existing.filter((m) => !known.has(m.id))
+  return [...page, ...newerThanPage]
+}
+
+/**
  * ★ **乐观那条收到服务端 id 时改名**——**先去掉服务端已经到手的那一份**（2026-10-16）。
  *
  * ## 病（一个 id 两条 ⇒ 两行画在同一个位置上）

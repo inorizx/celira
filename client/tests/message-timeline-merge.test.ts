@@ -13,7 +13,12 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergeLatestPage, mergeOlderPage, settleOptimisticId } from '../src/api/asyncOwnership.ts'
+import {
+  applyRoomPage,
+  mergeLatestPage,
+  mergeOlderPage,
+  settleOptimisticId,
+} from '../src/api/asyncOwnership.ts'
 import type { Message } from '../src/api/domain.ts'
 
 const msg = (id: string, over: Partial<Message> = {}): Message =>
@@ -81,4 +86,67 @@ test('★ 乐观改名：服务端那一份已经到手时，改名之后仍然�
   // 不相干的一条都不许动。
   const others = settleOptimisticId([msg('m1'), optimistic], 'local-1', 'srv-1')
   assert.deepEqual(others.map((m) => m.id), ['m1', 'srv-1'])
+})
+
+// ---------------------------------------------------------------------------
+// ★ **一页时间线落进某一间房：先问"这间房的窗口读过没有"**（2026-10-20 真机事故）
+//
+// 病：页面启动不预加载任何房间；门铃先送来一条新消息，直播间那条路把它写成了
+// `messagesByRoom[room] = [那一条]`（**片段**，不是时间线）；用户开房时服务端整页
+// 才到，而「合并最新一页」的口径是"已有顺序不动、没见过的追尾" ⇒ 那**一条**
+// 被当成时间线的开头，最新那条被顶到**最上面**。
+//
+// 判据：**片段不是窗口**。窗口读没读过决定这一页该怎么落 ——
+//   · 读过（翻过更早）：沿用 `mergeLatestPage`，历史留在前头；
+//   · 没读过：这一页就是全部，**照它的顺序替换**（顺序仍归 Core，浏览器不排）；
+//   · 片段里比这一页还新、页里还没有的那些，留住并排在页尾（否则用户的乐观那条会闪没）。
+// ---------------------------------------------------------------------------
+
+test('★ 直播先到的那一条：开房落页时不许被当成时间线的开头（2026-10-20 事故）', () => {
+  // 事故现场原样：门铃送来第 6 条 → 片段 = [第6条]；开房时服务端整页 1..6 才到。
+  const fragment = [msg('m6')]
+  const page = [msg('m1'), msg('m2'), msg('m3'), msg('m4'), msg('m5'), msg('m6')]
+  const merged = applyRoomPage({ existing: fragment, page, loaded: false })
+  assert.deepEqual(
+    merged.map((m) => m.id),
+    ['m1', 'm2', 'm3', 'm4', 'm5', 'm6'],
+    '最新那条排到最上面 —— 用户看到的就是这个',
+  )
+})
+
+test('窗口读过了：照旧合并，翻上来的历史留在前头（2026-10-16 那条判据不许退回去）', () => {
+  const history = [msg('m0')] // `loadOlder` 翻出来的更早那一截
+  const page = [msg('m1'), msg('m2')]
+  assert.deepEqual(
+    applyRoomPage({ existing: history, page, loaded: true }).map((m) => m.id),
+    ['m0', 'm1', 'm2'],
+  )
+})
+
+test('窗口没读过：位置服从这一页 —— 但**一个字都不排序**', () => {
+  // 页里的顺序故意不是字典序：谁敢在浏览器里排一遍，这条就红。
+  const page = [msg('z'), msg('a'), msg('m')]
+  // 片段里那条页里也有（第 6 条那个形状）：它的位置必须服从这一页，
+  // **不是**它原来在片段里的第 0 位。
+  assert.deepEqual(
+    applyRoomPage({ existing: [msg('m')], page, loaded: false }).map((m) => m.id),
+    ['z', 'a', 'm'],
+  )
+})
+
+test('片段里服务端这一页还没有的那条要留住，排在页尾（否则乐观那条会闪没）', () => {
+  const fragment = [msg('m6'), msg('local-7')] // m6 页里有；local-7 是刚发出去的乐观那条
+  const page = [msg('m1'), msg('m2'), msg('m3'), msg('m4'), msg('m5'), msg('m6')]
+  assert.deepEqual(
+    applyRoomPage({ existing: fragment, page, loaded: false }).map((m) => m.id),
+    ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'local-7'],
+  )
+})
+
+test('未读过的空房：那一页原样落下来（第一次读那一间）', () => {
+  assert.deepEqual(applyRoomPage({ existing: [], page: [], loaded: false }), [])
+  assert.deepEqual(
+    applyRoomPage({ existing: [], page: [msg('m1')], loaded: false }).map((m) => m.id),
+    ['m1'],
+  )
 })

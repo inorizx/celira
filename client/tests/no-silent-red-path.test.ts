@@ -93,15 +93,36 @@ test('★ 聊天时间线：普通文档流 ＋ 落点纯函数 ＋ 翻页钉位
 
 /**
  * ★ **"加载更早"的机制那半**（2026-10-16 主人真机反馈："…要么是显示位置有问题，不太明显那种，
- * 要么就是机制有问题？"）—— 机制在 store：**合并而不是替换**。
+ * 要么就是机制有问题？"）—— 机制在 store：**落页走 `applyRoomPage`**。
  *
  * 全仓**一处都不许**再有"把这一间的时间线整条换成某一页"的写法（2026-10-16 一共三处：
  * `refreshMessages`、开场时的缓存顶上、开场时的权威历史）—— 任何一处退回替换，
  * 人翻上来的历史都会被那一页顶掉。
+ *
+ * ⚠ **2026-10-20 换了一格（真机事故：小可 11:29 那条跑到 01:34 那一段之前）**：
+ * 从前这条守卫盯的是"store 里出现 `mergeLatestPage(`"。可那条函数只服务**窗口已经读过**
+ * 的情形；直播间那条先到时，它会把那**一条片段**当成时间线的开头。现在 store 只许经
+ * `applyRoomPage` 落页（它按"这间房的窗口读过没有"分派：读过才委托 `mergeLatestPage`），
+ * **不许直接调 `mergeLatestPage`** —— 直接调就等于绕过了那个判据。
+ * 新边界比原来严：除了"合并而不是替换"，还要求**每一处落页都问过那一格**。
  */
 test('★ 加载更早（机制）：store 合并而不是替换 ＋ 游标不被顶掉 ＋ 乐观改名去重', () => {
   const store = read('../src/api/store.ts')
-  assert.match(store, /mergeLatestPage\(/, '`refreshMessages` 必须走合并（历史不许被最新一页顶掉）')
+  const dispatchSites = [...store.matchAll(/applyRoomPage\(\{/g)].length
+  assert.ok(dispatchSites > 0, '落页必须走 `applyRoomPage`（合并/替换的分派只有一处）')
+  assert.doesNotMatch(
+    store,
+    /mergeLatestPage\(/,
+    'store 不许直接调 `mergeLatestPage` —— 它不知道"手里只有片段"这件事',
+  )
+  const loadedChecks = [
+    ...store.matchAll(/loaded: s\.timelineLoadedByRoom\[roomId\] === true/g),
+  ].length
+  assert.equal(
+    loadedChecks,
+    dispatchSites,
+    '每一处落页都要问「这间房的时间线窗口读过没有」（漏一处 = 那一处会重现 2026-10-20 那个顺序）',
+  )
   const replacements = [...store.matchAll(/messagesByRoom: \{ \.\.\.s\.messagesByRoom, \[roomId\]: \w+ \}/g)]
   assert.equal(
     replacements.length,

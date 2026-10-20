@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { CoreApi } from './core'
 import { MockApi } from './mock'
 import { newIdempotencyKey } from './client.ts'
-import { createInFlightGuard, mergeLatestPage, mergeOlderPage, settleOptimisticId } from './asyncOwnership'
+import { applyRoomPage, createInFlightGuard, mergeOlderPage, settleOptimisticId } from './asyncOwnership'
 import { emitBroadcast, subscribeBroadcast } from './broadcast'
 import { loadNotifyPrefs, showMessageNotification } from './notifications'
 import { clearRoomCache, loadRoomCache, loadRoomsCache, saveRoomCache, saveRoomsCache } from './idb'
@@ -270,6 +270,19 @@ interface AppState {
    */
   messagesLoadErrorByRoom: Record<string, string>
   nextBeforeByRoom: Record<string, string | null>
+  /**
+   * **这间房的时间线窗口读到过没有**（读到 = 一整页连续时间线落下来了）。
+   *
+   * 为什么必须有这一格（2026-10-20 真机事故）：`messagesByRoom` 有两个写者 ——
+   * 「整页」（`listMessages` / 更早页 / 缓存种子）与「单条直播间事件」。后者写进去的是
+   * **片段**，不是时间线；而"键在"从前同时表示这两种东西 ⇒ 开房落页时那**一条**被当成
+   * 时间线的**开头**，最新那条被顶到最上面（小可 11:29 那条跑到 01:34 那一段之前）。
+   *
+   * 有这一格以后：**键在且 `timelineLoadedByRoom` 在 ⇒ 连续窗口**（可以合并）；
+   * **键在但这一格不在 ⇒ 只有片段**（落页时以服务端那一页为准）。判据与两条合并
+   * 函数的分工写在 `asyncOwnership.ts` 的 `applyRoomPage` 里。
+   */
+  timelineLoadedByRoom: Record<string, true>
   /**
    * **当前这一通电话**（`ringing` / `in_progress`；没有就是 `null`）。
    *
@@ -873,10 +886,17 @@ export const useAppStore = create<AppState>()((set, get) => {
             //   从前这里把整条时间线换成"服务端最新一页"（50 条）⇒ `loadOlder` 翻出来的历史
             //   被下一条新消息整条抹掉、"加载更早"等于白加载；视图还会跳回去。
             //   判据三条（顺序不动 / 同 id 以服务端为准 / 新 id 追加）见 `mergeLatestPage`。
+            // ⚠ 2026-10-20：这一页怎么落，先看**这间房的窗口读过没有**（`applyRoomPage`）——
+            //   只有片段（直播间那条先到）时，合并会把最新那条顶到最上面。
             messagesByRoom: {
               ...s.messagesByRoom,
-              [roomId]: mergeLatestPage(s.messagesByRoom[roomId] ?? [], [...sys, ...messages]),
+              [roomId]: applyRoomPage({
+                existing: s.messagesByRoom[roomId] ?? [],
+                page: [...sys, ...messages],
+                loaded: s.timelineLoadedByRoom[roomId] === true,
+              }),
             },
+            timelineLoadedByRoom: { ...s.timelineLoadedByRoom, [roomId]: true },
             // ★ **游标不许被顶掉**：已经翻过历史时，`nextBeforeByRoom` 指的是"再往前那一页"，
             //   那是用户真正的下一条；拿最新一页的游标覆盖它 ⇒ 翻页重复/跳页、历史再也拉不回来。
             //   只有**还没有游标**（这一间第一次读）才用它初始化。
@@ -952,6 +972,10 @@ export const useAppStore = create<AppState>()((set, get) => {
       const messagesByRoom = { ...s.messagesByRoom }
       for (const ev of events) {
         if (ev.message && ev.roomId && ev.kind === 'message.created') {
+          // ⚠ **这一支只许写"片段"，不许写"窗口"**（2026-10-20）：这间房没读过时间线时，
+          //   `?? []` 会凭空造出 `[这一条]` —— 那是**片段**（会话列表的预览、通知要它），
+          //   不是时间线的开头。所以这里**不许**碰 `timelineLoadedByRoom`；开房落页时
+          //   `applyRoomPage` 会按"这一格不在"以服务端那一页为准。
           const list = messagesByRoom[ev.roomId] ?? []
           if (!list.some((m) => m.id === ev.message!.id)) {
             messagesByRoom[ev.roomId] = [...list, ev.message]
@@ -1258,6 +1282,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     messagesByRoom: {},
     messagesLoadErrorByRoom: {},
     nextBeforeByRoom: {},
+    timelineLoadedByRoom: {},
     contacts: [],
     pendingContacts: [],
     blocks: [],
@@ -1310,6 +1335,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         messagesByRoom: {},
         messagesLoadErrorByRoom: {},
         nextBeforeByRoom: {},
+        timelineLoadedByRoom: {},
         memberPresentationsByRoom: {},
         contacts: [],
         pendingContacts: [],
@@ -1807,8 +1833,13 @@ export const useAppStore = create<AppState>()((set, get) => {
         set((s) => ({
           messagesByRoom: {
             ...s.messagesByRoom,
-            [roomId]: mergeLatestPage(s.messagesByRoom[roomId] ?? [], seeded),
+            [roomId]: applyRoomPage({
+              existing: s.messagesByRoom[roomId] ?? [],
+              page: seeded,
+              loaded: s.timelineLoadedByRoom[roomId] === true,
+            }),
           },
+          timelineLoadedByRoom: { ...s.timelineLoadedByRoom, [roomId]: true },
           // 同上：已经有"更早的游标"就别用缓存那一份顶掉它。
           nextBeforeByRoom:
             s.nextBeforeByRoom[roomId] === undefined || s.nextBeforeByRoom[roomId] === null
@@ -1826,10 +1857,16 @@ export const useAppStore = create<AppState>()((set, get) => {
         scheduleCacheWrite(roomId, worldKey(), messages, nextBefore)
         set((s) => ({
           // ★ **合并**：权威历史到了也只是"最新一页"，翻过的历史照旧留在前头（同上）。
+          // ⚠ 2026-10-20：同上，先看窗口读过没有 —— 只有片段时以这一页为准。
           messagesByRoom: {
             ...s.messagesByRoom,
-            [roomId]: mergeLatestPage(s.messagesByRoom[roomId] ?? [], latest),
+            [roomId]: applyRoomPage({
+              existing: s.messagesByRoom[roomId] ?? [],
+              page: latest,
+              loaded: s.timelineLoadedByRoom[roomId] === true,
+            }),
           },
+          timelineLoadedByRoom: { ...s.timelineLoadedByRoom, [roomId]: true },
           nextBeforeByRoom:
             s.nextBeforeByRoom[roomId] === undefined || s.nextBeforeByRoom[roomId] === null
               ? { ...s.nextBeforeByRoom, [roomId]: nextBefore }
