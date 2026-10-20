@@ -117,3 +117,28 @@ test('★★ 自绘标题栏要的五条窗口权限必须在册（少一条就"
     '★ 不许放 `core:window:default`：它会连 set-position / set-size / set-always-on-top 一起给出去',
   )
 })
+
+/**
+ * ★ **第一屏也要有窗口按钮**（2026-10-20 主人真机："为啥这个界面没有那个比如关闭啊什么按钮"）。
+ *
+ * 病：标题栏只挂在 `AppShell`（**进世界之后**那一层）⇒ 启动加载 / 命名卡 / 正门那一屏
+ * 一个窗口按钮都没有；而窗口是 `decorations: false`（自绘）⇒ 人只能 Alt+F4。
+ * 判据：这几屏必须经 `FirstScreen`（它渲染 `TitleBar`，浏览器里仍为 null）。
+ */
+test('★ 第一屏（启动 / 命名 / 开机问 / 登录）必须带窗口栏', () => {
+  const APP = read('../src/App.tsx')
+  assert.match(APP, /function FirstScreen\(/, '要有一个共用的第一屏外壳（唯一写者）')
+  assert.match(APP, /<TitleBar \/>/, '外壳里要真的渲染标题栏')
+  // 数量一一对上：几屏就要几个外壳（漏一个 = 那一屏没有关闭按钮）。
+  const screens =
+    (APP.match(/<StartupLoading\b/g) ?? []).length +
+    (APP.match(/<NameYourselfCard\b/g) ?? []).length +
+    (APP.match(/<LoginGate\b/g) ?? []).length
+  const wrappers = (APP.match(/<FirstScreen>/g) ?? []).length
+  assert.ok(screens > 0, '第一屏总得有一张')
+  assert.equal(
+    wrappers,
+    screens,
+    `第一屏 ${screens} 张、外壳 ${wrappers} 个 —— 一对一，不然有一屏没窗口按钮`,
+  )
+})

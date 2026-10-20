@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { Loader2 } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -32,6 +32,8 @@ import {
   disableLocalWorld,
 } from '@/api/shellLocal'
 import { NameYourselfCard } from '@/components/celira/NameYourselfCard'
+import { TitleBar } from '@/components/celira/TitleBar'
+import { isTauriRuntime } from '@/api/shell'
 import { cn } from '@/lib/utils'
 
 const ChatPage = lazy(() => import('@/pages/ChatPage').then((m) => ({ default: m.ChatPage })))
@@ -99,7 +101,12 @@ function RouteFallback() {
 function EntryLanding() {
   const { token } = useConnection()
   if (!token.trim()) return <Navigate to="/splash" replace />
-  return <StartupLoading />
+  // 它也是**第一屏**（有凭据时的诚实等待态）⇒ 同样要带窗口栏（`FirstScreen`，2026-10-20）。
+  return (
+    <FirstScreen>
+      <StartupLoading />
+    </FirstScreen>
+  )
 }
 
 /**
@@ -510,6 +517,33 @@ export async function declineLocalWorld(): Promise<void> {
   useAppStore.getState().setNeedsLogin(true)
 }
 
+/**
+ * **第一屏也要有窗口按钮**（2026-10-20 主人："为啥这个界面没有那个比如关闭啊什么按钮"）。
+ *
+ * 病：标题栏只挂在 `AppShell`（**进世界之后**那一层）⇒ 启动加载 / 命名卡 / 正门这几屏
+ * 一个窗口按钮都没有；而窗口是 `decorations: false`（自绘），于是人**只能** Alt+F4 或
+ * 任务栏右键 —— 这在一个"我还没进来"的屏幕上尤其糟。
+ *
+ * 判据两条：
+ * 1. **凡是不在 `AppShell` 里的一屏，都经过这一层**（只有一个写者，不会出现两条栏）；
+ * 2. 它是**浮层**（`fixed`），不改任何一屏的布局：那几屏自己都是 `min-h-screen` 的居中卡，
+ *    把栏塞进 flex 流里就会多出 36px 的溢出。
+ *
+ * 浏览器里 `TitleBar` 自己返回 null（`isTauriRuntime`）⇒ web 版布局一行都不变。
+ */
+function FirstScreen({ children }: { children: ReactNode }) {
+  return (
+    <>
+      {isTauriRuntime() && (
+        <div className="fixed inset-x-0 top-0 z-50">
+          <TitleBar />
+        </div>
+      )}
+      {children}
+    </>
+  )
+}
+
 function RootLayout() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -577,10 +611,10 @@ function RootLayout() {
   // 只显示诚实的加载态。
   if (startupPending) {
     return (
-      <>
+      <FirstScreen>
         <StartupLoading />
         <DemoSwitcher />
-      </>
+      </FirstScreen>
     )
   }
   // 正门优先于一切：**入口路径**（`/`、`/splash`）且没有可复用的直连凭据时，
@@ -590,7 +624,8 @@ function RootLayout() {
   // 本来就是「已经决定过连接之后」的路径。
   if (needsName && isEntryPath) {
     return (
-      <NameYourselfCard
+      <FirstScreen>
+        <NameYourselfCard
         onSubmit={async (displayName) => {
           const done = await nameLocalHuman(displayName)
           if (done.ok) {
@@ -605,12 +640,14 @@ function RootLayout() {
           await declineLocalWorld()
           setNeedsName(false)
         }}
-      />
+        />
+      </FirstScreen>
     )
   }
   if (localAsk && isEntryPath) {
     return (
-      <LoginGate
+      <FirstScreen>
+        <LoginGate
         mode="run-local"
         localFailure={localFailure}
         onRunLocal={async () => {
@@ -638,11 +675,16 @@ function RootLayout() {
           await declineLocalWorld()
           setLocalAsk(false)
         }}
-      />
+        />
+      </FirstScreen>
     )
   }
   if (needsLogin && isEntryPath) {
-    return <LoginGate />
+    return (
+      <FirstScreen>
+        <LoginGate />
+      </FirstScreen>
+    )
   }
   return (
     <>
