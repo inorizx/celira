@@ -1,4 +1,4 @@
-﻿//! 最小组合入口：把 Core + 最小 OS 骨干（接入契约 / 展开 / 路由）+ 只读文件视图 + 一个 Model
+//! 最小组合入口：把 Core + 最小 OS 骨干（接入契约 / 展开 / 路由）+ 只读文件视图 + 一个 Model
 //! 装起来，驱动有限活动。
 //!
 //! 它**不是操作系统**：没有通知、没有唤醒、没有调度、没有多 App 切换、没有授权系统、
@@ -54,7 +54,7 @@ use crate::pins_board::PinsBoard;
 use crate::previous_activity::{PreviousActivity, PreviousReading, UnsettledOperation};
 use crate::recovery::{self, RunState};
 use crate::self_concept::{IdentityClaim, SelfConceptBoard};
-use crate::skills_desktop::{SkillsDesktop, read_skills};
+use crate::skills_desktop::{SkillEntry, SkillsDesktop, read_skills};
 use crate::status_bar::StatusBar;
 use crate::store::{Admission, Environment, EnvironmentReader, TracePayload, WakeOrigin};
 use crate::terminal_app::{TERMINAL_APP_ID, TerminalAccess, TerminalApp};
@@ -405,6 +405,8 @@ pub fn run_activity_in_environment<M: ModelPort>(
                 tier: crate::web_app::WebTier::Full,
             },
             terminal: None,
+            // 一次性入口**没有档位声明**：取缺省档（只能动自己那一块）——"不给"是默认那一档。
+            files: FilesScope::Home,
             mcp: &[],
             // 一次性入口不接 im（见上）⇒ 这一格在它身上不产生任何效果：如实给 fail-closed 那一档。
             vision: false,
@@ -569,6 +571,12 @@ impl<'a> RunOrigin<'a> {
 /// 会话**借用**它。
 #[derive(Clone, Default)]
 pub struct SessionDeclarations {
+    /// **文件面的档位**（2026-10-20 主人裁：「要么没有要么全开」）。
+    ///
+    /// `Home`（缺省）＝ 只能动自己那一块；`Machine` ＝ **任意文件夹**（文件动词收绝对路径）。
+    /// 它由宿主按这一支的 `agent.conf`（`files=`）在**启动时**定，与 `terminal` 同一族：
+    /// 换档的生效点是下一次装配，本层不猜、也不给"半开"的中间档。
+    pub files: FilesScope,
     /// 宿主给出的文本创建授权；`None` = 这一次活动不能新建文本。
     pub creation: Option<CreationGrant>,
     /// **这一次装配用的模型名**（2026-10-08）：开场那一行 `model` 的取值。
@@ -650,6 +658,39 @@ pub struct SessionDeclarations {
     /// （那要真的连上对面才拿得到）。因此它们进来时"只认得名字"，**展开那一下**才把动词面
     /// 交出来——装了不用就一分钱不花。授权面是**装配期事实**：换授权面要重启宿主。
     pub mcp: Vec<McpAccess>,
+}
+
+/// 文件面的档位（宿主 `--files` / `agent.conf` 的 `files=`）。
+///
+/// 两档是**互斥的全量**，没有中间档（2026-10-20 主人裁：「要么没有要么全开」）：
+/// - [`FilesScope::Home`]（缺省）：只能动自己那一块（资料根读、作品目录写）；
+/// - [`FilesScope::Machine`]：**任意文件夹**，文件动词收绝对路径，读与写都在整台机器。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FilesScope {
+    /// 只能动自己那一块。**缺省**（"不给"必须是默认那一档）。
+    #[default]
+    Home,
+    /// 整台机器。
+    Machine,
+}
+
+impl FilesScope {
+    /// 宿主那一侧的稳定写法（`agent.conf` 的 `files=` 与 `--files` 用它）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FilesScope::Home => "own",
+            FilesScope::Machine => "full",
+        }
+    }
+
+    /// 解析宿主给的取值；认不出就是 `None`（**明确拒绝启动**比落进"全开"或"只读"都安全）。
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "own" | "none" => Some(FilesScope::Home),
+            "full" => Some(FilesScope::Machine),
+            _ => None,
+        }
+    }
 }
 
 /// 打开一次会话需要的声明：**必填的那一半 ＋ 一个声明包**。
@@ -766,8 +807,8 @@ struct OpeningMaterials {
     pinned: Option<Vec<crate::pins_board::PinnedRow>>,
     /// 主体钉住的**动作详情**（自持物、跨 Run；`None` = 读不出来，不是"没钉"）。
     pinned_actions: Option<Vec<String>>,
-    /// 技能桌面的一行读数（`None` = 材料区读不出来 ⇒ 那一块整块不出场）。
-    skills: Option<usize>,
+    /// 技能索引（`None` = 材料区没有技能区 ⇒ 那一块整块不出场）。
+    skills: Option<Vec<SkillEntry>>,
     /// 主体自己约下的时刻（**持有物**；读失败 ⇒ `None` ⇒ 如实渲染 `unknown`，不冒充"没安排过"）。
     holdings: Option<Vec<crate::holdings::HoldingRow>>,
     /// 自识（三态：缺席 / 在 / 读不出来）。
@@ -1117,7 +1158,7 @@ fn situation_chain(
                 PinnedActions::new(
                     materials.pinned_actions.as_deref(),
                     SkillsDesktop::new(
-                        materials.skills,
+                        materials.skills.clone(),
                         EventCards::new(
                             live.cards,
                             // **持有物紧贴"我是谁"外面一圈**：主体开场读到的顺序是
@@ -1932,6 +1973,8 @@ struct MachineDeclarations<'a> {
     web: WebDeclaration<'a>,
     /// terminal 的档位声明；`None` = 这只手不在。
     terminal: Option<&'a TerminalAccess>,
+    /// 文件面的档位（见 [`SessionDeclarations::files`]）。
+    files: FilesScope,
     /// MCP server 的声明（宿主声明了几台就有几台）。
     mcp: &'a [McpAccess],
     /// 这一次装配用的模型收不收得到媒体材料（见 [`SessionDeclarations::vision`]）。
@@ -1949,6 +1992,7 @@ fn machine_declarations<'a>(declarations: &'a SessionDeclarations) -> MachineDec
             tier: declarations.web,
         },
         terminal: declarations.terminal.as_ref(),
+        files: declarations.files,
         mcp: &declarations.mcp,
         vision: declarations.vision,
     }
@@ -1983,11 +2027,22 @@ fn assemble_machine(
         im,
         web,
         terminal,
+        files,
         mcp,
         vision,
     } = declarations;
-    let view = FileView::with_history_and_creation(material_root, environment_root, creation)
-        .map_err(|failure| machine_refused(MachineFailure::View(failure)))?;
+    // **文件面按档装配**（2026-10-20 主人裁「要么没有要么全开」）：机器档把资料面换成
+    // 整台机器（读与写都在任意文件夹），保留地址（`history` / 手册 / 自识）与作品面照旧。
+    // 与 `--terminal` 同一族：这一档是**主人的政策**，在装配期就定，运行时不改。
+    let view = match files {
+        FilesScope::Machine => {
+            FileView::with_machine_scope(material_root, environment_root, creation)
+        }
+        FilesScope::Home => {
+            FileView::with_history_and_creation(material_root, environment_root, creation)
+        }
+    }
+    .map_err(|failure| machine_refused(MachineFailure::View(failure)))?;
     let notes = NotesApp::open(environment_root).map_err(|failure| {
         CompositionError::MachineRefused(format!("notes-app:{}", failure.as_str()))
     })?;

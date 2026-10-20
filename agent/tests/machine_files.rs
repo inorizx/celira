@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use celira_agent::core::{Action, ActionId, ActionOutcome, ActionParams, ActionPort};
 use celira_agent::file_app::{FailureClass, FileApp};
+use celira_agent::file_view::FileView;
 use celira_agent::foundation::{AgentId, OperationId, RunId, Turn};
 
 const AGENT: &str = "agent-machine";
@@ -104,6 +105,15 @@ fn text_of(outcome: &ActionOutcome) -> String {
         .map(|block| block.text().to_string())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// 驱动**视图**那一层（`files` 这个 App 在生产里就是它）。
+fn view_call(view: &mut FileView, id: &str, params: ActionParams) -> ActionOutcome {
+    view.execute(
+        &AgentId::new(AGENT),
+        &operation(),
+        &Action::with_params(ActionId::new(id), params),
+    )
 }
 
 /// 能力说明里 `path`/`name` 那句（模型唯一能看到"该写哪种形状"的地方）。
@@ -249,6 +259,62 @@ fn machine_scope_without_the_write_face_does_not_declare_writes() {
         "{outcome:?}",
     );
     assert!(!scratch.path().join("a.txt").exists(), "什么都没写出来");
+}
+
+#[test]
+fn the_view_in_machine_scope_reads_absolute_paths_and_keeps_reserved_addresses() {
+    let scratch = Scratch::new("view-machine");
+    // 环境根：一份手册（保留地址）。
+    let environment = scratch.path().join("env");
+    fs::create_dir_all(&environment).expect("可以建环境根");
+    fs::write(environment.join("manual.md"), "手写的说明").expect("可以写手册");
+    // 资料根：机器档**不装配**它（整台机器就是读面）——这一份读不到才对。
+    let materials = scratch.path().join("materials");
+    fs::create_dir_all(&materials).expect("可以建资料根");
+    fs::write(materials.join("only-home.txt"), "只有家档看得到").expect("可以写资料");
+    // 「任意文件夹」：临时目录里另一处，与资料根毫无关系。
+    let elsewhere = scratch.path().join("elsewhere");
+    fs::create_dir_all(&elsewhere).expect("可以建任意目录");
+    fs::write(elsewhere.join("a.txt"), "hello anywhere").expect("可以写文件");
+
+    let mut view =
+        FileView::with_machine_scope(&materials, &environment, None).expect("机器档可以装配");
+
+    // ① 绝对路径：读到任意文件夹里的那一份。
+    let absolute = elsewhere.join("a.txt").display().to_string();
+    let read_back = view_call(&mut view, "files_read", read(&absolute));
+    assert_eq!(read_back.failure_class(), None, "{read_back:?}");
+    assert!(text_of(&read_back).contains("hello anywhere"));
+
+    // ② 保留地址照旧按名字可用（它不是资料面的地址，是派生的）。
+    let manual = view_call(&mut view, "files_read", read("manual.md"));
+    assert_eq!(manual.failure_class(), None, "{manual:?}");
+    assert!(text_of(&manual).contains("手写的说明"));
+
+    // ③ 相对路径**不再指向资料根**：机器档的地址一律是绝对路径。
+    let relative = view_call(&mut view, "files_read", read("only-home.txt"));
+    assert_eq!(
+        relative.failure_class(),
+        Some(FailureClass::InvalidPath.as_str()),
+        "{relative:?}",
+    );
+
+    // ④ 能力说明跟着档走（模型据此决定写哪种形状）。
+    let caps = ActionPort::capabilities(&view, &AgentId::new(AGENT), operation().run());
+    let read_path = caps
+        .items()
+        .iter()
+        .find(|each| each.id().as_str() == "files_read")
+        .expect("能力目录里有 files_read")
+        .params()
+        .iter()
+        .find(|spec| spec.name() == "path")
+        .expect("files_read 有 path 参数");
+    assert!(
+        read_path.description().contains("绝对"),
+        "机器档的说明必须说清可以写绝对路径：{}",
+        read_path.description(),
+    );
 }
 
 #[test]

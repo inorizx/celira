@@ -166,6 +166,13 @@ impl FileViewFailure {
 #[derive(Debug)]
 pub struct FileView {
     materials: FileApp,
+    /// **这一格是机器档吗**（`files=full`）。
+    ///
+    /// 机器档与家档共用同一个视图：差别只有一条 —— `materials` 那一面换成了
+    /// `FileApp::machine_with_writes()`（整台机器），于是**绝对路径**整条交给它，
+    /// 而三个保留地址（`history` / 手册 / 自识）与作品面**一个字都不变**
+    /// （它们不是资料面的地址，是派生的与主体自己的东西）。
+    machine: bool,
     history: Option<HistoryView>,
     /// 派生手册：环境根下那一份（只读）。`None` = 环境根里**没有**那一份 ⇒ 地址**缺席**
     /// （不是错误，也不是"读不到"）。
@@ -273,6 +280,7 @@ impl FileView {
     pub fn materials_only(root: &Path) -> Result<Self, FailureClass> {
         Ok(Self {
             materials: FileApp::open(root)?,
+            machine: false,
             history: None,
             manual: None,
             self_concept: None,
@@ -300,11 +308,58 @@ impl FileView {
         environment_root: &Path,
         creation: Option<&CreationGrant>,
     ) -> Result<Self, FileViewFailure> {
-        let materials_app = match creation {
-            Some(grant) => FileApp::with_creation(materials, grant)
-                .map_err(FileViewFailure::CreationTargetUnusable)?,
-            None => FileApp::open(materials).map_err(FileViewFailure::Materials)?,
+        Self::with_materials_scope(materials, environment_root, creation, false)
+    }
+
+    /// **机器档**（`files=full`）：资料面换成"整台机器"，其余照旧。
+    ///
+    /// 判据（2026-10-20 主人裁）：不给 ⇒ 只能动自己那一块；给了 ⇒ **任意文件夹**。
+    /// 因此这一档**不装配资料根**（没有那一个根可装配）、也**不需要 `CreationGrant`**
+    /// （那份授权说的是"资料根里哪一个子目录可以写"，机器档没有那个根）；
+    /// 三个保留地址与作品面照旧 —— 它们不是资料面的地址。
+    pub fn with_machine_scope(
+        materials: &Path,
+        environment_root: &Path,
+        creation: Option<&CreationGrant>,
+    ) -> Result<Self, FileViewFailure> {
+        Self::with_materials_scope(materials, environment_root, creation, true)
+    }
+
+    fn with_materials_scope(
+        materials: &Path,
+        environment_root: &Path,
+        creation: Option<&CreationGrant>,
+        machine: bool,
+    ) -> Result<Self, FileViewFailure> {
+        // 机器档：读面与写面都是整台机器（写不需要授权——这一档本身就是主人的授权）。
+        // 资料根与环境根那些"必须分开"的判据在机器档**无从成立**（整台机器当然包含环境根），
+        // 所以那一组检查只在门档做；保留地址那一组同理由（没有资料面可被同名条目遮蔽）。
+        let materials_app = if machine {
+            FileApp::machine_with_writes()
+        } else {
+            match creation {
+                Some(grant) => FileApp::with_creation(materials, grant)
+                    .map_err(FileViewFailure::CreationTargetUnusable)?,
+                None => FileApp::open(materials).map_err(FileViewFailure::Materials)?,
+            }
         };
+        if machine {
+            let environment_root = fs::canonicalize(environment_root)
+                .map_err(|error| FileViewFailure::Materials(file_app::io_class(&error)))?;
+            let manual = manual_view(&environment_root);
+            let self_concept = self_concept_view(&environment_root);
+            let works = works_face(&environment_root);
+            return Ok(Self {
+                materials: materials_app,
+                machine,
+                history: Some(HistoryView {
+                    root: environment_root,
+                }),
+                manual,
+                self_concept,
+                works,
+            });
+        }
         // 家档才有那一个根（机器档的根由每条绝对路径自己点名）⇒ 这一层装配只认家档；
         // 拿到没有根的实例就是装配期错误，不猜、也不悄悄退化成"没有资料面"。
         let Some(materials_root) = materials_app.home().map(Path::to_path_buf) else {
@@ -356,6 +411,7 @@ impl FileView {
         }
         Ok(Self {
             materials: materials_app,
+            machine,
             history: Some(HistoryView {
                 root: environment_root,
             }),
@@ -370,12 +426,28 @@ impl FileView {
     /// 说明里给出逻辑地址形状、参数语义、上限与截断行为：`state` 是**存储结构状态**
     /// （是否登记开始、有没有结束事实、有没有封存），不是任务完成判定。
     pub fn capabilities() -> Capabilities {
+        Self::capabilities_in(false)
+    }
+
+    /// 按档位给的那份说明：机器档里 `path` 可以是**绝对路径**（整台机器），
+    /// 相对路径仍然指向保留地址与视图本身 —— 这一句必须跟着档走，否则模型会按错的形状发。
+    pub(crate) fn capabilities_in(machine: bool) -> Capabilities {
+        let list_path = if machine {
+            "视图内的相对目录（留空表示视图根），或这台机器上的绝对目录（如 `D:\\work`）"
+        } else {
+            "视图内的相对目录；留空表示视图根"
+        };
+        let read_path = if machine {
+            "视图内的相对文件路径，或这台机器上的绝对文件路径（如 `D:\\work\\a.txt`）"
+        } else {
+            "视图内的相对文件路径"
+        };
         Capabilities::of(vec![
             Capability::new(
                 ActionId::new(CAPABILITY_LIST),
                 "列出一个目录的直接子项（不递归，按名称排序）；接着列用 `after`",
                 vec![
-                    ParamSpec::new(PARAM_PATH, false, "视图内的相对目录；留空表示视图根"),
+                    ParamSpec::new(PARAM_PATH, false, list_path),
                     ParamSpec::new(
                         PARAM_AFTER,
                         false,
@@ -394,7 +466,7 @@ impl FileView {
                 ActionId::new(CAPABILITY_READ_TEXT),
                 "读一个 UTF-8 文本文件；整份读，或给 `offset`/`limit` 续读一段",
                 vec![
-                    ParamSpec::new(PARAM_PATH, true, "视图内的相对文件路径"),
+                    ParamSpec::new(PARAM_PATH, true, read_path),
                     ParamSpec::new(PARAM_OFFSET, false, "本段的起始字节（默认 0）"),
                     ParamSpec::new(PARAM_LIMIT, false, "本段的字节数上限（默认 64 KiB）"),
                 ],
@@ -438,10 +510,14 @@ impl FileView {
     /// 这个实例当前声明的能力：读侧三项，加上有创建授权时的**那两项**写能力与它们各自的复核
     /// 能力，再加上**作品面**那六件（主体在场就在场——主体自己的东西不需要任何声明）。
     fn available_capabilities(&self) -> Capabilities {
-        let mut items = Self::capabilities().items().to_vec();
+        let mut items = Self::capabilities_in(self.machine).items().to_vec();
         if self.materials.is_writable() {
-            // 视图这一层只装配**家档**（资料面 ＋ 作品面），所以说明里的地址是相对路径。
-            let mode = file_app::PathMode::Home;
+            // 写面那一族说明跟着档走：家档说相对路径，机器档说绝对路径。
+            let mode = if self.machine {
+                file_app::PathMode::Machine
+            } else {
+                file_app::PathMode::Home
+            };
             items.push(FileApp::creation_capability(mode));
             items.push(FileApp::verification_capability(mode));
             items.push(FileApp::edit_capability(mode));
@@ -784,6 +860,18 @@ impl ActionPort for FileView {
 }
 
 impl FileView {
+    /// 机器档下"这条地址要不要整条交给机器面"。
+    ///
+    /// 判据只有一条：**绝对路径**。相对路径仍然按家档那套解释（保留地址 / 资料面）——
+    /// 这既让 `history/`、`manual`、`self_concept` 在机器档里照旧可用，也让"混着写"这类
+    /// 失误落成一句明确的 `invalid-path`（机器面自己会说清它要绝对路径）。
+    fn machine_delegates(&self, params: &ActionParams) -> bool {
+        self.machine
+            && params
+                .get(PARAM_PATH)
+                .is_some_and(|value| Path::new(value).is_absolute())
+    }
+
     /// 列目录：保留地址走派生视图（`history` 列经历目录、`manual.md` 按"它是文件"如实报类型不
     /// 对），其余整条动作交给真实资料目录。
     ///
@@ -796,6 +884,12 @@ impl FileView {
         action: &Action,
         params: &ActionParams,
     ) -> ActionOutcome {
+        // **机器档：绝对路径整条交给机器面**（它自己判形状、自己逐段查链接）。
+        // 判据只有一条：这条地址是绝对路径 —— 其余（`history/`、`manual`、`self_concept`、
+        // 以及任何相对路径）照旧走派生地址与资料面，一个字不变。
+        if self.machine_delegates(params) {
+            return self.materials.list(params);
+        }
         let relative = match file_app::path_parameter_with(params, false, &[PARAM_AFTER]) {
             Ok(Some(value)) => value,
             // 省略路径 = 视图根；这里只做合并，真实遍历仍由资料目录自己完成。
@@ -870,6 +964,10 @@ impl FileView {
         action: &Action,
     ) -> ActionOutcome {
         let params = action.params();
+        // 机器档：绝对路径整条交给机器面（与 `list` 同一条判据）。
+        if self.machine_delegates(params) {
+            return self.materials.read_text(params);
+        }
         let relative =
             match file_app::path_parameter_with(params, true, &[PARAM_OFFSET, PARAM_LIMIT]) {
                 Ok(Some(value)) => value,
@@ -976,6 +1074,10 @@ impl FileView {
     /// `invalid-argument`（**它是保留地址，不能说成"不存在"**），缺席时才是 `not-found`。因此它们的
     /// 内容不会被 `files_grep` 命中——这一条如实登记。
     fn find_text(&self, params: &ActionParams) -> ActionOutcome {
+        // 机器档：绝对目录整条交给机器面（它自己判形状；相对路径照旧走派生地址）。
+        if self.machine_delegates(params) {
+            return self.materials.find_text(params);
+        }
         if let Some(path) = params.get(PARAM_PATH) {
             match file_app::relative_names(path) {
                 Ok(names) if FileView::is_history_address(&names) => {

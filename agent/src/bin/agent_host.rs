@@ -35,7 +35,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use celira_agent::clock::ClockHandle;
-use celira_agent::composition::SessionDeclarations;
+use celira_agent::composition::{FilesScope, SessionDeclarations};
 use celira_agent::context_reading::{ContextReading, ContextReadingWriter};
 use celira_agent::cost::{UsageReport, UsageWriter};
 use celira_agent::doorbell::{Doorbell, DoorbellAccess, DoorbellPolicy};
@@ -45,7 +45,7 @@ use celira_agent::host_loop::{
 };
 use celira_agent::im_channel::ImAccess;
 use celira_agent::manual_entry::escape_field;
-use celira_agent::mcp::{McpAccess, parse_declaration, stdio_available};
+use celira_agent::mcp::{McpAccess, credential_names, parse_declaration, stdio_available};
 use celira_agent::model_choice::ModelChoice;
 use celira_agent::model_readings::{ModelReadings, ModelReadingsWriter};
 use celira_agent::model_source;
@@ -135,6 +135,8 @@ struct Options {
     context_window: Option<String>,
     im_endpoint: String,
     terminal_tier: Option<String>,
+    /// **文件面的档位**（`--files own|full`；不给 = `own` ⇒ 只能动自己那一块）。
+    files_tier: Option<String>,
     /// **出网档**的原始声明（`--web off|fetch|full`；缺省 full = 出厂以来的样子）。
     web_tier: Option<String>,
     /// `--mcp` 的**原始声明**（可重复，一台一条）。
@@ -162,6 +164,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
     let mut context_window: Option<String> = None;
     let mut im_endpoint: Option<String> = None;
     let mut terminal_tier: Option<String> = None;
+    let mut files_tier: Option<String> = None;
     let mut web_tier: Option<String> = None;
     let mut mcp: Vec<String> = Vec::new();
     let mut model: Option<String> = None;
@@ -177,7 +180,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
         match argument {
             "--help" | "-h" => return Ok(None),
             "--root" | "--agent" | "--materials" | "--max-turns" | "--context-window"
-            | "--terminal" | "--web" | "--mcp" | "--model" | "--model-endpoint"
+            | "--terminal" | "--files" | "--web" | "--mcp" | "--model" | "--model-endpoint"
             | "--model-protocol" | "--model-sources" | "--identity-agent" | "--identity-name"
             | "--im-endpoint" => {
                 index += 1;
@@ -195,6 +198,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
                     "--max-turns" => max_turns = Some(value),
                     "--context-window" => context_window = Some(value),
                     "--terminal" => terminal_tier = Some(value),
+                    "--files" => files_tier = Some(value),
                     "--web" => web_tier = Some(value),
                     // **可重复**：一台 server 一条声明（重名由 resolve 那一关拒绝）。
                     "--mcp" => mcp.push(value),
@@ -243,6 +247,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
 
     Ok(Some(Options {
         terminal_tier,
+        files_tier,
         web_tier,
         mcp,
         root: root.ok_or_else(|| "缺 --root".to_string())?,
@@ -398,13 +403,25 @@ fn main() -> ExitCode {
     for line in model_source::banner_lines(&source) {
         let _ = writeln!(out, "{line}");
     }
-    // 每台装上的 server 一行：档位、窗口、命令与**洗凭据读数**（只报键名，永不取值）。
+    // 每台装上的 server 一行：档位、窗口、通道与**洗凭据读数**（只报键名，永不取值）。
+    // 远程端点只报**去掉查询串**的地址与凭据的**变量名**——凭据本身不进任何读数。
     for access in &mcp {
         let declaration = access.declaration();
         let (scrubbed, unscrubbed) = access.credential_reading();
+        let channel = match declaration.endpoint() {
+            celira_agent::mcp::McpEndpoint::Stdio { command } => format!("stdio:{command}"),
+            celira_agent::mcp::McpEndpoint::Remote {
+                address,
+                credential_env,
+            } => format!(
+                "remote:{} credential-env={}",
+                celira_agent::mcp::remote::redacted_endpoint(address),
+                credential_env.as_deref().unwrap_or("none"),
+            ),
+        };
         let _ = writeln!(
             out,
-            "mcp={} effect={} timeout={} scrub={} unscrubbed={} command={}",
+            "mcp={} effect={} timeout={} scrub={} unscrubbed={} channel={}",
             escape_field(declaration.name()),
             declaration.effect().as_str(),
             declaration.timeout_seconds(),
@@ -414,7 +431,7 @@ fn main() -> ExitCode {
             } else {
                 unscrubbed.join(",")
             },
-            escape_field(declaration.command()),
+            escape_field(&channel),
         );
     }
 
@@ -463,6 +480,20 @@ fn main() -> ExitCode {
             eprintln!("{message}");
             return ExitCode::from(code as u8);
         }
+    };
+
+    // **文件面的档位**（2026-10-20 主人裁「要么没有要么全开」）：不给 = own（只能动自己
+    // 那一块，出厂以来的样子）；给了 full = 任意文件夹。认不出的取值**拒绝启动**——
+    // 既不静默当"全开"，也不静默当"只读"。
+    let files = match options.files_tier.as_deref() {
+        None => FilesScope::Home,
+        Some(text) => match FilesScope::parse(text) {
+            Some(scope) => scope,
+            None => {
+                eprintln!("未知的文件档位: {text}（v1 只有 own / full）");
+                return ExitCode::FAILURE;
+            }
+        },
     };
 
     // **出网档**（2026-10-13）：`--web off|fetch|full`，缺省 full（不改现有行为）。
@@ -530,6 +561,7 @@ fn main() -> ExitCode {
         web: web_tier,
         search,
         terminal,
+        files,
         mcp,
         // 这一次装配用的模型收不收得到媒体材料（2026-10-17）：与上面 `model` 同一处口径
         // ——从**模型来源**里取，入口不另算一份；进程侧来源没有这一格 ⇒ fail-closed。
@@ -853,15 +885,11 @@ fn resolve_web(tier: Option<&str>) -> Result<WebTier, (String, i32)> {
     Ok(tier)
 }
 
-/// 要洗掉的凭据键名（**只报名字**，永不取值）：这台机器上这个进程认得的全部凭据。
-/// 系统自有的 `CELIRA_` 前缀那族由件自己按前缀洗，这里列的是另外几个。
-fn credential_names() -> Vec<String> {
-    vec![
-        "DEEPSEEK_API_KEY".to_string(),
-        "TAVILY_API_KEY".to_string(),
-        "CELIRA_IM_BACKEND_AUTH".to_string(),
-    ]
-}
+// 要洗掉的凭据键名（**只报名字**，永不取值）：这台机器上这个进程认得的全部凭据。
+// 系统自有的 `CELIRA_` 前缀那族由件自己按前缀洗，这里列的是另外几个。
+//
+// ⚠ 名单本身在 `celira_agent::mcp::credential_names`——宿主声明的 server 与 Agent 自己
+// `mcp.conf` 里自配的那几台**必须洗同一份**，否则"自配一台"就是偷另一台被洗掉钥匙的路子。
 
 /// 外部来源的 App 的**授权面**解析（在打开环境、起任何东西之前）。
 ///
@@ -871,17 +899,18 @@ fn resolve_mcp(declarations: &[String]) -> Result<Vec<McpAccess>, (String, i32)>
     if declarations.is_empty() {
         return Ok(Vec::new());
     }
-    if !stdio_available() {
-        return Err((
-            "本平台没有 stdio MCP 通道的实现（有实现的平台：Windows、Linux）：不静默换行为，直接拒绝"
-                .to_string(),
-            1,
-        ));
-    }
     let mut accesses: Vec<McpAccess> = Vec::new();
     for text in declarations {
         let declaration = parse_declaration(text)
             .map_err(|message| (format!("agent_host: --mcp 声明读不懂（{message}）"), 1))?;
+        // **stdio 那一档要平台臂**；远程端点只走网络，与平台无关。
+        if !declaration.is_remote() && !stdio_available() {
+            return Err((
+                "本平台没有 stdio MCP 通道的实现（有实现的平台：Windows、Linux）：不静默换行为，直接拒绝"
+                    .to_string(),
+                1,
+            ));
+        }
         if accesses
             .iter()
             .any(|each| each.declaration().name() == declaration.name())

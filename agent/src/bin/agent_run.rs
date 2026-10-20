@@ -42,7 +42,7 @@
 use std::path::{Path, PathBuf};
 
 use celira_agent::clock::ClockHandle;
-use celira_agent::composition::SessionDeclarations;
+use celira_agent::composition::{FilesScope, SessionDeclarations};
 use celira_agent::context_reading::{ContextReading, ContextReadingWriter};
 use celira_agent::cost::{UsageReport, UsageWriter};
 use celira_agent::creation_grant::CreationGrant;
@@ -184,6 +184,7 @@ fn run(arguments: Vec<String>) -> i32 {
             im_endpoint,
             search_endpoint,
             terminal_tier,
+            files_scope,
             web_tier,
             mcp,
             model,
@@ -200,6 +201,7 @@ fn run(arguments: Vec<String>) -> i32 {
                 im_endpoint,
                 search_endpoint,
                 terminal_tier,
+                files_scope,
                 web_tier,
                 mcp,
                 model_source: ModelSourceRequest {
@@ -225,6 +227,8 @@ struct Declarations {
     search_endpoint: Option<String>,
     /// 宿主声明的 terminal 档位（不给就没有这只手）。
     terminal_tier: Option<String>,
+    /// **文件面的档位**（`--files own|full`；不给 = `own` ⇒ 只能动自己那一块）。
+    files_scope: Option<FilesScope>,
     /// **出网档**（`--web off|fetch|full`；缺省 full）。
     web_tier: Option<WebTier>,
     /// 宿主声明的外部来源 App（**原始声明**，可重复；空 = 一台都没装）。
@@ -269,6 +273,7 @@ fn start(
         im_endpoint,
         search_endpoint,
         terminal_tier,
+        files_scope,
         web_tier,
         mcp,
         model_source,
@@ -295,6 +300,10 @@ fn start(
             return code;
         }
     };
+    // **文件面的档位**（2026-10-20 主人裁「要么没有要么全开」）：不给 = own（只能动自己
+    // 那一块，出厂以来的样子）；给了 full = 任意文件夹。档位在**解析那一处**就已经 fail-closed
+    // （认不出的取值直接拒绝），这里只把它落进声明包。
+    request.declarations.files = files_scope.unwrap_or_default();
     // 外部来源的 App 的**授权面**：声明读不懂 / 两台同名 / 本平台没有通道实现 —— 都在这里
     // 直接拒绝（fail-closed，不猜、不静默换行为）。**可重复**，一台 server 一条。
     request.declarations.mcp = match resolve_mcp(&mcp) {
@@ -455,6 +464,8 @@ enum Invocation {
         search_endpoint: Option<String>,
         /// 宿主声明的 terminal 档位（原始取值；不给就没有这只手）。
         terminal_tier: Option<String>,
+        /// **文件面的档位**（原始取值已解析成封闭枚举；不给 = `own`）。
+        files_scope: Option<FilesScope>,
         /// **出网档**（`--web off|fetch|full`；缺省 full）。
         web_tier: Option<WebTier>,
         /// 宿主声明的外部来源 App（**原始声明**，可重复；空 = 一台都没装）。
@@ -492,6 +503,7 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
     let mut im_endpoint: Option<String> = None;
     let mut search_endpoint: Option<String> = None;
     let mut terminal_tier: Option<String> = None;
+    let mut files_scope: Option<FilesScope> = None;
     let mut web_tier: Option<WebTier> = None;
     let mut mcp: Vec<String> = Vec::new();
     let mut model: Option<String> = None;
@@ -528,6 +540,14 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
                 take_value(rest, index, option)?,
             )?,
             "--terminal" => set_once(&mut terminal_tier, option, take_value(rest, index, option)?)?,
+            // **文件面的档位**（2026-10-20）：封闭枚举，**在解析这一处就 fail-closed**——
+            // 认不出的取值不降级（既不当"全开"，也不当"只读"）：那是主人的政策，猜错就是替主人做主。
+            "--files" => {
+                let value = take_value(rest, index, option)?;
+                let scope = FilesScope::parse(&value)
+                    .ok_or_else(|| format!("未知的文件档位: {value}（v1 只有 own / full）"))?;
+                set_once(&mut files_scope, option, scope)?;
+            }
             // **出网档**（2026-10-13）：封闭枚举，**在解析这一处就 fail-closed**——不认识的档位不降级、
             // 也不拿近似档顶上（"主体能不能出网"是主人的政策，猜错就是替主人做主）。
             "--web" => {
@@ -607,6 +627,7 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
                 ("--im-endpoint", im_endpoint.is_some()),
                 ("--search-endpoint", search_endpoint.is_some()),
                 ("--terminal", terminal_tier.is_some()),
+                ("--files", files_scope.is_some()),
                 ("--web", web_tier.is_some()),
                 ("--mcp", !mcp.is_empty()),
                 ("--model", model.is_some()),
@@ -692,6 +713,7 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
                 im_endpoint,
                 search_endpoint,
                 terminal_tier,
+                files_scope,
                 web_tier,
                 mcp,
                 model,
@@ -1190,5 +1212,44 @@ mod tests {
             Ok(_) => panic!("init 不接受 --mcp"),
         };
         assert!(message.contains("init 不接受 --mcp"), "{message}");
+    }
+
+    /// **文件面的档位**（2026-10-20 主人裁「要么没有要么全开」）：
+    /// `--files full` 收下、缺省是 `own`、认不出的取值**在解析这一处**就拒绝
+    /// （既不静默当"全开"，也不静默当"只读"）。
+    #[test]
+    fn the_files_flag_is_a_closed_two_value_switch() {
+        let mut argv = run_head();
+        argv.extend(arguments(&["--files", "full"]));
+        let Invocation::Run { files_scope, .. } = parse(&argv).expect("--files full 应当能解析")
+        else {
+            panic!("应当是 run");
+        };
+        assert_eq!(files_scope, Some(FilesScope::Machine));
+
+        let mut argv = run_head();
+        argv.extend(arguments(&["--files", "own"]));
+        let Invocation::Run { files_scope, .. } = parse(&argv).expect("--files own 应当能解析")
+        else {
+            panic!("应当是 run");
+        };
+        assert_eq!(files_scope, Some(FilesScope::Home));
+
+        // 缺省：不给就是"只能动自己那一块"。
+        let Invocation::Run { files_scope, .. } =
+            parse(&run_head()).expect("不带 --files 也能解析")
+        else {
+            panic!("应当是 run");
+        };
+        assert_eq!(files_scope, None);
+
+        // 认不出的取值：拒绝（不降级、不就近猜）。
+        let mut argv = run_head();
+        argv.extend(arguments(&["--files", "readonly"]));
+        let message = match parse(&argv) {
+            Err(message) => message,
+            Ok(_) => panic!("未知档位应当被拒"),
+        };
+        assert!(message.contains("未知的文件档位"), "{message}");
     }
 }
