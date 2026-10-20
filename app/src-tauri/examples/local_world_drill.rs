@@ -115,6 +115,13 @@ fn main() {
                     println!("[本机世界] 世界 = {}", facts.world_base());
                     std::process::exit(0);
                 }
+                SessionOutcome::NoHuman => {
+                    println!(
+                        "[本机世界] 这个世界还没有你（没有 human_id）—— 名字得由人给：\
+                         app 首屏那张卡，或 `celira-im bootstrap-human --display-name <名字>`"
+                    );
+                    std::process::exit(5);
+                }
                 SessionOutcome::WorldDown => {
                     println!("[本机世界] 世界没在跑（先 ensure）——什么都没动");
                     std::process::exit(4);

@@ -18,9 +18,11 @@ import { DEFAULT_PREFS, type ConnectionPrefs } from '../src/api/prefs.ts'
 import { decideFrontDoor } from '../src/api/entry.ts'
 import {
   adoptDecision,
+  humanNameProblem,
   localBaseOf,
   localWorldChoiceLabel,
   planLocalWorld,
+  sessionNextStep,
   shouldStartLocalWorld,
   type LocalSessionView,
   type LocalWorldReadout,
@@ -250,4 +252,36 @@ test('decideFrontDoor 的第三格只在"没凭据 + 壳说要问"时出现', ()
   assert.deepEqual(decideFrontDoor(prefsOf(), null), { screen: 'login' })
   // 手里有凭据 ⇒ 用户的选择优先，连问都不问。
   assert.deepEqual(decideFrontDoor(prefsOf({ token: 't' }), true), { screen: 'core-auto' })
+})
+
+// ── 8) 这个世界还没有你：问名字，不替谁起名（2026-10-20）──────────────────────
+
+test('★ 会话读数：no-human ⇒ 问名字（既不是失败，也不是 ok）', () => {
+  assert.equal(sessionNextStep(sessionOf({ state: 'no-human', token: null, humanId: null })), 'name')
+  // 它**不许**被当成成功：没有 token 就没有会话。
+  assert.equal(adoptDecision(sessionOf({ state: 'no-human', token: null, humanId: null })).adopt, false)
+})
+
+test('会话读数：其余四态与"不认识的值"一律 fail-closed（不当 ok）', () => {
+  assert.equal(sessionNextStep(sessionOf()), 'adopt')
+  assert.equal(sessionNextStep(sessionOf({ token: null })), 'stop', 'ok 却没有原文 ⇒ 读不懂')
+  assert.equal(sessionNextStep(sessionOf({ state: 'world-down', token: null })), 'stop')
+  assert.equal(sessionNextStep(sessionOf({ state: 'no-core', token: null })), 'stop')
+  assert.equal(sessionNextStep(sessionOf({ state: 'failed', token: null })), 'stop')
+  assert.equal(sessionNextStep(sessionOf({ state: 'something-new', token: 't' })), 'stop')
+  assert.equal(sessionNextStep(null), 'stop')
+})
+
+test('★ 名字那一格：三条规则与 Core 同一套（禁 NUL / ≤80 个 scalar / trim 后非空）', () => {
+  assert.equal(humanNameProblem('测试名字'), null)
+  assert.equal(humanNameProblem('  测试名字  '), null, '两侧空白由壳削掉')
+  assert.match(humanNameProblem('') ?? '', /不能是空的/)
+  assert.match(humanNameProblem('   ') ?? '', /不能是空的/)
+  assert.match(humanNameProblem('a\u0000b') ?? '', /控制字符/)
+  assert.equal(humanNameProblem('字'.repeat(80)), null)
+  assert.match(humanNameProblem('字'.repeat(81)) ?? '', /80/)
+  // 按 **scalar value** 数，不按 UTF-16 单元：80 个 emoji 合格，81 个不合格
+  // （`s.length` 会把一个 emoji 记成两个，那样我们会先拒掉世界本来会接受的名字）。
+  assert.equal(humanNameProblem('🐱'.repeat(80)), null)
+  assert.match(humanNameProblem('🐱'.repeat(81)) ?? '', /80/)
 })

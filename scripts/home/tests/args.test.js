@@ -1,4 +1,4 @@
-'use strict'
+﻿'use strict'
 // 开机编排的两样"形状"：**参数解析**与**交给子进程的命令行**。
 //
 // 为什么这两样值得各写几条：参数顺序就是语义（Windows 与 Linux 上 `--mcp` 必须夹在
@@ -340,6 +340,9 @@ argCase('参数解析：无参 / --token / --status', () => {
     // `--agent-name`（2026-10-12）：**自建那一支**的显示名。`null` = 没给 ⇒ 布置用占位
     // `未命名`（系统不替 Agent 起名 —— 显示名是公共呈现，归它自己或它的 Owner）。
     agentName: null,
+    // `--human-name`（2026-10-20）：**这个世界里你自己**的显示名。`null` = 没给 ⇒ 占位
+    // `未命名`（系统同样不替人起名；机器用户名那条路已撤掉）。
+    humanName: null,
     // **远端跑法**（2026-09-30）：`imEndpoint` = 规范化过的世界地址（`null` = 没给 ⇒ 本机全量）；
     // `remoteToken` = `--token` **跟的那个值**（主人凭据；`null` = 没跟值）。
     imEndpoint: null,
@@ -366,6 +369,26 @@ argCase('参数解析：--agent-name 带名字 / 不带名字 / 空值（后两�
   const both = up.parseUpArgs(['--agent', 'a-1', '--agent-name', '阿岩'])
   assert.equal(both.error, null)
   assert.equal(both.adoptAgent, 'a-1')
+  assert.equal(both.agentName, '阿岩')
+})
+
+argCase('参数解析：--human-name 带名字 / 不带名字 / 空值（后两种 ⇒ 用法错，绝不回落成占位）', () => {
+  assert.equal(up.parseUpArgs(['--human-name', '测试名字']).humanName, '测试名字')
+  assert.equal(up.parseUpArgs(['--human-name', '  测试名字  ']).humanName, '测试名字', '两侧空白去掉')
+  for (const argv of [
+    ['--human-name'],
+    ['--human-name', ''],
+    ['--human-name', '   '],
+    ['--human-name', '--token'],
+  ]) {
+    const bad = up.parseUpArgs(argv)
+    assert.ok(bad.error && bad.error.includes('--human-name'), `${JSON.stringify(argv)} 必须报用法错`)
+    assert.equal(bad.humanName, null, '报错时不许留下半个名字')
+  }
+  // 与 `--agent-name` 一起给是合法的：两个名字各归各的（人是人、Agent 是 Agent）。
+  const both = up.parseUpArgs(['--human-name', '测试名字', '--agent-name', '阿岩'])
+  assert.equal(both.error, null)
+  assert.equal(both.humanName, '测试名字')
   assert.equal(both.agentName, '阿岩')
 })
 

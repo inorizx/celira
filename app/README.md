@@ -306,8 +306,8 @@ CELIRA_HOME_DIR=<家> CELIRA_REPO_DIR=<仓库根> cargo run --example anjia_dril
 |---|---|---|
 | 1 | **报读数** | 只读：家在哪、世界在不在（`GET /health` 回 200）、主人是谁、家的门两个口 |
 | 2 | **起世界** | **探活优先**（已经在跑就不动它，`up.js` 同款）；不在才起：无参数、`cwd` = 家、三个 `CELIRA_IM_*` 环境、日志 `logs/im.out`、就绪判据 `GET /health`（30 秒预算） |
-| 3 | **首次布置** | 家里没有 `human_id` ⇒ `bootstrap-human --display-name <这台机器的用户名>`（`provision.js` 的 `defaultHumanDisplayName` 是权威、壳侧是它的镜像；取不到 ⇒ `未命名`）并把 `human_id` 记进 `home.conf`（**唯一允许的写**，写法照 `conf.js` 的 `confSet`）；已有 ⇒ `issue-human-session` 补一支 |
-| 4 | **交一支会话** | token **只在内存里交给页面一次**（`local_world_session`）；壳不落盘、不打印、不进日志 |
+| 3 | **首次布置** | 家里没有 `human_id` ⇒ 页面先问名字（`no-human` ⇒ `NameYourselfCard` ⇒ `local_world_bootstrap { displayName }`），壳再 `bootstrap-human --display-name <人给的那个>`，并把 `human_id` 记进 `home.conf`（**唯一允许的写**，写法照 `conf.js` 的 `confSet`）；已有 ⇒ `issue-human-session` 补一支。⚠ **壳不再从这台机器的用户名造名字**（2026-10-20）：那是机器事实，写进公共世界就是拿它冒充公共事实；三条规则（禁 NUL / ≤80 个 scalar / trim 后非空）与 Core 同一套，权威在 `local_world::normalize_human_name` |
+| 4 | **交一支会话** | token **只在内存里交给页面一次**（`local_world_session`）；壳不落盘、不打印、不进日志。**它不铸人**：没有主人时回 `no-human`（一个待回答的问题，不是失败） |
 | 5 | **起本机住户**（2026-10-03 第二刀） | 世界在跑 ⇒ 这个家的住户**也该在跑**（§8.1：本地进程是本地 app 的孩子）。判据见下 |
 
 **「打开就进 ⇒ 她就在」**（2026-10-03 第二刀，`src-tauri/src/local_residents.rs`）：
@@ -355,18 +355,23 @@ CELIRA_HOME_DIR=<家> CELIRA_REPO_DIR=<仓库根> cargo run --example anjia_dril
 而 app 进程还在、`tray_icon_app` 那个托盘窗口在、世界与住户照旧跑；**重开 app**（她先被人为
 停掉）⇒ 启动日志：`[本机服务] 世界本来就在跑（没动它）` ＋ `[本机服务] 住户 小月：started`。
 
-**首位 Human 的显示名 = 公共呈现，不是关系**（2026-10-03 刀）：规矩是
-**取这台机器的用户名**（`USERNAME`，退 `USER`），取不到 ⇒ 中性占位 `未命名`。
-从前两边都写死 `主人` —— 那会把 **IM 里可变的昵称**与**世界侧的 ownership**
-（`role='owner'` 是权限事实）压成一个词，而且 Agent 拿到这个显示名就照着叫
-（真机读数："主人你好呀"）⇒ 等于**系统借一个昵称替她认定了关系**（宪法判据 9）。
-关系归**主体自己的记忆**（他的环境根），系统只给机械事实与公共呈现。
-真机验证（2026-10-03）：全新的家走完首次布置 ⇒ `GET /v1/me` 回的显示名就是这台机器的用户名。
+**首位 Human 的显示名 = 公共事实，由人给**（2026-10-03 立判据，2026-10-20 改来源）：
+规矩是**问进这个世界的人一次**（app 首屏的 `NameYourselfCard`），页面把它交给
+`local_world_bootstrap { displayName }`；命令行形态是 `node home.js up --human-name <名字>`，
+**没给就用占位 `未命名` 并在读数里说出来**（占位不是称呼）。
 
-⚠ **已知缺口（不自己补）**：Human 的显示名今天**没有任何改的路** —— `GET /v1/me` 只读、
-呈现切片只写 Agent 资料与群内呈现、operator CLI 无改名动词 ⇒ 首次布置铸下即长久。
-要改它得走一次**窄解冻裁决**（唯一登记处 `CORE_V1_ACCEPTANCE.md` §6.1）；
-客户端不得自行发明端点。
+- 为什么不再取机器用户名（2026-10-20 撤掉）：那是**机器事实**，写进**公共世界**就是拿它冒充
+  公共事实；而且它常常不是你（`Administrator` / `user` / `DESKTOP-8K2LQ`），同机两个人也分不开。
+- 为什么不写死 `主人`（更早的那一刀）：那会把 **IM 里可变的昵称**与**世界侧的 ownership**
+  （`role='owner'` 是权限事实）压成一个词，而且 Agent 拿到就照着叫（真机读数："主人你好呀"）
+  ⇒ 等于**系统借一个昵称替她认定了关系**（宪法判据 9）。关系归**主体自己的记忆**。
+- 三条规则与 Core 同一套（契约 4.1）：禁 U+0000、至多 80 个 Unicode scalar value、trim 后非空。
+  权威在世界的 `DisplayName::parse`；壳的 `normalize_human_name` 与页面的 `humanNameProblem`
+  是**同一套规则的输入提示**，不是第二个裁决者。
+
+**改名有路了**（2026-10-18 切片，`CORE_V1_PARTICIPANT_PRESENTATION.md` §4）：`display_name` 是
+既有的 Participant 身份事实 ⇒ 改名是**状态写**，**只有本人能写**（Human 没有 Owner 这一支），
+入口在「我的资料」。所以初次起错、或用占位铸下，都换得掉 —— 不再是长久债。
 
 **壳↔前端（四个命令）**：`local_world_readout`（只读；`runLocalWorld` 用 `null` 表示
 **还没表态**）／`local_world_enable`（写下表态 + 确保世界在跑）／`local_world_disable`

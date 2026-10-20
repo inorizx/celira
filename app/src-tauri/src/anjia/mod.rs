@@ -238,6 +238,27 @@ fn homed_at_text(at: &HomedAt) -> String {
     }
 }
 
+/// 家级目录（一支都没有也要有的那几格）：`materials/`、`materials/skills/`、`logs/`。
+///
+/// **技能区空着也要建**（2026-10-20）：Agent 侧 `skills_desktop` 把"没有技能区"（`None`，
+/// 整块不出场）与"技能区空着"（`Some(0)`，如实说「技能区为空」）当成两件事 ⇒ 不建它，主体
+/// 只看得见"没有那一行"，于是"这具身体没有技能区"与"技能区空着"合成一片空白（真机上主体
+/// 据此答成"没有可安装的技能包"）。CLI 那边同一条（`scripts/home/up.js`）。
+///
+/// 返回**写不进去的是哪一格**与原因：调用方要点名，不静默降级。
+fn ensure_home_dirs(home_dir: &Path) -> Result<(), (PathBuf, std::io::Error)> {
+    for dir in [
+        home::materials_root(home_dir),
+        home::skills_dir(home_dir),
+        home_dir.join("logs"),
+    ] {
+        if let Err(error) = std::fs::create_dir_all(&dir) {
+            return Err((dir, error));
+        }
+    }
+    Ok(())
+}
+
 /// 跑一次安家。全程同步（调 CLI、收发 HTTP、起进程、等报到）——
 /// 将来接 Tauri 命令时用 `tauri::async_runtime::spawn_blocking` 托底。
 pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
@@ -470,14 +491,12 @@ pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
     }
 
     // ── 3) 建它的环境根 + 写它的身份（一支一个）──────────────────────────
-    for dir in [home_dir.join("materials"), home_dir.join("logs")] {
-        if let Err(error) = std::fs::create_dir_all(&dir) {
-            lines.push(format!(
-                "[安家] 家目录写不进去（{}：{error}）—— 停手",
-                dir.display()
-            ));
-            return report(&agent_id, AnjiaOutcome::Failed, lines, None, None, None);
-        }
+    if let Err((dir, error)) = ensure_home_dirs(&home_dir) {
+        lines.push(format!(
+            "[安家] 家目录写不进去（{}：{error}）—— 停手",
+            dir.display()
+        ));
+        return report(&agent_id, AnjiaOutcome::Failed, lines, None, None, None);
     }
     let init = world::run_cli(
         &layout.run_exe,
@@ -885,6 +904,17 @@ pub fn ensure_registration(
                 lines,
             };
         }
+        crate::local_world::SessionOutcome::NoHuman => {
+            lines.push(
+                "[登记] 这个世界还没有你 —— 先在 app 首屏给自己起个名字（它负责铸出首位 \
+                 Human），再回来补登记"
+                    .to_string(),
+            );
+            return RegisterReport {
+                outcome: RegisterOutcome::RefusedNoHuman,
+                lines,
+            };
+        }
         crate::local_world::SessionOutcome::NoCore => {
             lines.push(format!(
                 "[登记] 缺可执行件：{}",
@@ -1037,6 +1067,8 @@ pub enum RegisterOutcome {
     RefusedNoEnvRoot,
     /// 拒绝：问不到世界（这一点**不猜**）。
     RefusedWorldUnreadable,
+    /// 拒绝：这个世界还没有你（没有 `human_id`）—— 名字得由人给，壳不替谁起名。
+    RefusedNoHuman,
     /// 拒绝：世界里没有这个 id，或者它不是你的。
     RefusedNotOwned,
     /// 拒绝：这个 id 不是 active。
@@ -1053,6 +1085,7 @@ impl RegisterOutcome {
             Self::RefusedBadId => "refused-bad-id",
             Self::RefusedNoEnvRoot => "refused-no-env-root",
             Self::RefusedWorldUnreadable => "refused-world-unreadable",
+            Self::RefusedNoHuman => "refused-no-human",
             Self::RefusedNotOwned => "refused-not-owned",
             Self::RefusedNotActive => "refused-not-active",
             Self::Failed => "failed",
@@ -1212,6 +1245,24 @@ mod tests {
         for dir in dirs {
             let _ = fs::remove_dir_all(dir);
         }
+    }
+
+    /// 建家那一步必须把**空的技能区**也建出来（`None` ≠ `Some(0)`）。
+    ///
+    /// 判据：Agent 侧只在 `skills/` 存在时才摆 `skills: 0 项（技能区为空）` 那一行；目录不在，
+    /// 主体看到的是"没有那一行"——于是"没有技能区"与"技能区空着"在主体眼里是同一件事。
+    #[test]
+    fn the_home_gets_an_empty_skills_area_even_with_no_skills() {
+        let home = temp_dir("home-dirs");
+        ensure_home_dirs(&home).expect("建家目录");
+        let skills = home::skills_dir(&home);
+        assert!(skills.is_dir(), "技能区必须建出来：{}", skills.display());
+        assert_eq!(
+            fs::read_dir(&skills).expect("读得回来").count(),
+            0,
+            "刚建出来时一个一级条目都没有——那正是「技能区为空」，不是「没有技能区」"
+        );
+        cleanup(&[&home]);
     }
 
     #[test]

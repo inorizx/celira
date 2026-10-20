@@ -53,30 +53,55 @@ use crate::home_facts;
 use crate::world_channel;
 use crate::world_channel::WorldHttp;
 
-/// 首位 Human 的显示名（`provision.js` 的 `defaultHumanDisplayName`，**逐字同款**）。
+/// 首位 Human 的显示名**由人给**（2026-10-20 主人裁决："必须要填"）。
 ///
-/// 规矩：**取这台机器的用户名**（机器事实 —— 就是"他自己"，不表态关系）；
-/// 取不到 ⇒ 中性占位 `未命名`。⚠ 从前这里是 `主人`：那会把 **IM 里可变的昵称**与
-/// **世界侧的 ownership**（`role='owner'` 是权限事实）压成一个词，而且 Agent 拿到
-/// 这个显示名就会照着叫 —— 等于系统借一个昵称替主体认定了关系（判据 9）。
-pub fn default_human_display_name() -> String {
-    let username = std::env::var("USERNAME").ok();
-    let user = std::env::var("USER").ok();
-    human_display_name_from(username.as_deref(), user.as_deref())
+/// ## 为什么不再取这台机器的用户名
+///
+/// 用户名是**机器事实**，而显示名是**公共事实**（那个世界的 Participant）—— 把机器
+/// 事实写进公共世界就是拿它冒充公共事实，而且它常常不是你（`Administrator` / `user` /
+/// `DESKTOP-8K2LQ`），同机两个人也分不开。判据与 2026-10-12 给 Agent 定的那条是**同一条**：
+/// 显示名是公共呈现，**系统不替谁认定身份**（判据 9）。
+///
+/// ## 三条规则（与 Core 同一套，别在这里发明第二种）
+///
+/// 权威在 `im/server/src/domain/participant.rs` 的 `DisplayName::parse`（契约 4.1）：
+/// 禁 U+0000、至多 **80 个 Unicode scalar value**、trim 后至少一个非空白字符。
+/// 壳这一道**不是**重复劳动：页面与 CLI 都能绕过对方，而壳是唯一同时看得见两者的那一层。
+/// 返回的是**trim 之后**要提交给世界的那份正文（与兑换邀请那条路一致，`invite.ts` 同款）。
+pub fn normalize_human_name(raw: &str) -> Result<String, HumanNameError> {
+    if raw.contains('\u{0}') {
+        return Err(HumanNameError::ContainsNul);
+    }
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(HumanNameError::Empty);
+    }
+    // `chars().count()` 就是 Unicode scalar value 计数（与 Core 那一侧逐字同款）。
+    if trimmed.chars().count() > 80 {
+        return Err(HumanNameError::TooLong);
+    }
+    Ok(trimmed.to_string())
 }
 
-/// 那条规矩的**纯函数形状**（用例直接量它；不碰进程环境）。
-///
-/// 次序与 `provision.js` 同款：`USERNAME`（Windows）优先，`USER`（POSIX）次之，
-/// 两者都空/只有空白 ⇒ 占位。**不做任何关系判断**，也不猜别的字段。
-pub fn human_display_name_from(username: Option<&str>, user: Option<&str>) -> String {
-    for value in [username, user].into_iter().flatten() {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
+/// 名字不合法的三种（封闭表；文案是给页面的一句话，不是给机器判读的词）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HumanNameError {
+    /// trim 之后一个字都不剩。
+    Empty,
+    /// 含 U+0000。
+    ContainsNul,
+    /// 超过 80 个 Unicode scalar value。
+    TooLong,
+}
+
+impl HumanNameError {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Empty => "名字不能是空的 —— 这个世界里别人看到的就是它",
+            Self::ContainsNul => "名字里不能有控制字符（U+0000）",
+            Self::TooLong => "名字最多 80 个字（按字符数，不按字节）",
         }
     }
-    "未命名".to_string()
 }
 
 /// 就绪预算：30 秒（`up.js` 的 `waitHttp(..., 30)`）。
@@ -404,6 +429,9 @@ pub enum SessionOutcome {
         token: String,
         minted_human: bool,
     },
+    /// **这个世界还没有你**（`home.conf` 没有 `human_id`）⇒ 名字得由人给，
+    /// 铸人只走 [`bootstrap_first_human`]。这一支**不**等于失败：它是一个待用户回答的问题。
+    NoHuman,
     /// 世界没在跑（可起 —— 调用方先 [`ensure_world`]）。
     WorldDown,
     /// 缺可执行件。
@@ -421,13 +449,15 @@ pub fn human_id_of(facts: &LocalFacts) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-/// **确保家里有主人，并交一支会话**。
+/// **取一支本机会话**（只读：世界还没铸人时它**不替谁起名**）。
 ///
-/// 顺序（与 `provision.js` 第 1 步逐条对齐）：
-/// 1. 世界答不上 ⇒ [`SessionOutcome::WorldDown`]（**不猜、不动**）；
-/// 2. `home.conf` 有 `human_id` ⇒ `issue-human-session`（补一支，旧的那支仍然有效）；
-/// 3. 没有 ⇒ `bootstrap-human`（**铸首位 Human**，token 只出现这一次）⇒ 把 `human_id`
-///    记进 `home.conf`（唯一允许的写；写法逐字照 `conf.js` 的 `confSet`）。
+/// 顺序：
+/// 1. 缺可执行件 ⇒ [`SessionOutcome::NoCore`]；
+/// 2. 世界答不上 ⇒ [`SessionOutcome::WorldDown`]（**不猜、不动**）；
+/// 3. `home.conf` 没有 `human_id` ⇒ [`SessionOutcome::NoHuman`]（**名字得由人给**，
+///    铸人只走 [`bootstrap_first_human`] —— 2026-10-20 之前这里会顺手铸一个，
+///    而那时的名字是从机器用户名来的）；
+/// 4. 有 ⇒ `issue-human-session`（补一支，旧的那支仍然有效）。
 pub fn local_session(facts: &LocalFacts) -> SessionOutcome {
     if !facts.layout.im_exe.is_file() {
         return SessionOutcome::NoCore;
@@ -435,26 +465,56 @@ pub fn local_session(facts: &LocalFacts) -> SessionOutcome {
     if !probe(&facts.world_base()) {
         return SessionOutcome::WorldDown;
     }
-    if let Some(human_id) = human_id_of(facts) {
-        return match world_channel::issue_human_session(
-            &facts.layout.im_exe,
-            &facts.listen(),
-            &facts.home_dir,
-            &human_id,
-        ) {
-            Ok(token) => SessionOutcome::Ok {
-                human_id,
-                token,
-                minted_human: false,
-            },
-            Err(detail) => SessionOutcome::Failed { detail },
-        };
+    match human_id_of(facts) {
+        Some(human_id) => issue_session_for(facts, human_id),
+        None => SessionOutcome::NoHuman,
     }
+}
+
+/// 补一支会话（已有主人时那两条路共用）。
+fn issue_session_for(facts: &LocalFacts, human_id: String) -> SessionOutcome {
+    match world_channel::issue_human_session(
+        &facts.layout.im_exe,
+        &facts.listen(),
+        &facts.home_dir,
+        &human_id,
+    ) {
+        Ok(token) => SessionOutcome::Ok {
+            human_id,
+            token,
+            minted_human: false,
+        },
+        Err(detail) => SessionOutcome::Failed { detail },
+    }
+}
+
+/// **铸首位 Human**（`bootstrap-human`）—— 名字由人给，**这是唯一的铸人入口**。
+///
+/// 顺序与 [`local_session`] 同一条：缺件 ⇒ `NoCore`；世界没跑 ⇒ `WorldDown`；
+/// 已经有主人 ⇒ 补一支会话（**不铸第二个**，幂等）；名字不合法 ⇒ `Failed`（原因给人看）。
+pub fn bootstrap_first_human(facts: &LocalFacts, raw_name: &str) -> SessionOutcome {
+    if !facts.layout.im_exe.is_file() {
+        return SessionOutcome::NoCore;
+    }
+    if !probe(&facts.world_base()) {
+        return SessionOutcome::WorldDown;
+    }
+    if let Some(human_id) = human_id_of(facts) {
+        return issue_session_for(facts, human_id);
+    }
+    let name = match normalize_human_name(raw_name) {
+        Ok(name) => name,
+        Err(error) => {
+            return SessionOutcome::Failed {
+                detail: error.message().to_string(),
+            }
+        }
+    };
     match world_channel::bootstrap_human(
         &facts.layout.im_exe,
         &facts.listen(),
         &facts.home_dir,
-        &default_human_display_name(),
+        &name,
     ) {
         Ok((human_id, token)) => {
             // 记下来（否则 `home.js` 下次跑会以为还没铸人、再 bootstrap 一次）。
@@ -678,61 +738,95 @@ pub async fn local_world_disable(
 
 /// 交一支**本机会话**（页面用它进自己的世界）。
 ///
-/// 三态如实：拿到 / 世界没在跑 / 失败（原因原样）。**token 只在这一次调用里出现**，
-/// 壳不落盘、不打日志；页面负责把它放到自己的持久面（`prefs`，唯一权威）。
+/// 三态如实：拿到 / 世界没在跑 / **这个世界还没有你**（`no-human`）/ 失败（原因原样）。
+/// **token 只在这一次调用里出现**，壳不落盘、不打日志；页面负责把它放到自己的持久面
+/// （`prefs`，唯一权威）。
+///
+/// ⚠ 它**不铸人**（2026-10-20）：没有主人时回 `no-human`，由页面问出名字再叫
+/// [`local_world_bootstrap`]。从前这里会顺手用一个机器用户名铸一个。
 #[tauri::command]
 pub async fn local_world_session() -> Result<LocalSessionView, String> {
     let view = tauri::async_runtime::spawn_blocking(move || -> LocalSessionView {
         let facts = LocalFacts::load(None, None);
-        match local_session(&facts) {
-            SessionOutcome::Ok {
-                human_id,
-                token,
-                minted_human,
-            } => LocalSessionView {
-                state: "ok".to_string(),
-                address: facts.world_base(),
-                human_id: Some(human_id),
-                token: Some(token),
-                minted_human,
-                detail: None,
-            },
-            SessionOutcome::WorldDown => LocalSessionView {
-                state: "world-down".to_string(),
-                address: facts.world_base(),
-                human_id: human_id_of(&facts),
-                token: None,
-                minted_human: false,
-                detail: None,
-            },
-            SessionOutcome::NoCore => LocalSessionView {
-                state: "no-core".to_string(),
-                address: facts.world_base(),
-                human_id: human_id_of(&facts),
-                token: None,
-                minted_human: false,
-                detail: Some(facts.layout.im_exe.display().to_string()),
-            },
-            SessionOutcome::Failed { detail } => LocalSessionView {
-                state: "failed".to_string(),
-                address: facts.world_base(),
-                human_id: human_id_of(&facts),
-                token: None,
-                minted_human: false,
-                detail: Some(detail),
-            },
-        }
+        session_view(&facts, local_session(&facts))
     })
     .await
     .map_err(|error| format!("壳内部错误：本机会话没能回来（{error}）"))?;
     Ok(view)
 }
 
+/// **给这个世界里第一位 Human 起名并铸人**（名字由人给 —— 2026-10-20 主人裁决）。
+///
+/// 这是唯一的铸人入口；已经有主人时它只是补一支会话（幂等，**不会**改掉已有的名字）。
+/// 名字不合法 ⇒ `Err`（一句话给人看）：页面已经先按同一条判据拦过一次，这里是第二道。
+#[tauri::command]
+pub async fn local_world_bootstrap(display_name: String) -> Result<LocalSessionView, String> {
+    let view = tauri::async_runtime::spawn_blocking(move || -> LocalSessionView {
+        let facts = LocalFacts::load(None, None);
+        session_view(&facts, bootstrap_first_human(&facts, &display_name))
+    })
+    .await
+    .map_err(|error| format!("壳内部错误：铸人那一步没能回来（{error}）"))?;
+    Ok(view)
+}
+
+/// 一次会话结果 ⇒ 页面读数（**唯一**的映射处；两个命令共用）。
+fn session_view(facts: &LocalFacts, outcome: SessionOutcome) -> LocalSessionView {
+    match outcome {
+        SessionOutcome::Ok {
+            human_id,
+            token,
+            minted_human,
+        } => LocalSessionView {
+            state: "ok".to_string(),
+            address: facts.world_base(),
+            human_id: Some(human_id),
+            token: Some(token),
+            minted_human,
+            detail: None,
+        },
+        // **这不是失败**：世界在跑、只是还没有你 ⇒ 页面的下一步是问名字。
+        SessionOutcome::NoHuman => LocalSessionView {
+            state: "no-human".to_string(),
+            address: facts.world_base(),
+            human_id: None,
+            token: None,
+            minted_human: false,
+            detail: None,
+        },
+        SessionOutcome::WorldDown => LocalSessionView {
+            state: "world-down".to_string(),
+            address: facts.world_base(),
+            human_id: human_id_of(facts),
+            token: None,
+            minted_human: false,
+            detail: None,
+        },
+        SessionOutcome::NoCore => LocalSessionView {
+            state: "no-core".to_string(),
+            address: facts.world_base(),
+            human_id: human_id_of(facts),
+            token: None,
+            minted_human: false,
+            detail: Some(facts.layout.im_exe.display().to_string()),
+        },
+        SessionOutcome::Failed { detail } => LocalSessionView {
+            state: "failed".to_string(),
+            address: facts.world_base(),
+            human_id: human_id_of(facts),
+            token: None,
+            minted_human: false,
+            detail: Some(detail),
+        },
+    }
+}
+
 /// 一次会话的回报（**唯一带 token 的形状**；页面用完即存自己的持久面）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalSessionView {
-    /// 封闭词表：`ok` / `world-down` / `no-core` / `failed`。
+    /// 封闭词表：`ok` / `no-human` / `world-down` / `no-core` / `failed`。
+    /// 页面必须**逐值**判：不认识的值一律不当 `ok`（fail-closed）。
     pub state: String,
     pub address: String,
     pub human_id: Option<String>,
@@ -955,38 +1049,79 @@ mod tests {
         assert!(matches!(local_session(&missing), SessionOutcome::NoCore));
     }
 
-    /// 首位 Human 的**默认显示名**：取机器用户名；两个都空才用占位，且**绝不**表态关系
-    /// （与 `provision.js` 的 `defaultHumanDisplayName` 逐字同款 —— 那一条的判据在那边写着）。
+    /// 首位 Human 的显示名**由人给**：三条规则与 Core 同一套（禁 NUL / ≤80 个 scalar /
+    /// trim 后非空），返回的是 trim 之后要提交的正文。**机器用户名不再参与**（2026-10-20）。
     #[test]
-    fn default_human_display_name_is_a_machine_fact_not_a_relationship() {
-        assert_eq!(human_display_name_from(Some("inori"), None), "inori");
-        assert_eq!(human_display_name_from(None, Some("inori")), "inori");
-        assert_eq!(human_display_name_from(Some(" inori "), None), "inori");
+    fn human_name_is_whatever_the_person_types_nothing_from_the_machine() {
+        assert_eq!(normalize_human_name("测试名字").as_deref(), Ok("测试名字"));
         assert_eq!(
-            human_display_name_from(Some("a"), Some("b")),
-            "a",
-            "Windows 那个优先"
+            normalize_human_name("  测试名字  ").as_deref(),
+            Ok("测试名字"),
+            "两头空白由壳削掉（与兑换邀请那条路同款）"
         );
+        assert_eq!(normalize_human_name(""), Err(HumanNameError::Empty));
+        assert_eq!(normalize_human_name("   "), Err(HumanNameError::Empty));
         assert_eq!(
-            human_display_name_from(Some("  "), Some("b")),
-            "b",
-            "空白不算数 ⇒ 落到下一个"
+            normalize_human_name("a\u{0}b"),
+            Err(HumanNameError::ContainsNul)
         );
-        assert_eq!(human_display_name_from(None, None), "未命名");
-        assert_eq!(human_display_name_from(Some(""), Some("")), "未命名");
-        // 反向判据（这一刀的全部理由）：默认值里**不许**出现关系词。
-        for name in [
-            human_display_name_from(None, None),
-            human_display_name_from(Some("x"), None),
-        ] {
-            let lowered = name.to_lowercase();
-            assert!(
-                !lowered.contains("主人")
-                    && !lowered.contains("master")
-                    && !lowered.contains("owner"),
-                "默认显示名不该表态关系：{name}"
-            );
-        }
+        // 80 个 scalar 可以，81 个不行 —— 按**字符**数，不按字节（与 `DisplayName::parse` 同款）。
+        let eighty = "字".repeat(80);
+        assert!(normalize_human_name(&eighty).is_ok());
+        assert_eq!(
+            normalize_human_name(&"字".repeat(81)),
+            Err(HumanNameError::TooLong)
+        );
+        // emoji 是单个 scalar value（JS 那边 `[...s].length` 与它对齐，别写成 `.length`）。
+        assert!(normalize_human_name(&"🐱".repeat(80)).is_ok());
+        assert_eq!(
+            normalize_human_name(&"🐱".repeat(81)),
+            Err(HumanNameError::TooLong)
+        );
+        // 反向判据（这一刀的全部理由）：壳里**不许**再出现"从机器环境造名字"的路
+        // （判据盯的是那两次 `env::var`，不是这两个词出现 —— 注释里提它们不算违规）。
+        let source = include_str!("local_world.rs");
+        assert!(
+            !source.contains("env::var(\"USERNAME\")") && !source.contains("env::var(\"USER\")"),
+            "壳不许再读机器用户名去当显示名"
+        );
+    }
+
+    /// 没有主人 ⇒ 会话那一格回 **`no-human`**（不是失败、也不是 `ok`）：
+    /// 页面据此问名字；壳不替它铸一个。
+    #[test]
+    fn a_world_without_a_human_says_so_and_mints_nobody() {
+        let home = "/home/u/celira-home";
+        let empty = facts(
+            home,
+            conf_with(&[]),
+            PathBuf::from("/repo/target/release/celira-im"),
+        );
+        assert_eq!(human_id_of(&empty), None);
+        // 世界没在跑 ⇒ 先撞 WorldDown（探活那一关），这一条钉的是**顺序**：
+        // 没有主人时也绝不悄悄铸人 —— 铸人只走 `bootstrap_first_human`。
+        let down = facts(
+            home,
+            conf_with(&[("listen_addr", "127.0.0.1:59233")]),
+            std::env::current_exe().expect("current_exe"),
+        );
+        assert!(matches!(local_session(&down), SessionOutcome::WorldDown));
+    }
+
+    /// 会话结果 ⇒ 页面读数：`NoHuman` 必须落成 `no-human`（封闭词表那一格），
+    /// 而且**不带 token、不谎报主人**。
+    #[test]
+    fn no_human_maps_to_the_no_human_word() {
+        let f = facts(
+            "/home/u/celira-home",
+            conf_with(&[]),
+            PathBuf::from("/repo/target/release/celira-im"),
+        );
+        let view = session_view(&f, SessionOutcome::NoHuman);
+        assert_eq!(view.state, "no-human");
+        assert!(view.token.is_none());
+        assert!(view.human_id.is_none());
+        assert!(!view.minted_human);
     }
 
     /// `human_id` 只在**非空**时算数（空值按"还没铸人"，与 `conf.js` 的空串处置对齐）。

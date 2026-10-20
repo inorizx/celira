@@ -55,7 +55,13 @@ export interface LocalWorldReadout {
 
 /** 壳回的一支本机会话（**唯一带 token 的形状**）。 */
 export interface LocalSessionView {
-  /** 封闭词表：`ok` / `world-down` / `no-core` / `failed`。 */
+  /**
+   * 封闭词表：`ok` / `no-human` / `world-down` / `no-core` / `failed`。
+   *
+   * ⚠ `no-human`（2026-10-20）**不是失败**：世界在跑，只是这个世界里还没有你 ⇒
+   * 下一步是**问名字**（[`humanNameProblem`] ＋ [`bootstrapLocalWorld`]），
+   * 而不是把原因摆成一句错误。不认识的值一律**不当 `ok`**（fail-closed）。
+   */
   state: string
   address: string
   humanId: string | null
@@ -135,7 +141,7 @@ export function shouldStartLocalWorld(plan: LocalWorldPlan): boolean {
 /**
  * 一次会话回报该不该采用（纯函数）：**只有 `ok` 且真的有原文**才算数。
  *
- * ⚠ 这不是"防御式编程"：`ok` 而没有原文是一个**读不懂的回执**——静默当成成功，
+ * ⚠ 这不是"防御式编程"：`ok` 而没有原文是一个**读不懂的回执** —— 静默当成成功，
  * 用户会停在一个连不上的世界里，而且没有任何人告诉他为什么。
  */
 export function adoptDecision(session: LocalSessionView | null): {
@@ -146,6 +152,20 @@ export function adoptDecision(session: LocalSessionView | null): {
   if (session.state !== 'ok') return { adopt: false, reason: session.state }
   if (!session.token) return { adopt: false, reason: 'no-token' }
   return { adopt: true, reason: null }
+}
+
+/**
+ * 会话读数**下一步该做什么**（纯函数，首屏定案那两处共用）：
+ *
+ * - `name` —— 这个世界还没有你（`no-human`）⇒ 问名字（2026-10-20）。**不是失败**：
+ *   世界在跑、只是还没有人，所以不摆成错误、也不许顺手编一个名字；
+ * - `adopt` —— 拿到会话（`ok` 且有原文）；
+ * - `stop` —— 其余一律停（含**不认识的值**：封闭词表外的一律不当 `ok`，fail-closed）。
+ */
+export function sessionNextStep(session: LocalSessionView | null): 'name' | 'adopt' | 'stop' {
+  if (!session) return 'stop'
+  if (session.state === 'no-human') return 'name'
+  return adoptDecision(session).adopt ? 'adopt' : 'stop'
 }
 
 /**
@@ -262,7 +282,13 @@ export async function disableLocalWorld(invoke: ShellInvoke | null): Promise<Loc
   }
 }
 
-/** 交一支本机会话（页面手里没有凭据时叫它；拿到就立刻写进 `prefs`，本模块不留副本）。 */
+/**
+ * **交一支本机会话**（页面手里没有凭据时叫它；拿到就立刻写进 `prefs`，本模块不留副本）。
+ *
+ * ⚠ 它**不铸人**（2026-10-20）：这个世界还没有你时回 `no-human`，由页面问出名字再叫
+ * [`bootstrapLocalWorld`]。从前壳会顺手用这台机器的用户名铸一个 —— 那是拿机器事实
+ * 冒充公共事实，而且那个名字通常不是用户自己。
+ */
 export async function mintLocalSession(invoke: ShellInvoke | null): Promise<LocalSessionView | null> {
   if (!invoke) return null
   try {
@@ -270,6 +296,44 @@ export async function mintLocalSession(invoke: ShellInvoke | null): Promise<Loca
   } catch {
     return null
   }
+}
+
+/**
+ * **给这个世界的首位 Human 起名并铸人**（2026-10-20：名字由人给，壳不替谁起名）。
+ *
+ * 已经有主人时它是**幂等**的（补一支会话，不改已有的名字 —— 改名走"我的资料"那条
+ * 状态写，不在这里）。拿不到壳/壳抛错 ⇒ `null`（调用方按"读不到"如实说，不当成功）。
+ */
+export async function bootstrapLocalWorld(
+  invoke: ShellInvoke | null,
+  displayName: string,
+): Promise<LocalSessionView | null> {
+  if (!invoke) return null
+  try {
+    return asSession(await invoke('local_world_bootstrap', { displayName }))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * **名字这一格合不合格**：合格 ⇒ `null`，否则 ⇒ 一句给人看的话。
+ *
+ * 判据与 Core 那一侧**同一套**（`im/server/src/domain/participant.rs` 的
+ * `DisplayName::parse`，契约 4.1），与壳的 `normalize_human_name` 逐条同名：
+ * trim 后非空、禁 U+0000、至多 **80 个 Unicode scalar value**。
+ *
+ * ⚠ 数长度用 `[...s].length`（scalar value），**不是** `s.length`：后者数 UTF-16 单元，
+ * 一个 emoji 记两个 —— 那会与世界的裁决对不上（它会放行 80 个 emoji，我们会先拒）。
+ *
+ * 这一道只为"不让人白等一次往返"；权威仍然是世界那一侧（它才是唯一裁决者）。
+ */
+export function humanNameProblem(raw: string): string | null {
+  if ([...raw].some((ch) => ch === '\u0000')) return '名字里不能有控制字符'
+  const trimmed = raw.trim()
+  if (!trimmed) return '名字不能是空的 —— 这个世界里别人看到的就是它'
+  if ([...trimmed].length > 80) return '名字最多 80 个字（按字符数，不按字节）'
+  return null
 }
 
 /**

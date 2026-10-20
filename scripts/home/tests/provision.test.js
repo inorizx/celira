@@ -1,4 +1,4 @@
-'use strict'
+﻿'use strict'
 // 布置的**可重入**判据（TASK_59）。
 //
 // 这一族为什么值得单独立文件：它是"同机第二个家会把第一个家变成不可启动"那条病的药，
@@ -15,7 +15,13 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { acceptedCreate, obtainBackendCredential, provision, defaultHumanDisplayName } = require('../provision')
+const {
+  acceptedCreate,
+  obtainBackendCredential,
+  provision,
+  humanNameProblem,
+  HUMAN_DISPLAY_NAME_PLACEHOLDER,
+} = require('../provision')
 
 let cases = 0
 function pCase(name, fn) {
@@ -25,26 +31,31 @@ function pCase(name, fn) {
   })
 }
 
-// ── 首位 Human 的默认显示名：**公共呈现，不是关系**（2026-10-03 刀）──────────
+// ── 首位 Human 的显示名：**由人给**（2026-10-20 主人裁决"必须要填"）────────────
 //
-// 判据：显示名是 IM 里可变的昵称，ownership（`role='owner'`）是权限事实 ——
-// 两者不许压成一个词。从前的默认值 `主人` 会让 Agent 照着叫（真机见过
-// "主人你好呀"），那等于**系统借一个昵称替她认定了关系**（判据 9）。
-pCase('默认显示名：取这台机器的用户名；两个都空才用占位，且**绝不**是关系词', () => {
-  assert.equal(defaultHumanDisplayName({ USERNAME: 'inori' }), 'inori')
-  assert.equal(defaultHumanDisplayName({ USER: 'inori' }), 'inori')
-  assert.equal(defaultHumanDisplayName({ USERNAME: ' inori ' }), 'inori', '两侧空白去掉')
-  assert.equal(defaultHumanDisplayName({ USERNAME: 'a', USER: 'b' }), 'a', 'Windows 那个优先')
-  assert.equal(defaultHumanDisplayName({ USERNAME: '  ', USER: 'b' }), 'b', '空白不算数 ⇒ 落到下一个')
-  assert.equal(defaultHumanDisplayName({}), '未命名')
-  assert.equal(defaultHumanDisplayName({ USERNAME: '', USER: '' }), '未命名')
-  // 反向判据：默认值里**不许**出现关系词（这一条是这一刀的全部理由）。
-  for (const env of [{}, { USERNAME: 'x' }]) {
-    assert.ok(
-      !/主人|master|owner/i.test(defaultHumanDisplayName(env)),
-      `默认显示名不该表态关系：${defaultHumanDisplayName(env)}`,
-    )
-  }
+// 判据：显示名是**公共事实**（那个世界的 Participant），用户名是**机器事实** ——
+// 拿机器事实写进公共世界就是冒充公共事实，而且它常常不是你（Administrator / user /
+// DESKTOP-XXXX），同机两个人也分不开。这与 Agent 那条（2026-10-12）是同一条：
+// 系统补能力缺口，**不替谁认定身份**（判据 9）。
+pCase('名字那一格：三条规则与 Core 同一套（禁 NUL / ≤80 个 scalar / trim 后非空）', () => {
+  assert.equal(humanNameProblem('测试名字'), null)
+  assert.equal(humanNameProblem('  测试名字  '), null, '两侧空白由布置削掉')
+  assert.match(humanNameProblem(''), /不能是空的/)
+  assert.match(humanNameProblem('   '), /不能是空的/)
+  assert.match(humanNameProblem('a\u0000b'), /控制字符/)
+  assert.equal(humanNameProblem('字'.repeat(80)), null)
+  assert.match(humanNameProblem('字'.repeat(81)), /80/)
+  // 按 **scalar value** 数，不按 UTF-16 单元：80 个 emoji 合格，81 个不合格。
+  assert.equal(humanNameProblem('🐱'.repeat(80)), null)
+  assert.match(humanNameProblem('🐱'.repeat(81)), /80/)
+  // 占位是"没有名字"的诚实表达，不是默认值。
+  assert.equal(HUMAN_DISPLAY_NAME_PLACEHOLDER, '未命名')
+  // 反向判据（这一刀的全部理由）：**不再有任何从机器环境造名字的路**。
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'provision.js'),
+    'utf8',
+  )
+  assert.ok(!/USERNAME|process\.env\.USER\b/.test(source), '不再读机器用户名当显示名')
 })
 
 /** 造一个假的 `imRequest`：按调用次序返回预置响应，并把收到的参数记下来。 */

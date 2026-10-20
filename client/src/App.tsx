@@ -20,15 +20,18 @@ import { setLocalHomeBase } from '@/api/homes'
 import { fetchHomeConfig, modelSourceAbsent } from '@/api/homeConfig'
 import {
   adoptDecision,
+  bootstrapLocalWorld,
   enableLocalWorld,
   localBaseOf,
   mintLocalSession,
   planLocalWorld,
   readLocalWorld,
+  sessionNextStep,
   shellInvokeOrNull,
   shouldStartLocalWorld,
   disableLocalWorld,
 } from '@/api/shellLocal'
+import { NameYourselfCard } from '@/components/celira/NameYourselfCard'
 import { cn } from '@/lib/utils'
 
 const ChatPage = lazy(() => import('@/pages/ChatPage').then((m) => ({ default: m.ChatPage })))
@@ -191,6 +194,14 @@ interface EntryOutcome {
   /** 第一屏是「这台机器上还没有世界」那一格（§8.6-1 问一次）；其余时候为空。 */
   localAsk?: boolean
   /**
+   * ★ **这个世界还没有你**（2026-10-20）：世界在跑，但没有 `human_id` ⇒ 首屏问名字。
+   *
+   * 与 `localAsk` **分两格**：那一格问的是"要不要在这台机器上开一个世界"（机器级表态），
+   * 这一格问的是"你在这个世界里叫什么"（公共事实）。它们可能接连出现，也可能各自单独出现
+   * （世界早就开着、只是还没铸人）。
+   */
+  needsHumanName?: boolean
+  /**
    * **第一次的路**：本机世界刚被采用，而这台机器上**还没有模型配置** ⇒ 先去配一条。
    *
    * 判据是 `readModelSourceAbsent`（纯函数在 `api/homeConfig.ts`，**两个门**那两份载荷都成立）；
@@ -338,6 +349,9 @@ async function attemptEntry(credentialsFailed: boolean): Promise<EntryOutcome> {
   if (effective.kind === 'enter') {
     // ③ 采用本机条目：先取一支本机会话（壳签、只在内存里过一次），再写进页面的唯一持久面。
     const session = await mintLocalSession(invoke)
+    // ★ **这个世界还没有你**（2026-10-20）⇒ 首屏问名字，拿到名字再叫壳铸人。
+    //   绝不在这里替谁起一个（从前壳会拿机器用户名铸一个 —— 那正是这一刀修掉的东西）。
+    if (sessionNextStep(session) === 'name') return { enter: false, needsHumanName: true }
     const verdict = adoptDecision(session)
     if (!verdict.adopt) {
       // **绝不假装成功**：拿不到会话就把原因摆在那一格上，用户还能选"连别的世界"。
@@ -366,7 +380,9 @@ async function attemptEntry(credentialsFailed: boolean): Promise<EntryOutcome> {
           // ★ **换了世界必须说出来**（静默换世界 = 欺骗）：把上一个世界的地址带出去。
           return { ...second, switchedFrom: failedAddress }
         }
-        if (second.enter || second.localAsk) return second
+        // ⚠ 2026-10-20：`needsHumanName` 也要往上传 —— 它既不是 enter 也不是 localAsk，
+        //   漏了它就会掉进下面那句"回登录页"，而用户其实该看到命名卡（真机撞到过）。
+        if (second.enter || second.localAsk || second.needsHumanName) return second
       }
       useAppStore.getState().setNeedsLogin(true)
       return { enter: false }
@@ -429,14 +445,22 @@ function storePrefsOf() {
  *
  * 三步：叫壳写下表态并确保世界在跑 ⇒ 取一支本机会话 ⇒ 写进 `prefs` 再直连。
  * **任何一步没成都不往下走**：原因原样交回去，由那张卡显示（绝不假装成功）。
+ *
+ * ★ 2026-10-20：世界起来了、但**这个世界还没有你**时，它不编一个名字 —— 交回
+ * `needsHumanName`，由外层切到命名卡（`NameYourselfCard`）。
  */
-export async function startLocalWorld(): Promise<{ ok: boolean; detail: string | null }> {
+export async function startLocalWorld(): Promise<{
+  ok: boolean
+  detail: string | null
+  needsHumanName?: boolean
+}> {
   const invoke = await shellInvokeOrNull()
   const readout = await enableLocalWorld(invoke)
   if (!readout) return { ok: false, detail: null }
   setLocalHomeBase(localBaseOf(readout))
   if (readout.state !== 'running') return { ok: false, detail: readout.detail }
   const session = await mintLocalSession(invoke)
+  if (sessionNextStep(session) === 'name') return { ok: false, detail: null, needsHumanName: true }
   const verdict = adoptDecision(session)
   if (!verdict.adopt) return { ok: false, detail: session?.detail ?? null }
   const store = useAppStore.getState()
@@ -446,6 +470,35 @@ export async function startLocalWorld(): Promise<{ ok: boolean; detail: string |
   if (next.connection !== 'connected') {
     return { ok: false, detail: next.connectionError ?? null }
   }
+  next.setNeedsLogin(false)
+  return { ok: true, detail: null }
+}
+
+/**
+ * 「你在这个世界里叫什么」——命名卡按下去之后走的路（2026-10-20）。
+ *
+ * 三步与 `startLocalWorld` 的后半截是同一条：叫壳**铸人**（`local_world_bootstrap`，
+ * 名字由人给）⇒ 拿回会话 ⇒ 写进 `prefs` 再直连。名字不合法时壳回一句人话（`detail`），
+ * 卡上原样显示；**不**偷偷换一个名字、**不**把失败说成成功。
+ */
+export async function nameLocalHuman(
+  displayName: string,
+): Promise<{ ok: boolean; detail: string | null }> {
+  const invoke = await shellInvokeOrNull()
+  const readout = await readLocalWorld(invoke)
+  if (readout) setLocalHomeBase(localBaseOf(readout))
+  const session = await bootstrapLocalWorld(invoke, displayName)
+  const verdict = adoptDecision(session)
+  if (!verdict.adopt) return { ok: false, detail: session?.detail ?? null }
+  const store = useAppStore.getState()
+  store.setPrefs(
+    'core',
+    session!.token!,
+    normalizeServerUrl(session!.address || readout?.address || ''),
+  )
+  await store.connect()
+  const next = useAppStore.getState()
+  if (next.connection !== 'connected') return { ok: false, detail: next.connectionError ?? null }
   next.setNeedsLogin(false)
   return { ok: true, detail: null }
 }
@@ -464,6 +517,12 @@ function RootLayout() {
   // 「这台机器上还没有世界」那一格（§8.6-1 问一次）：**壳在场且还没表态**时才可能出现。
   // 它是首屏定案的产物、只活在这一次启动里（答复本身落在壳那边 —— 机器级事实，不在浏览器里）。
   const [localAsk, setLocalAsk] = useState(false)
+  /**
+   * 「你在这个世界里叫什么」（2026-10-20）：世界在跑、但没有主人时出现。
+   * 与 `localAsk` 一样是**首屏定案的产物、只活这一次启动** —— 名字本身落在世界那一侧
+   * （`participants.display_name`），答复不在浏览器里。
+   */
+  const [needsName, setNeedsName] = useState(false)
   const [localFailure, setLocalFailure] = useState<string | null>(null)
   /**
    * ★ **换了世界就说出来**（2026-10-08）：值是上一个世界的地址。
@@ -485,6 +544,10 @@ function RootLayout() {
       if (outcome.localAsk) {
         setLocalAsk(true)
         setLocalFailure(outcome.localFailure ?? null)
+        return
+      }
+      if (outcome.needsHumanName) {
+        setNeedsName(true)
         return
       }
       if (!enter || !isEntryPath) return
@@ -525,6 +588,26 @@ function RootLayout() {
   // 深链接（/app/…、/gallery 等）保持各自既有语义，不做拦截——首访者总是从
   // 入口路径进来，而深链接的语义（见得 `FixtureRouteGuard` 与各页面自身）
   // 本来就是「已经决定过连接之后」的路径。
+  if (needsName && isEntryPath) {
+    return (
+      <NameYourselfCard
+        onSubmit={async (displayName) => {
+          const done = await nameLocalHuman(displayName)
+          if (done.ok) {
+            setNeedsName(false)
+            // 落点与入口定案**同一段判定**（`entryLandingTarget`）：刚进自己的世界，
+            // 而它还没有任何模型来源 ⇒ 先去机器页的「模型」那一间。
+            navigate(entryLandingTarget(await readModelSourceAbsent()), { replace: true })
+          }
+          return done
+        }}
+        onConnectElsewhere={async () => {
+          await declineLocalWorld()
+          setNeedsName(false)
+        }}
+      />
+    )
+  }
   if (localAsk && isEntryPath) {
     return (
       <LoginGate
@@ -533,6 +616,12 @@ function RootLayout() {
         onRunLocal={async () => {
           setLocalFailure(null)
           const done = await startLocalWorld()
+          // ★ 世界起来了，但**这个世界还没有你** ⇒ 切到命名卡（不编名字、不当失败）。
+          if (done.needsHumanName) {
+            setLocalAsk(false)
+            setNeedsName(true)
+            return
+          }
           if (!done.ok) {
             // 起不来就说清（**不假装成功**）：卡留在原地，两个出口都还在。
             setLocalFailure(done.detail ?? '世界没能起来——可以再试一次，或去连别的世界。')

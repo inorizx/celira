@@ -362,6 +362,9 @@ pub fn run() {
             local_world::local_world_enable,
             local_world::local_world_disable,
             local_world::local_world_session,
+            // **给这个世界的第一个 Human 起名并铸人**（2026-10-20：名字由人给，
+            // 壳不再从机器用户名造名字 —— 见 `local_world::normalize_human_name`）。
+            local_world::local_world_bootstrap,
             local_services::local_services_readout,
             local_services::local_services_stop,
             local_services::local_quit_behaviour_readout,

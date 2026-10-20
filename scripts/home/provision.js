@@ -68,31 +68,37 @@ const { HUMAN_ENV: HUMAN_TOKEN_ENV } = require('./remote')
 
 const BACKEND_ENV = 'CELIRA_IM_BACKEND_AUTH'
 /**
- * 首位 Human 的**默认显示名**（2026-10-03 改）。
+ * 首位 Human 的显示名：**由人给**（`node home.js up --human-name <名字>`，2026-10-20 主人裁决
+ * "必须要填"）。没给 ⇒ 占位 `未命名`（明确是占位，不是称呼），而且**读数要说出来**。
  *
- * 判据（主人 2026-10-03 原话的意思）：**显示名是公共呈现，不是关系** ——
- * "什么是 im 的名字……关系啊什么的，或者真正的名字，反而是跟随着自己的、自己记忆的那种"。
- * 从前的默认值是 `主人`：它把两件事压成了一个词 —— **IM 里可变的昵称**与**世界侧的
- * ownership**（`role='owner'` 是权限事实）。代价是真机上看得到的：Agent 拿到
- * `display_name=主人` 就照着叫（"主人你好呀"）——**等于系统借一个昵称替她认定了关系**
- * （判据 9：系统补能力缺口，不替认知判断）。
+ * ## 为什么不再取这台机器的用户名
  *
- * 现在的规矩：**取这台机器的用户名**（机器事实，就是"他自己"，不表态关系）；
- * 取不到 ⇒ 中性占位 `未命名`（明确是占位，不是称呼）。
+ * 判据（主人 2026-10-03 原话的意思）：**显示名是公共呈现，不是关系**。用户名是**机器事实**
+ * —— 把它写进公共世界就是拿机器事实冒充公共事实；而且它常常不是你（`Administrator` /
+ * `user` / `DESKTOP-8K2LQ`），同一台机器上两个人也分不开。
  *
- * ⚠ 壳那一侧有同一条规矩的镜像（`app/src-tauri/src/world_channel.rs` 的
- * `default_human_display_name`）——**两处必须逐字同款**（壳也能给一个空家铸首位 Human）。
- * ⚠ 已知缺口（**不自己补**）：Human 的显示名今天**没有任何改的路**（`GET /v1/me` 只读、
- * 呈现切片只写 Agent 资料与群内呈现、operator CLI 无改名动词）⇒ 这一铸就是长久的。
+ * 这与 Agent 那条（2026-10-12）是**同一条**：系统补能力缺口，不替谁认定身份（判据 9）。
+ *
+ * ⚠ 壳那一侧同样的规矩在 `app/src-tauri/src/local_world.rs` 的 `normalize_human_name`
+ * （页面那条路）—— 两处**规则逐条同名**，但壳不再从环境取名字。
+ * ⚠ 改名的路**已经有了**（2026-10-18 切片：只有本人能写自己的 `display_name`，
+ * `CORE_V1_PARTICIPANT_PRESENTATION.md` §4）⇒ 占位与起错都换得掉。
  */
-function defaultHumanDisplayName(env = process.env) {
-  // 逐字镜像 `local_world.rs` 的 `human_display_name_from`：**空白不算数**（继续看下一个），
-  // 两个都空/只有空白 ⇒ 占位。次序：Windows 的 `USERNAME` 优先，POSIX 的 `USER` 次之。
-  for (const candidate of [env?.USERNAME, env?.USER]) {
-    const trimmed = String(candidate ?? '').trim()
-    if (trimmed !== '') return trimmed
-  }
-  return '未命名'
+const HUMAN_DISPLAY_NAME_PLACEHOLDER = '未命名'
+
+/**
+ * 名字这一格合不合格（与 Core 的 `DisplayName::parse` 同一套三条，见契约 4.1）：
+ * 禁 U+0000、至多 80 个 Unicode scalar value、trim 后非空。**权威是世界那一侧** ——
+ * 这一道只为了"失败时说得出为什么"，不是第二个裁决者。
+ *
+ * @returns {string|null} 不合格 ⇒ 一句人话；合格 ⇒ `null`
+ */
+function humanNameProblem(raw) {
+  if ([...String(raw ?? '')].includes('\u0000')) return '名字里不能有控制字符'
+  const trimmed = String(raw ?? '').trim()
+  if (trimmed === '') return '名字不能是空的'
+  if ([...trimmed].length > 80) return '名字最多 80 个字（按字符数，不按字节）'
+  return null
 }
 /**
  * 自建那支 Agent 的**默认显示名**（2026-10-12 改）。
@@ -107,8 +113,9 @@ function defaultHumanDisplayName(env = process.env) {
  *     Owner（表达权见 `CORE_V1_PARTICIPANT_PRESENTATION.md` §4）；
  *   · **没给就是占位**：`未命名`（明确是占位，不是称呼），而且读数要说出来。
  *
- * ⚠ 与 Human 那条的差别：Agent 的显示名**有改的路**（它自己或它的 Owner 都能改）⇒ 占位换得掉；
- * Human 的显示名今天没有任何改的路（见上面那段已知缺口）。
+ * ⚠ 与 Human 那条的差别（2026-10-20 更正）：Human 的显示名**也有改的路**了 ——
+ * 2026-10-18 的切片只允许**本人**写自己的 `display_name`（`CORE_V1_PARTICIPANT_PRESENTATION.md`
+ * §4）⇒ 占位与起错都换得掉，只是从"我的资料"里改。
  */
 const AGENT_DISPLAY_NAME_PLACEHOLDER = '未命名'
 /** 「值班室」是**叫法**（日志与手册里的人话），不是房名：direct 房没有标题（批次二）。 */
@@ -484,6 +491,10 @@ const NEED_HUMAN_TOKEN =
  * @param {string} ctx.listen 本机世界地址的口（本机全量时 `base = http://<listen>`）
  * @param {object} ctx.imEnv 起 core CLI 子命令用的环境（bootstrap-human 那一族）
  * @param {string} ctx.imExe / `ctx.runExe` 可执行件
+ * @param {string|null} [ctx.humanName] 首位 Human 的显示名（`--human-name`）。
+ *   **null = 没给 ⇒ 占位 `未命名`**（明确是占位，不是称呼；系统不替谁起名）。
+ *   ⚠ 从前这里取这台机器的用户名（2026-10-20 撤掉）：那是机器事实，写进公共世界
+ *   就是拿它冒充公共事实 —— 判据与 Agent 那条同一条（显示名是公共呈现，系统不替谁认定身份）。
  * @param {object|null} [ctx.resident] **已有的住户**（`{ agentId, envDir, slot, roomId }`）；
  *   `null` = 这一支还没安家（要认领或自建）
  * @param {string|null} [ctx.adoptAgentId] `--agent <世界里的 id>`（认领）
@@ -522,9 +533,28 @@ async function provision(ctx) {
   } else {
     let humanId = confGet(confFile, 'human_id')
     if (!humanId) {
+      // ★ 名字**由人给**（`--human-name`）；没给就是占位 `未命名`，而且读数要**说出来**
+      //   它是占位。从前这里取这台机器的用户名（2026-10-20 撤掉）—— 那是机器事实。
+      const given =
+        typeof ctx.humanName === 'string' && ctx.humanName.trim() !== ''
+          ? ctx.humanName.trim()
+          : null
+      if (given) {
+        const problem = humanNameProblem(given)
+        if (problem) {
+          return fail(`[布置] 首位 Human 的名字不能用：${problem}（--human-name）`)
+        }
+      }
+      const humanName = given ?? HUMAN_DISPLAY_NAME_PLACEHOLDER
+      if (!given) {
+        console.log(
+          `[布置] 首位 Human 没有给名字（--human-name）⇒ 显示名先用占位「${HUMAN_DISPLAY_NAME_PLACEHOLDER}」` +
+            ' —— 占位不是称呼；名字归你自己，进 app 首屏或「我的资料」里改',
+        )
+      }
       const done = runCliFn(
         imExe,
-        ['bootstrap-human', '--display-name', defaultHumanDisplayName()],
+        ['bootstrap-human', '--display-name', humanName],
         imEnv,
       )
       if (done.code !== 0) {
@@ -856,7 +886,8 @@ module.exports = {
   KEY_NAMES,
   NEED_HUMAN_TOKEN,
   BACKEND_ENV,
-  defaultHumanDisplayName,
+  humanNameProblem,
+  HUMAN_DISPLAY_NAME_PLACEHOLDER,
   AGENT_DISPLAY_NAME_PLACEHOLDER,
   ROOM_NAME,
 }

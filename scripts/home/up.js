@@ -46,6 +46,9 @@ const USAGE = [
     remote.HUMAN_ENV + '）',
   '  --agent-name <名字> = **自建那一支**的名字（只在"这个家还没有住户"那一次有用）。',
   '             不给 ⇒ 显示名是占位 `未命名`：**名字归它自己或它的 Owner**，系统不替它起名',
+  '  --human-name <名字> = **这个世界里你自己的名字**（只在"这个家还没铸首位 Human"那一次有用）。',
+  '             不给 ⇒ 占位 `未命名` 并在读数里说出来：**名字归你自己**，系统不替你起名；',
+  '             进 app 首屏那张卡问的也是它（本地模式第一次）',
 ]
 
 // ---------------------------------------------------------------------------
@@ -60,6 +63,9 @@ function parseUpArgs(argv) {
     // `--agent-name`（2026-10-12）：**自建那一支**的显示名。`null` = 没给 ⇒ 占位 `未命名`
     // （系统不替它起名：显示名是公共呈现，归它自己或它的 Owner）。
     agentName: null,
+    // `--human-name`（2026-10-20）：**这个世界里你自己**的显示名。`null` = 没给 ⇒ 占位
+    // `未命名`（系统不替你起名：机器用户名→公共世界那条路已撤掉）。
+    humanName: null,
     // **远端跑法**（2026-09-30）：`imEndpoint` 是规范化过的世界地址（`null` = 没给 ⇒ 本机全量）；
     // `remoteToken` 是 `--token` **跟的那个值**（主人凭据；`null` = 没跟值）。
     imEndpoint: null,
@@ -136,6 +142,17 @@ function parseUpArgs(argv) {
         return out
       }
       out.agentName = value.trim()
+      index += 1
+    } else if (arg === '--human-name') {
+      // 与 `--agent-name` 同一条纪律：**缺值一律是用法错**，绝不回落成"没给"——
+      // 那会让"人给的名字"悄悄变成占位，而占位与"人起的名"是两件不同的事。
+      const value = argv[index + 1] ?? ''
+      if (!value.trim() || value.trim().startsWith('--')) {
+        out.error =
+          '[home_up] --human-name 要一个显示名（名字归你自己；不给这个旗标就是占位「未命名」）'
+        return out
+      }
+      out.humanName = value.trim()
       index += 1
     } else {
       out.error = `[home_up] 不认识的参数：${arg}`
@@ -792,6 +809,27 @@ function imListenerVerdict({ ledgerPid, listener, proof, hasAgent, port }) {
   }
 }
 
+/**
+ * 家级目录（缺什么补什么）：家根、`im/media`、`agents/`、`materials/`、`materials/skills/`、`logs/`。
+ *
+ * **技能区空着也要建出来**（2026-10-20）：`skills/` 不在场与"在场但空"在主体那边是两件事
+ * （`agent/src/skills_desktop.rs`：`None` 整块不出场，`Some(0)` 说「技能区为空」）。不建它，
+ * "这具身体没有技能区"与"技能区空着"在主体眼里合成一片空白——真机上主体据此答成
+ * "没有可安装的技能"。幂等：重复调用不报错、不动已有内容。
+ */
+function ensureHomeDirs(homeDir) {
+  for (const dir of [
+    homeDir,
+    path.join(homeDir, 'im', 'media'),
+    P.agentsRoot(homeDir),
+    P.materialsRoot(homeDir),
+    P.skillsRoot(homeDir),
+    path.join(homeDir, 'logs'),
+  ]) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
+}
+
 async function up(argv) {
   const options = parseUpArgs(argv)
   if (options.error) {
@@ -808,12 +846,10 @@ async function up(argv) {
   // —— 家目录（缺什么补什么）——
   // ⚠ 这里**不再建 `<家>/env`**：一支一个环境根（`<家>/agents/<支>/`），住户化之后由布置
   // 按需建。老家的 `<家>/env` 是迁移的输入（`residents.migrateHomeShape`），不在这里动它。
-  const materialsDir = path.join(homeDir, 'materials')
+  const materialsDir = P.materialsRoot(homeDir)
   const logDir = path.join(homeDir, 'logs')
   try {
-    for (const dir of [homeDir, path.join(homeDir, 'im', 'media'), P.agentsRoot(homeDir), materialsDir, logDir]) {
-      fs.mkdirSync(dir, { recursive: true })
-    }
+    ensureHomeDirs(homeDir)
   } catch {
     console.log(`[home_up] 家目录写不进去: ${homeDir}`)
     return EXIT.ENV_UNAVAILABLE
@@ -1376,6 +1412,8 @@ async function up(argv) {
       adoptAgentId: target.adoptId,
       // 自建那一支的名字（`--agent-name`）：`null` = 没给 ⇒ 布置用占位 `未命名`。
       agentName: options.agentName,
+      // 这个世界里你自己的名字（`--human-name`，2026-10-20）：`null` = 没给 ⇒ 占位 `未命名`。
+      humanName: options.humanName,
       slot: target.slot,
       agentRunning: agentAtStart.running,
       agentPid: agentAtStart.pid,
@@ -2165,6 +2203,7 @@ module.exports = {
   up,
   parseUpArgs,
   planUpTargets,
+  ensureHomeDirs,
   buildHostArgs,
   terminalNotice,
   migrateTerminalDefault,
