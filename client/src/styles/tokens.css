@@ -1,4 +1,4 @@
-﻿@import 'tailwindcss';
+@import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
@@ -56,36 +56,44 @@
   --code-meta: #6e6983;
 }
 
+/* 夜间（2026-10-20 主人："夜主题不够优雅……会不会是线条什么的"）。
+   两条病都量到了：
+   ① **色系断裂**：中性层是蓝灰（hue≈227°），强调色却是紫（256°），而亮色主题的中性层是紫调
+      （≈250°）⇒ 夜主题不是"把灯关掉"，是换了一套冷色系，于是紫强调像贴上去的；
+   ② **靠线分层**：表面差只有 1.05–1.11（几乎看不见），线却有 1.69（比亮色的 1.35 硬）
+      ⇒ 读起来是"一整块平面 ＋ 一堆 1px 线"，像仪表盘。
+   改法：中性层回到紫族（251–256°）、表面差抬到 1.14–1.15、线降到 1.44 —— 结构由**表面**说，
+   线只做收边。（对比度不变：正文 15.0、次要 6.5、主按钮上的字 6.3。） */
 .dark {
-  --background: #191b22;
-  --foreground: #e9eaef;
-  --card: #20222b;
-  --card-foreground: #e9eaef;
-  --popover: #24262f;
-  --popover-foreground: #e9eaef;
+  --background: #15131c;
+  --foreground: #e9e7f0;
+  --card: #221f30;
+  --card-foreground: #e9e7f0;
+  --popover: #282438;
+  --popover-foreground: #e9e7f0;
   --primary: #a284f4;
   --primary-foreground: #14131c;
-  --secondary: #282a33;
-  --secondary-foreground: #d7d9e0;
-  --muted: #22242c;
-  --muted-foreground: #9a95ac;
-  --accent: #2b2d37;
+  --secondary: #292537;
+  --secondary-foreground: #d9d5e4;
+  --muted: #231f31;
+  --muted-foreground: #9c96ad;
+  --accent: #2f2a44;
   --accent-foreground: #c5b8f5;
   --destructive: #ef6b6b;
   --destructive-foreground: #14131c;
-  --border: #3e414b;
-  --input: #585b6e;
+  --border: #352f45;
+  --input: #524c66;
   --ring: #a284f4;
   --overlay: #00000080;
 
   --brand: #a284f4;
   --agent: #6ec6ff;
-  --agent-surface: #1d2b33;
+  --agent-surface: #1f2c34;
   --bubble-self-from: #7f6fe0;
   --bubble-self-to: #9a86ec;
   --bubble-self-foreground: #14131c;
-  --bubble-peer: #262832;
-  --bubble-peer-foreground: #e9eaef;
+  --bubble-peer: #282433;
+  --bubble-peer-foreground: #e9e7f0;
   --presence-online: #7bd88f;
   --presence-thinking: #6ec6ff;
   --presence-silent: #797390;

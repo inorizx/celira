@@ -92,9 +92,12 @@ export function AppShell() {
             下组「家」之间用分隔线呈现分区（设计系统「导航壳」）。
             ⚠ 标记**不在这里**了（2026-10-17）：标题栏已经有品牌，导航栏再放一枚
             就是同一个东西画两遍 ✗（网易云那种形状也是品牌只在标题栏）。 */}
+        {/* 轨道与聊天区**同一族表面**（`bg-background`），只有会话列表是 `bg-card`：
+            少一处靠 1px 线分层的地方，多一处靠表面 —— 暗色下那几条竖线是最像"仪表盘"的东西
+            （判据与量出来的数在 `tokens.css` 的 `.dark` 注释里）。 */}
         <nav
           aria-label="主导航"
-          className="hidden w-14 shrink-0 flex-col items-center gap-2 border-r border-border bg-card py-3 md:flex"
+          className="hidden w-14 shrink-0 flex-col items-center gap-2 border-r border-border bg-background py-3 md:flex"
         >
         {groups.map((group, groupIndex) => (
           <div
