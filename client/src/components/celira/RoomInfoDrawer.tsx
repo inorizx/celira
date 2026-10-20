@@ -20,8 +20,8 @@ import { getApi, useAppStore, useConnection, useRoomMessages } from '@/api/store
 import { supportsMemberPresentations } from '@/api/uiPolicy'
 import { roomActionErrorText } from '@/api/contractErrors'
 import { MemberAvatar } from './MemberAvatar'
-import { isOnline, isTyping, liveHeadline } from '@/api/roomLive'
-import { groupHeadline, memberRoll, membersWithSelf, peerPresence, presenceLabel, selfMember } from '@/api/roomHeadline'
+import { isOnline, isTyping } from '@/api/roomLive'
+import { membersWithSelf, roomHeadline, selfMember } from '@/api/roomHeadline'
 import { AgentBadge } from './AgentBadge'
 import { OfficialBadge } from './OfficialBadge'
 import { FileRow } from './FileRow'
@@ -118,13 +118,19 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
       : null,
   )
   const authoritativeMembers = coreMembers != null && coreMembers.length > 0
-  const roll = memberRoll(allMembers, self, authoritativeMembers)
-  // 1:1（`direct` / `human_direct`）：人数三连不承载信息（那间房只有你和对方），只报对端状态。
-  const isOneToOne = room.kind === 'direct' || room.kind === 'human_direct'
   // 主体进行态（在不在 / 正在写）：**易失投影**，只用于成员行上那个点与
   // 那三个字。判据走唯一裁决面 `api/roomLive.ts`（人与 Agent 同形）。
   const live = useAppStore((s) => s.roomLiveByRoom[room.id])
-  const onlineCount = liveHeadline(live, selfId).onlineCount
+  // 标题下那句话与 `ChatHeader` **同一句**：唯一裁决面在 `api/roomHeadline.ts`。
+  // 分解（几个 Agent / 几个人）不进句子 —— 它的家就是下面的成员列表
+  // （「Agent — N」「Human — N」两组，每行一枚徽标）。
+  const headline = roomHeadline({
+    kind: room.kind,
+    members: allMembers,
+    self,
+    authoritative: authoritativeMembers,
+    snapshot: live,
+  })
   const agents = allMembers.filter((m) => m.kind === 'agent')
   const humans = allMembers.filter((m) => m.kind === 'human')
   const presentationById = new Map(
@@ -189,10 +195,8 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
       <SheetContent className="flex w-80 flex-col gap-0 p-0">
         <SheetHeader className="border-b border-border px-5 py-4 text-left">
           <SheetTitle className="text-title">{room.name}</SheetTitle>
-          <SheetDescription className="text-caption" data-room-roll={isOneToOne ? 'one-to-one' : 'group'}>
-            {isOneToOne
-              ? presenceLabel(peerPresence(live, room.peer?.id))
-              : groupHeadline(roll, onlineCount)}
+          <SheetDescription className="text-caption">
+            {headline}
           </SheetDescription>
           <div className="mt-2 flex gap-1 rounded-lg bg-muted p-1">
             {tabs.map((t) => (

@@ -3,7 +3,7 @@ import { ArrowLeft, Phone, Search, Users, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { roomMemberViews } from '@/api/roomMembers'
 import { liveHeadline } from '@/api/roomLive'
-import { groupHeadline, memberRoll, peerPresence, presenceLabel, selfMember } from '@/api/roomHeadline'
+import { roomHeadline, selfMember } from '@/api/roomHeadline'
 import { callEntryFor } from '@/api/uiPolicy'
 import type { Participant, Room } from '@/api/domain'
 import { useAppStore } from '@/api/store'
@@ -40,18 +40,23 @@ export function ChatHeader({
   // 不是"在线"；拿它冒充在线会让每个活着的成员永远亮绿点。旧实现这里第三条来源用
   // `getParticipant`（查不到就抛）——收口后解析不出的人是**跳过**，异常不再有机会进渲染路径。
   const members: Participant[] = roomMemberViews({ core: coreMembers, room })
-  // 成员读数**只从这一处算**（`api/roomHeadline.ts`：人数含我、在线不含我、读不到≠没有）。
+  // 那一行的措辞**只从这一处来**（`api/roomHeadline.ts` 是唯一裁决面：人数含我、在线不含我、
+  // 读不到≠没有；2026-10-20 起不再把"含你/不含你"与 Human/Agent 计数印到句子里）。
   // ⚠ 从前这里自己数一遍 `members.length / human / agent`，而成员来源在"世界的成员表"与
   // "房间自带的对端"之间切换 ⇒ 同一间 1:1 房会先显示「1 位参与者 · 0 Human · 1 Agent」、
   // 加载后又显示「2 位参与者 · 1 Human · 1 Agent」（2026-10-14 真机读数）。
   const authoritativeMembers = coreMembers != null && coreMembers.length > 0
-  const roll = memberRoll(members, selfMember(me), authoritativeMembers)
-  // 1:1（`direct` / `human_direct`）：人数三连不承载信息（那间房只有你和对方），只报对端状态。
-  const isOneToOne = room.kind === 'direct' || room.kind === 'human_direct'
+  const headline = roomHeadline({
+    kind: room.kind,
+    members,
+    self: selfMember(me),
+    authoritative: authoritativeMembers,
+    snapshot: live,
+  })
 
   // 进行态的两个派生读数走**唯一裁决面**（`api/roomLive.ts`，有 `node --test`
   // 直测）：不含自己——自己的在线/进行态对自己没有信息量。
-  const { onlineCount, typingNames } = liveHeadline(live, myId)
+  const { typingNames } = liveHeadline(live, myId)
 
   const showCallHint = (kind: Exclude<CallHint, null>) => {
     setCallHint(kind)
@@ -93,14 +98,12 @@ export function ChatHeader({
         className="min-w-0 cursor-pointer rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted"
       >
         <div className="truncate text-title">{room.name}</div>
-        {/* 头部报**静态参与者统计** + **主体进行态**两件事，仅此而已：
-            谁在线（连接在不在）、谁正在写。执行过程（在调工具 / 草稿写了
-            什么）不进 IM——那是执行端的事，判据见 `client/DESIGN_SYSTEM.md`
-            「导航壳」那条第一性原理与 2026-09-28 主人裁决。 */}
-        <div className="text-caption text-muted-foreground" data-room-roll={isOneToOne ? 'one-to-one' : 'group'}>
-          {isOneToOne
-            ? presenceLabel(peerPresence(live, room.peer?.id))
-            : groupHeadline(roll, onlineCount)}
+        {/* 头部报**"还有谁、能不能找到人"**这一件事，仅此而已：谁在线（连接在不在）、
+            谁正在写。执行过程（在调工具 / 草稿写了什么）不进 IM——那是执行端的事，判据见
+            `client/DESIGN_SYSTEM.md`「导航壳」那条第一性原理与 2026-09-28 主人裁决。
+            ⚠ 2026-10-20 起这一行**不报账**（见 `api/roomHeadline.ts` 文件头）。 */}
+        <div className="text-caption text-muted-foreground">
+          {headline}
         </div>
         {typingNames.length > 0 && (
           <div className="truncate text-caption text-muted-foreground" role="status">
