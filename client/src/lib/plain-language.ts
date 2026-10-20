@@ -134,16 +134,23 @@ export function originLabel(origin: string | null | undefined): string | null {
 }
 
 /**
- * 「Agent 在不在本机」那一格（`agentAgentMatch` 的三态；前端填肉刀 2026-09-23）。
+ * 「它在哪台机器上」那一格（`agentAgentMatch` 的三态；前端填肉刀 2026-09-23）。
+ *
+ * ⚠ **这一格只答住址**（2026-10-20 修）：从前它写「在本机运行 / 未接入 / 状态未知」——
+ * 前两句把**住址**与**在不在跑**说成一件事，而"在不在跑"另有其格（`api/agentHealth.ts`
+ * 那一句，唯一权威）。真机上撞到过一行：`机器没在跑 · 上次：完成` 紧挨着绿的
+ * 「在本机运行」—— 两个相反的答案并排，谁也不知道该信哪一句。
+ * ⇒ 现在它只说"在哪台机器上"：**一个词只答一件事**（远程那台的写法是
+ * 「在<机器名>上」，在 `api/agentRowStatus.ts` 里拼 —— 它得点名）。
  *
  * ⚠ **三态不许压成两态**（判据的来历见 `api/homeStatus.ts` 的 `agentAgentMatch`）：
- * `different` 是"读数里那个 id 是**别人**" ⇒ 可以说「未接入」；而 `unknown` 是
- * "这一格**读不到**"（环境根记录读不出来、或口子版本旧）⇒ 它只能说「状态未知」。
- * **把 `unknown` 说成「未接入」，就是把读不到说成一个事实** —— 这一格的全部意义
+ * `different` 是"读数里那个 id 是**别人**" ⇒ 「不在这台机器上」；而 `unknown` 是
+ * "这一格**读不到**"（环境根记录读不出来、或口子版本旧）⇒ 「不知道在哪台机器上」。
+ * **把 `unknown` 说成「不在这台」，就是把读不到说成一个事实** —— 这一格的全部意义
  * 就在于这两件事在页面上长得不一样。
  */
 export function machineMatchLabel(match: 'same' | 'different' | 'unknown'): string {
-  if (match === 'same') return '在本机运行'
-  if (match === 'different') return '未接入'
-  return '状态未知'
+  if (match === 'same') return '在这台机器上'
+  if (match === 'different') return '不在这台机器上'
+  return '不知道在哪台机器上'
 }

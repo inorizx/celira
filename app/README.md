@@ -562,8 +562,10 @@ cargo run --example local_world_drill -- session   # 交一支会话（需要时
   跨站 `Origin` ⇒ **403**、同源 `Origin` ⇒ 200、体 64 KiB+1 ⇒ **400 Bad Request（读得到的拒绝）**、
   `GET /home-binding` ⇒ 405 ＋ `allow: PUT`（按路由给）。
 - **端到端**（把两道门的真载荷喂给**客户端自己的读取层**）：`isHomeStatusView → true`、
-  `isHomeConfigView → true`、`agentAgentMatch → same`；三格 = 「在本机运行」／「未指定」／
+  `isHomeConfigView → true`、`agentAgentMatch → same`；三格 = 「在这台机器上」／「未指定」／
   「2026/10/4 14:44:02（推算）」；并断言载荷里**没有** `api_key` / 任何 `sk-` 取值。
+  ⚠ 2026-10-20：住址那一格从「在本机运行」改成「在这台机器上」（`api/agentRowStatus.ts`
+  的 T2：「在不在跑」只归机器那一句，住址那一格只答住址）。
 
 **同一刀撞出并修掉的权威 bug**（`host_status_parse.js`）：真实输出里**未收尾的活动没有
 `outcome=`**（`run=… state=unfinished`），而那一版的正则要求它 ⇒ **账本里只要有一条未收尾活动，

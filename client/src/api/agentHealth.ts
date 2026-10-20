@@ -1,5 +1,5 @@
 /**
- * 「这一支 Agent 现在正常吗」——**机器侧那一句人话**（2026-10-06）。
+ * 「这一支 Agent 现在正常吗」——**机器侧那一句人话**（2026-10-06；2026-10-20 修主语）。
  *
  * ## 它治的是什么
  *
@@ -11,15 +11,23 @@
  *
  * | 这一句 | 意思 |
  * |---|---|
- * | `机器在跑 · 上次：完成` | 正常 |
- * | `机器在跑 · 上次：未回复` | 正常 —— **主体选择不回**（沉默是一等终态，不是故障） |
- * | `机器在跑 · 上次：没正常结束` | 出过事；**为什么**在「运行」那一页的「活动」房间 |
- * | `机器没在跑 · …` | 那台机器上没有它的进程 |
+ * | `它正在跑 · 上次：完成` | 正常 |
+ * | `它正在跑 · 上次：未回复` | 正常 —— **主体选择不回**（沉默是一等终态，不是故障） |
+ * | `它正在跑 · 上次：没正常结束` | 出过事；**为什么**在「运行」那一页的「活动」房间 |
+ * | `它现在没在跑（…上没有它的进程） · …` | 那台机器上没有它的进程 |
  * | `机器这一面读不到` | 这一格没有读数（**不是**"没在跑"） |
+ *
+ * ⚠ **2026-10-20 修那两个主语的错**（真机撞到的一行：`机器没在跑 · 上次：完成`
+ * 紧挨着绿的「在本机运行」—— 一句说"没在跑"、一句说"在跑"，两个相反的答案并排）：
+ *
+ * - **这一句的主语是它**，不是宿主进程：说的是"**它**现在有没有在跑"，宿主进程只是
+ *   这件事的来路（`hostStateOf` 那四态没变，短标签 `hostStateLabel` 也没变）；
+ * - **"在跑"这个词只归这一句**：住址那一格（`machineMatchLabel`）只说"在哪台机器上"，
+ *   不再借"运行"两个字 —— 一个词只答一件事，两格才不会互相打脸。
  *
  * ## 三条纪律
  *
- * 1. **两个平面不许互相冒充**：这里的「机器在跑」是**执行端**的事实（宿主进程在不在），
+ * 1. **两个平面不许互相冒充**：这里的「它正在跑」是**执行端**的事实（宿主进程在不在），
  *    与 IM 里那个「在线」（连接派生的易失投影）**不是一件事** —— 页面把它们分开摆，
  *    这一层只讲前者；而家侧读数**不进世界**（它不上 im 服务端，也不进任何公共事实）；
  * 2. **粗粒度**：系统收场的**分类**（`credential-rejected` / `transport-failure` …）不上这一句
@@ -54,13 +62,21 @@ export interface AgentHealth {
  *
  * `view` 为 `null` = **这一份读数这次没读到**（家条目读失败 ／ 加载中 ／ 认领不到）——
  * 与"读到了、但那一格没有"是两件事，两者在这一层各有各的说法。
+ *
+ * `machine` 只是**那句话里点谁的名**（缺省「这台机器」）：认领到远程那一台时，
+ * "这台机器上没有它的进程"是句假话 —— 那里的事实是"**那台**上没有它的进程"。
+ * ⚠ 它**不改判据**，只改主语的名字（长短可以两样，事实只能一处）。
  */
-export function agentHealthReadout(view: HomeStatusView | null): AgentHealth {
+export function agentHealthReadout(
+  view: HomeStatusView | null,
+  opts: { machine?: string } = {},
+): AgentHealth {
   if (view === null) return { tone: 'muted', text: '机器这一面读不到' }
   const cached = view.stale ? '（缓存）' : ''
+  const where = opts.machine ?? '这台机器'
   return {
     tone: toneOf(view),
-    text: `${cached}${machinePart(view)} · ${ledgerPart(view)}`,
+    text: `${cached}${machinePart(view, where)} · ${ledgerPart(view)}`,
   }
 }
 
@@ -80,11 +96,14 @@ export function agentHealthFromHomes(input: {
     // ★ **认领靠住户清单**（第 2 支起，2026-10-08）：住址对（这台机器确实跑着它），
     // 但顶层那几格是**第一支**的 ⇒ 这一句**不许**拿它算（那会说出"另一支的账本很健康"
     // 而这一行是这一支）。如实说这一支的读数这里读不到。
-    return { tone: 'muted', text: '在本机 · 这一支的运行读数不在这一份里' }
+    // ⚠ 2026-10-20：这一句从前写「在本机 · 这一支的运行读数不在这一份里」—— 住址与
+    //    "没有它的账本"混在一格，而「读数」是内行词（`scripts/jargon.mjs` 会红）。
+    //    住址那一格另有其格（`machineMatchLabel`），这一句只说"它的记录不在这儿"。
+    return { tone: 'muted', text: '这一支的记录不在这一份里（这一份只有第一支的）' }
   }
   if (resolution.kind === 'claimed' || resolution.kind === 'unknown-id') {
     // `unknown-id`（读数没报它是谁）照旧显示那台机器的读数 —— 与三格同一条口径。
-    return agentHealthReadout(resolution.view)
+    return agentHealthReadout(resolution.view, { machine: machineOf(resolution.entry) })
   }
   if (resolution.kind === 'elsewhere') {
     // ⚠ **带作用域**（2026-10-11）：`elsewhere` 说的是"**读得到的**执行端都没有报它在跑"，
@@ -118,7 +137,9 @@ export function agentHealthForClaimedMachine(input: {
   const { resolution } = input
   if (resolution === null || resolution.kind !== 'claimed') return null
   if (!resolution.ownReadings) return null
-  return agentHealthReadout(resolution.view)
+  // ⚠ 2026-10-20：这一句的**正文**与列表那一行逐字相同 ⇒ 那一句里点了哪台机器的名，
+  // 这一页也得点同一台（否则同一句话在两个页面上说两个机器）。
+  return agentHealthReadout(resolution.view, { machine: machineOf(resolution.entry) })
 }
 
 /**
@@ -140,13 +161,31 @@ export function hostStateLabel(host: HomeStatusHost | undefined | null): string 
   }
 }
 
-/** 机器那一半：**宿主进程在不在跑**（`host` 缺那一格 ⇒ 读不到，不说"没在跑"）。 */
-function machinePart(view: HomeStatusView): string {
+/**
+ * 那个条目在句子里的写法（本机那条不写它的名字 —— 它叫「本机」，拼进句子会变成
+ * 「本机这台机器…」；与 `agentMachine.ts` 的 `entryLabel` 同一口径）。
+ */
+function machineOf(entry: { local: boolean; name: string }): string {
+  return entry.local ? '这台机器' : entry.name
+}
+
+/**
+ * 机器那一半：**它现在有没有在跑**（`host` 缺那一格 ⇒ 读不到，不说"没在跑"）。
+ *
+ * ⚠ **2026-10-20 修主语**：从前这三句是「机器在跑 / 机器没在跑 / 机器在不在读不到」——
+ * 主语是**宿主进程**，而这一行问的是**它**。同一屏上「机器没在跑」与「在本机运行」
+ * （住址那一格）并排时，读起来就是两个相反的答案（真机撞到的那一行）。
+ * ⇒ 主语换成"它"，"在不在跑"这件事只说一次；住址那一格不再借"运行"两个字。
+ *
+ * `where` 是按认领到的那台机器点名（远程那台不许说"这台机器"）。
+ */
+function machinePart(view: HomeStatusView, where: string): string {
   const state = hostStateOf(view.host)
-  if (state === 'running') return '机器在跑'
-  if (state === 'running-orphan') return '机器在跑（不是这次开机起的）'
-  if (state === 'stopped') return '机器没在跑'
-  return '机器在不在读不到'
+  // 短标签（`hostStateLabel`）与这三句**同一个来源**：长短可以两样，事实只能一处。
+  if (state === 'running') return '它正在跑'
+  if (state === 'running-orphan') return '它正在跑（不是这次开机起的）'
+  if (state === 'stopped') return `它现在没在跑（${where}上没有它的进程）`
+  return '它现在跑没跑读不到'
 }
 
 /** 账本那一半：**该不该出手**优先于"上次结局"（准入那一格说的是"现在能不能开始新活动"）。 */

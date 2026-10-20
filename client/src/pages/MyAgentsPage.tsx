@@ -22,11 +22,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { scrollToAnchor } from '@/lib/anchorScroll'
-import type { OwnedAgent, Participant } from '@/api/domain'
+import type { OwnedAgent } from '@/api/domain'
 import type { BackendBindingView, CredentialView, ProfileView } from '@/api/contracts'
 import { getApi, useAppStore, useConnection } from '@/api/store'
 import { credentialsOf } from '@/api/credentials'
 import { bindingsOf } from '@/api/agentBindings'
+import { AGENT_REVOKED_CONSEQUENCE, shouldShowAgentAdmin } from '@/api/agentRevoked'
 import { agentRevokeErrorText, errorText } from '@/api/contractErrors'
 import {
   supportsAgentBindings,
@@ -217,10 +218,12 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
     : fallbackSelectedId || (agentList[0]?.id ?? '')
   // ⚠ 主页模式下**不许回落**到"列表里第一个" —— 认不出地址里那个 Agent 时，页面必须说"没有这个 Agent"，
   //    拿别的 Agent 说成 Agent 是这一刀要治的病（"运行状态代表谁"）。
-  // ⚠ 类型显式写成 `Participant | null`：这个 tsconfig 没开 `noUncheckedIndexedAccess`，
-  //    不写的话 `agentList[0] ?? null` 会被推成非空 —— 那个"非空"是假的（列表空时它确实是
-  //    undefined），下面的空判也就会被 TS 当成死代码而**失去 narrowing**。
-  const agent: Participant | null = homeMode
+  // ⚠ 类型显式写成 `OwnedAgent | null`（2026-10-20 起）：这一页要读 `revoked` 那一格
+  //    （T3：已撤销的 Agent 不渲染管理面），而 `Participant` 上没有它。
+  //    这个 tsconfig 没开 `noUncheckedIndexedAccess`，不写的话 `agentList[0] ?? null` 会被推成
+  //    非空 —— 那个"非空"是假的（列表空时它确实是 undefined），下面的空判也就会被 TS
+  //    当成死代码而**失去 narrowing**。
+  const agent: OwnedAgent | null = homeMode
     ? (agentList.find((a) => a.id === participantId) ?? null)
     : (agentList.find((a) => a.id === selectedId) ?? agentList[0] ?? null)
   // 绑定读数走唯一权威：旧写法是 `bindingsByAgent[agent.id] ?? []` —— 键缺失（还没加载 /
@@ -307,7 +310,9 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
     // ⚠ 从前这里对列表模式也返回占位页 ⇒ 那颗按钮**永远渲染不出来**（骨架刀留下的死代码；
     //    填肉时才发现：空账号连列表页都到不了，只能靠页头那颗「＋ 添加」）。
     if (!homeMode && !loading && !failed) {
-      return <AgentsListPanel agents={agentList} onOpen={openAgent} />
+      // `agentsKnown`：走到这里说明清单**已经落定且没读失败** ⇒ 空列表就是"真的一支都没有"
+      // （三步清单的第二步据此判；读不到的另两支在下面那两个 else 里，不挂这块面板）。
+      return <AgentsListPanel agents={agentList} agentsKnown onOpen={openAgent} />
     }
     // 主页模式下"找不到它"必须**明说没有这个 Agent**，绝不留在这儿等一个永不出现的它，
     // 更不许拿列表里第一个顶上去（那正是"页面说不清它说的是谁"）。
@@ -347,6 +352,54 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
                 </Button>
               </>
             )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  /**
+   * ★ **已撤销的 Agent 不该有一张"可操作"的页**（2026-10-20 T3）。
+   *
+   * 撤销是**软撤销**：那一支仍留在所有权清单里（历史与房间成员记录不硬删），于是
+   * 深链接 `/app/agents/<已撤销 id>` 从前进来的是一张**完整的管理台** —— 接入、签发 /
+   * 轮换凭证、接到机器上、选模型、撤销 Agent 全都在，而它们**一件也做不成**（世界那一侧
+   * 早已不接受它）。列表那一行从 2026-09-29 起就只说后果了 ⇒ 两页对同一件事给出两个答案。
+   *
+   * 判据只有一条：**撤销之后还剩什么能改？** 什么都改不了。所以这一页剩下的**不是**
+   * "管理台的只读版"，而是**页头 ＋ 那一句后果 ＋ 一个返回**（那句与列表**同一个常量**，
+   * 见 `api/agentRevoked.ts`）。判据本身是纯函数，有用例。
+   *
+   * ⚠ **只对"这一支那一页"成立**（`homeMode`）：列表模式下 `agent` 也会被算出来
+   * （`agentList[0]` 那个兜底）—— 少了这个门，**列表页会被换成一页"已撤销"**（第一支
+   * 刚好是撤销的那支时，`/app/agents` 就不再有列表与「添加」）。这一条是真机撞出来的形状。
+   */
+  if (homeMode && !shouldShowAgentAdmin(agent)) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-4 md:px-6">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate('/app/agents')}
+            aria-label="返回我的 Agent"
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
+          <ParticipantAvatar participant={agent} size="sm" />
+          <span className="text-title">{agent.displayName} 的主页</span>
+          <AgentBadge />
+        </div>
+        <div className="flex flex-1 items-center justify-center px-6 py-10">
+          <div className="max-w-md space-y-3 text-center">
+            <p className="text-body text-destructive">{AGENT_REVOKED_CONSEQUENCE}</p>
+            <p className="text-caption text-muted-foreground">
+              这一页上原来能做的事（接入、凭证、接到机器上、选模型）都随撤销一起失效了 ——
+              所以这里不再显示它们。
+            </p>
+            <Button variant="outline" size="sm" onClick={() => navigate('/app/agents')}>
+              回到我的 Agent
+            </Button>
           </div>
         </div>
       </div>
@@ -1177,12 +1230,31 @@ function AgentMachine({ agentId }: { agentId: string }) {
                     </DropdownMenu>
                   </div>
                 )}
+                {/* ★ **"还没有配好的钥匙"这句必须带一个能走的出口**（2026-10-20 T1 ⑤）。
+                    从前它是两句**指路的话**（"去那台机器的「模型」那一间配一条"），
+                    没有可点的东西 —— 读到"缺什么"却走不到能补它的地方（诊断句没有下一步
+                    与死胡同同族，与列表行 `ModelSourceExit` 那条判据是同一件事）。
+                    目的地与那个出口**同一个**：这台机器的「模型」那一间（`#model`）；
+                    文案也不新造词 —— 按钮上就是列表行那一句「去配模型源」。 */}
                 {configView.entries.length === 0 && (
-                  <p className="text-caption text-muted-foreground">
-                    {homed
-                      ? '这台机器上还没有配好的钥匙 —— 去那台机器的「模型」那一间配一条。'
-                      : '这台机器上还没有配好的钥匙 —— 先去「模型」那一间配一条，再回来选。'}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-caption text-muted-foreground">
+                      {homed
+                        ? '这台机器上还没有配好的钥匙。'
+                        : '这台机器上还没有配好的钥匙 —— 先配一条，回来就能选。'}
+                    </p>
+                    {modelEntry !== null && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => navigate(`/app/runtimes/${modelEntry.id}#model`)}
+                      >
+                        <Server className="size-3.5" aria-hidden />
+                        去配模型源
+                      </Button>
+                    )}
+                  </div>
                 )}
                 <p className="text-micro text-muted-foreground">
                   {!homed ? (

@@ -196,7 +196,12 @@ async function waitForAgentHomeText(page) {
       text.includes(AGENT_HOME_UNREACHABLE_TITLE) ||
       (text.includes('运行') && text.includes('当前状态')) ||
       text.includes('没有这个 Agent') ||
-      text.includes('未接入')
+      // ★ 2026-10-20：这里从前认的是「未接入」—— 那是 `agentMachineReadout` **2026-10-11 之前**
+      // 的措辞（现在那一档是带作用域的「能读到的执行端都没有报它在跑」）⇒ 这一格早就恒不命中。
+      // 现在认「机器」那一段的四态里**说得出话**的那三句（住址 / 说不准 / 都没报它）。
+      text.includes('它住在') ||
+      text.includes('没报上上面跑的是谁') ||
+      text.includes('能读到的执行端')
     if (settled) return text
     const transient = text.includes('正在读取') || text.includes('正在准备连接')
     // 别的形状（不是这一页 / 抛错了）立刻返回，交给断言把原文报出来。
@@ -599,42 +604,54 @@ try {
   await goto(`${args.base}/app/agents`, '我的 Agent 列表')
   await page.waitForTimeout(4500)
   const listText = await page.locator('body').innerText()
-  // 三格 = 在线（`agentAgentMatch` 三态之一）＋ 模型 ＋ 最近活动。
-  // ⚠ 这一条**不许等一个具体取值**：状态口没开时那三格本来就说「未知」/「—」，
+  // 住址那一格（`machineMatchLabel` 三态）＋ 模型 ＋ 最近活动。
+  // ⚠ 这一条**不许等一个具体取值**：状态口没开时那几格本来就说「不知道」/「未知」，
   //    而那是**终态**、不是加载中（判据在 `api/agentRowStatus.ts`，有离线用例）。
-  //    所以这里判的是"三格在不在"，并把**实际读到的**在线那一格打进 detail（真实读数）。
-  const ONLINE_LABELS = ['在本机运行', '未接入', '状态未知']
+  //    所以这里判的是"那几格在不在"，并把**实际读到的**住址打进 detail（真实读数）。
+  // ★ 2026-10-20（T2 ②）：住址那一格从「在本机运行 / 未接入 / 状态未知」改成
+  //    「在这台机器上 / 不在这台机器上 / 不知道在哪台机器上」—— 它**只答住址**，
+  //    "在不在跑"只归机器那一句（同一行两个答案不许并排）。⚠ 顺序有讲究：
+  //    `不在这台机器上` 里含着 `在这台机器上` 六个字，所以更长的写法必须排在前面
+  //    （`find` 取第一个命中的）。
+  const ONLINE_LABELS = ['不在这台机器上', '不知道在哪台机器上', '在这台机器上']
   const onlineSeen = ONLINE_LABELS.find((label) => listText.includes(label)) ?? ''
+  // ★ 2026-10-20（T2 ④）：一份读数都没读回来时，那一行**收成一句**（原因 ＋ 出口），
+  //    不再并列四个"不知道"。两种形状都合法 —— 这一条判的是"读数那一段摆得出来"。
+  const collapsed = listText.includes('读不到它现在怎么样')
   check(
-    '列表行三格渲染：在线（三态之一）+ 模型 + 最近活动',
-    onlineSeen !== '' && listText.includes('模型：') && listText.includes('最近活动：'),
-    `在线那一格=「${onlineSeen}」· ${snippet(listText, 200)}`,
+    '列表行读数：住址（三态之一）+ 模型 + 最近活动（或四格同因收成一句 ＋ 出口）',
+    collapsed
+      ? listText.includes('去我的执行端')
+      : onlineSeen !== '' && listText.includes('模型：') && listText.includes('最近活动：'),
+    collapsed
+      ? `四格同因 ⇒ 收成一句 · ${snippet(listText, 200)}`
+      : `住址那一格=「${onlineSeen}」· ${snippet(listText, 200)}`,
   )
   check(
     '★ 最近活动那一格不把原始行摆出来（`run=…` / `drives=…` 不许上屏）',
     !listText.includes('run=') && !listText.includes('drives='),
     snippet(listText, 200),
   )
-  // 机器侧那一句（2026-10-06 加）：**宿主进程在不在跑 ＋ 上次怎么样**。
+  // 机器侧那一句（2026-10-06 加）：**它现在有没有在跑 ＋ 上次怎么样**。
   // 判据与文案在 `api/agentHealth.ts`（纯函数 ＋ 离线用例），这里只判"它在不在屏上"。
   // ⚠ 不许等一个具体取值（状态口没开时那一句本来就说「读不到」，而那是终态）。
   //
   // ⚠ **2026-10-10 补前提**：这一句**只对"这台机器承载的那支"有对象**——临时世界里那几支
-  // Agent 若一支都不由本机承载（读数如实是「未接入 —— 这台机器上跑的是别的 Agent」），
-  // 那一句**本来就不该出现** ⇒ 这时按本文件头那条纪律报**不适用**，不是红。
-  // 判据：屏上有没有**至少一行**是 claimed（`agentRowStatus` 给 claimed 的在线那一格就是
-  // 「在本机运行」）。实测过这个形状：本机没承载时它红过一轮，而当时那一行读数是对的。
-  const machinePremise = listText.includes('在本机运行')
+  // Agent 若一支都不由本机承载，那一句**本来就不该出现** ⇒ 这时按本文件头那条纪律报
+  // **不适用**，不是红。判据：屏上有没有**至少一行**是 claimed（住址那一格说「在这台机器上」）。
+  // ★ 2026-10-20（T2 ①）：那一句的四档改成"主语是**它**"（`它正在跑` / `它现在没在跑（…）` /
+  //    `它现在跑没跑读不到`）—— 从前的主语是宿主进程，与住址那一格并排就是两个相反的答案。
+  const machinePremise = listText.includes('在这台机器上')
   check(
-    '列表行有机器侧那一句：机器在不在跑 ＋ 上次怎么样',
+    '列表行有机器侧那一句：它现在有没有在跑 ＋ 上次怎么样',
     machinePremise
-      ? ['机器在跑', '机器没在跑', '机器在不在读不到', '机器这一面读不到'].some((s) =>
+      ? ['它正在跑', '它现在没在跑', '它现在跑没跑读不到', '机器这一面读不到'].some((s) =>
           listText.includes(s),
         )
       : null,
     machinePremise
       ? snippet(listText, 200)
-      : `这一轮没验：这台机器一支都没承载（屏上没有「在本机运行」）⇒ 那一句本来就没有对象 · ${snippet(listText, 160)}`,
+      : `这一轮没验：这台机器一支都没承载（屏上没有「在这台机器上」）⇒ 那一句本来就没有对象 · ${snippet(listText, 160)}`,
   )
   check(
     '★ 机器那一格不把口子的原始取值摆出来（`running` / `stopped` / `pid` 不许上屏）',
@@ -661,6 +678,28 @@ try {
       createText.includes('创建后它不会回复 —— 还没有模型，也没有机器在跑它') &&
       createInputs >= 1,
     `输入框=${createInputs} · ${snippet(createText, 200)}`,
+  )
+  // ★ **2026-10-20（T1 ①③）：创建面板顶部是「三步清单」** —— 模型源 / 建一支 / 接上一台机器。
+  // 目标句：新账号 + 一台空机器，从 `/app/agents` 出发、不查文档，就能看见"还差哪一步、各去哪"。
+  // 判据两条：① 三步的名字与 ✓/✗ 在场；② **缺模型源那一步自带出口**（不是只印一句"它不会回话"）。
+  // ⚠ 前提：模型那一格读得到（判据在 `api/firstRun.ts`：**读不到不摆**）——门没开就报不适用。
+  const configDoorOpen = await page.evaluate(async () => {
+    try {
+      const res = await fetch('/home-config')
+      return res.ok
+    } catch {
+      return false
+    }
+  })
+  check(
+    '★ 创建面板顶部：三步清单（模型源 / 建一支 / 接上一台机器）＋ 缺模型源那一步带出口',
+    configDoorOpen
+      ? ['模型源', '建一支', '接上一台机器', '✓', '✗'].every((word) => createText.includes(word)) &&
+          createText.includes('去配模型源')
+      : null,
+    configDoorOpen
+      ? snippet(createText, 260)
+      : '⚠ 不适用：本机模型配置门没开（/home-config 不通）⇒ 那一格读不到，清单整块不该摆',
   )
   const localOption = page.locator('button', { hasText: '只创建本地' })
   const localDisabled = await localOption.isDisabled().catch(() => false)
@@ -806,10 +845,10 @@ try {
   const machineClaimsThisAgent = gateOpen && agentAgentIdOnMachine === agentIdInUrl
   check(
     machineClaimsThisAgent
-      ? 'Agent 主页「机器」那一段：住址 ＋ 机器在不在跑 ＋ 上次怎么样'
+      ? 'Agent 主页「机器」那一段：住址 ＋ 它现在有没有在跑 ＋ 上次怎么样'
       : 'Agent 主页「机器」那一段：说不准是哪台时，不给别台的账本读数（负对照）',
     machineClaimsThisAgent
-      ? ['机器在跑', '机器没在跑', '机器在不在读不到', '机器这一面读不到'].some((s) =>
+      ? ['它正在跑', '它现在没在跑', '它现在跑没跑读不到', '机器这一面读不到'].some((s) =>
           machineSection.includes(s),
         )
       : !machineSection.includes('上次：'),
@@ -2576,7 +2615,18 @@ try {
           ...(i || {}),
           headers: { ...((i && i.headers) || {}), Authorization: `Bearer ${token}` },
         })
-        return { status: res.status, body: res.ok ? await res.json() : null }
+        // ⚠ 2026-10-20（T3 那一刀撞上）：`204 No Content` **是成功响应、但没有 JSON 正文**
+        // ⇒ `res.ok` 为真时也不能无脑 `res.json()`（那一句会抛 `Unexpected end of JSON input`，
+        // 整支门禁崩在半路）。这一格的用途只是"拿状态码 ＋ 可能有的正文"（撤销那条只要状态码）。
+        let body = null
+        if (res.ok) {
+          try {
+            body = await res.json()
+          } catch {
+            body = null
+          }
+        }
+        return { status: res.status, body }
       },
       [path, init || null, args.token],
     )
@@ -2782,6 +2832,71 @@ try {
         snippet(afterMention, 160),
       )
       await page.keyboard.press('Escape')
+    }
+  }
+
+  // ---- ★ T3（2026-10-20）：已撤销的 Agent 深链不再是一张"可操作"的页 ----
+  //
+  // 目标：深链 `/app/agents/<已撤销 id>` 只渲染**页头 ＋ 那句后果 ＋ 返回**，接入 / 凭证 /
+  // 撤销 / 接上 / 模型**一件都不许渲染**（它们一件也做不成：世界那一侧早已不接受它）。
+  // 造法全程走**公开协议**（`POST /v1/agents` ＋ `DELETE /v1/agents/<id>`）—— 不改库、不塞数据。
+  // ⚠ 这一块放在**所有 Agent 主页断言之后**：它会在世界里多一支（已撤销的）Agent，
+  //   排在前面的话后面那些"点列表第一个进主页"的断言就会点进那一支。
+  {
+    const created = await apiJson('/v1/agents', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'Idempotency-Key': `probe-revoked-${Date.now()}`,
+      },
+      body: JSON.stringify({ display_name: '探针已撤销' }),
+    })
+    const revokedId = created.body && created.body.agent ? created.body.agent.id : null
+    const revoked = revokedId ? await apiJson(`/v1/agents/${revokedId}`, { method: 'DELETE' }) : null
+    const revokedOk =
+      revoked !== null && (revoked.status === 200 || revoked.status === 204 || revoked.status === 202)
+    if (!revokedId || !revokedOk) {
+      check(
+        '★ T3：已撤销 Agent 的深链只说后果 ＋ 返回',
+        null,
+        `⚠ 这一轮没验：造不出一支已撤销的 Agent（建=${created.status} · 撤=${revoked ? revoked.status : '—'}）`,
+      )
+    } else {
+      await goto(`${args.base}/app/agents/${revokedId}`, '已撤销 Agent 的深链')
+      await page.waitForTimeout(2500)
+      const revokedText = await page.locator('body').innerText()
+      // 那五样**管理面**一件都不许在（逐条点名：这几句就是"可操作的页"的形状）。
+      const leakedSurface = [
+        '签发凭证',
+        '轮换凭证',
+        '撤销 Agent',
+        '接到这台机器上',
+        '它用哪一条模型',
+      ].filter((phrase) => revokedText.includes(phrase))
+      check(
+        '★ T3：已撤销 Agent 的深链只说后果 ＋ 返回（接入 / 凭证 / 撤销 / 接上 / 模型一件都不渲染）',
+        revokedText.includes('已撤销 —— 不再接收事件，房间成员关系与凭证一并作废') &&
+          revokedText.includes('回到我的 Agent') &&
+          leakedSurface.length === 0,
+        leakedSurface.length
+          ? `不该出现的还在：${JSON.stringify(leakedSurface)} · ${snippet(revokedText, 200)}`
+          : snippet(revokedText, 200),
+      )
+      // ★ **列表页不许被那一页顶掉**（2026-10-20 真机撞出来的形状）：列表模式下 `agent` 也会
+      // 被算出来（`agentList[0]` 那个兜底）⇒ 少了 `homeMode` 那道门，`/app/agents` 会变成
+      // 一页"已撤销"，列表与「添加」一起消失（**世界多一支已撤销的 Agent 就会踩到**）。
+      await goto(`${args.base}/app/agents`, '已撤销之后回列表页')
+      await page.waitForTimeout(2500)
+      const listAfterRevoke = await page.locator('body').innerText()
+      const rowsAfterRevoke = await page.getByRole('button', { name: /^打开 .* 的主页$/ }).count()
+      check(
+        '★ T3：世界里有一支已撤销的 Agent 之后，/app/agents 仍然是**列表**（有那句清单说明 ＋ 行 ＋ 添加）',
+        listAfterRevoke.includes('这份清单拼两件事') &&
+          listAfterRevoke.includes('添加') &&
+          rowsAfterRevoke >= 1 &&
+          listAfterRevoke.includes('已撤销 —— 不再接收事件，房间成员关系与凭证一并作废'),
+        `行=${rowsAfterRevoke} · ${snippet(listAfterRevoke, 220)}`,
+      )
     }
   }
 

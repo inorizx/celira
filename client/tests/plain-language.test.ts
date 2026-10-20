@@ -102,11 +102,19 @@ test('「接下来」那一行：待命说"当前空闲"，其余如实描述（
   assert.equal(nextLabel(null), '——')
 })
 
-test('★ 「Agent 在不在本机」：三态各有话，且 `unknown` **不冒充**「未接入」', () => {
-  // 前端填肉刀（2026-09-23）：列表行在线那一格用它。
-  assert.equal(machineMatchLabel('same'), '在本机运行')
-  assert.equal(machineMatchLabel('different'), '未接入')
-  assert.equal(machineMatchLabel('unknown'), '状态未知')
-  // 这一条是这一格的**全部意义**：读不到 ≠ Agent 在这台机器上没跑。
+test('★ 「它在哪台机器上」：三态各有话，且 `unknown` **不冒充**「不在这台」', () => {
+  // 前端填肉刀（2026-09-23）：列表行住址那一格用它。
+  // ⚠ 2026-10-20（T2 ②）：这一格**只答住址** —— 从前是「在本机运行 / 未接入 / 状态未知」，
+  //    而"在不在跑"另有其格（`api/agentHealth.ts` 那一句）。一个词答两件事，就会在真机上
+  //    并出两个相反的答案（`机器没在跑 · 上次：完成` ＋ 绿的「在本机运行」）。
+  assert.equal(machineMatchLabel('same'), '在这台机器上')
+  assert.equal(machineMatchLabel('different'), '不在这台机器上')
+  assert.equal(machineMatchLabel('unknown'), '不知道在哪台机器上')
+  // 这一条是这一格的**全部意义**：读不到 ≠ 它不在这台机器上。
   assert.notEqual(machineMatchLabel('unknown'), machineMatchLabel('different'))
+  // "在不在跑"这两个字一个都不许回到这一格（那是健康那一句的活）。
+  for (const match of ['same', 'different', 'unknown'] as const) {
+    assert.ok(!machineMatchLabel(match).includes('运行'), `住址那一格又说"运行"了：${machineMatchLabel(match)}`)
+    assert.ok(!machineMatchLabel(match).includes('未接入'), `「未接入」又回来了：${machineMatchLabel(match)}`)
+  }
 })

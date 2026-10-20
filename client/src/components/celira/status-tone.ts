@@ -40,3 +40,19 @@ export const READOUT_TONE_TEXT: Record<AgentHealthTone, string> = {
   bad: 'text-presence-failed',
   muted: 'text-muted-foreground',
 }
+
+/**
+ * **那一句话的圆点**（2026-10-20 T2 ③）：四档 → 点的颜色。
+ *
+ * 为什么现在才需要它：「我的 Agent」那一行从前有**两个点** —— 住址那一格一颗
+ * （绿=本机 / 灰=别人 / 空心=读不到），机器那一句没有点。于是"机器没在跑"（黄字）
+ * 旁边挂着一颗**绿的、说住址**的点，读起来就是"它在跑"（真机撞到的那一行）。
+ * ⇒ 判据：**一行只许一个状态点，它只说"在不在跑 / 正不正常"**（`AgentHealthTone`），
+ * 住址那一格变纯文本。颜色只许来自 `tokens.css`（`check-tokens.mjs` 守着）。
+ */
+export const READOUT_TONE_DOT: Record<AgentHealthTone, string> = {
+  ok: 'bg-presence-online',
+  warn: 'bg-presence-timeout',
+  bad: 'bg-destructive',
+  muted: 'bg-muted-foreground',
+}

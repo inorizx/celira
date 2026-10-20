@@ -1,7 +1,7 @@
 // 「我的 Agent」列表那三格状态的纯逻辑测试（前端填肉刀，2026-09-23）。
 //
 // 最要紧的两条判据（都是踩出来的，不许压成一个）：
-//  ① **`unknown` 不许说成「未接入」** —— 那是"把读不到说成一个事实"；
+//  ① **`unknown` 不许说成「不在这台机器上」** —— 那是"把读不到说成一个事实"；
 //  ② **`lastWake` 是原始行、不是时间串** —— 直接把那一行交给时间格式化会得到 `—`，
 //    时间只能从活动标识里还原，且必须说清它从哪来。
 //
@@ -9,12 +9,16 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   agentRowStatus,
   agentRowStatusFromHomes,
   lastWakeReadout,
   machineSituation,
+  rowSameCauseLine,
 } from '../src/api/agentRowStatus.ts'
+import { agentHealthFromHomes } from '../src/api/agentHealth.ts'
 import { localHomeEntry, resolveAgentHome, type HomeEntry, type HomeReading } from '../src/api/homes.ts'
 import type { HomeStatusView } from '../src/api/homeStatus.ts'
 import type { HomeConfigView } from '../src/api/homeConfig.ts'
@@ -64,32 +68,32 @@ const CONFIG: HomeConfigView = {
 
 // ── 一、在线那一格：三态 ────────────────────────────────────────────────
 
-test('在线：读数里的 id 就是我正在看的 Agent ⇒ 「在本机运行」（绿）', () => {
+test('在线：读数里的 id 就是我正在看的 Agent ⇒ 「在这台机器上」（绿）', () => {
   const row = agentRowStatus({ view: STATUS, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '在本机运行')
+  assert.equal(row.onlineLabel, '在这台机器上')
   assert.equal(row.onlineTone, 'local')
 })
 
-test('在线：读数是**别人** ⇒ 「未接入」（灰，不是错误）', () => {
+test('在线：读数是**别人** ⇒ 「不在这台机器上」（灰，不是错误）', () => {
   const row = agentRowStatus({ view: STATUS, config: CONFIG, agentId: 'agent-9' })
-  assert.equal(row.onlineLabel, '未接入')
+  assert.equal(row.onlineLabel, '不在这台机器上')
   assert.equal(row.onlineTone, 'away')
 })
 
-test('★ 在线：读数里**没有 id** ⇒ 「状态未知」，**绝不冒充「未接入」**', () => {
+test('★ 在线：读数里**没有 id** ⇒ 「不知道在哪台机器上」，**绝不冒充「不在这台机器上」**', () => {
   const noId: HomeStatusView = { ...STATUS, agent: { ...STATUS.agent, agentId: undefined } }
   const row = agentRowStatus({ view: noId, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '状态未知')
+  assert.equal(row.onlineLabel, '不知道在哪台机器上')
   assert.equal(row.onlineTone, 'unknown')
-  assert.notEqual(row.onlineLabel, '未接入', '读不到 ≠ Agent 不在这台机器上')
+  assert.notEqual(row.onlineLabel, '不在这台机器上', '读不到 ≠ Agent 不在这台机器上')
   // 反方向：我不知道"我是谁"时同样是未知，不许说成别人在跑。
   const alsoUnknown = agentRowStatus({ view: STATUS, config: CONFIG, agentId: '' })
-  assert.equal(alsoUnknown.onlineLabel, '状态未知')
+  assert.equal(alsoUnknown.onlineLabel, '不知道在哪台机器上')
 })
 
-test('在线：整份读数没读到 ⇒ 「状态未知」（与"是别人"分开）', () => {
+test('在线：整份读数没读到 ⇒ 「不知道在哪台机器上」（与"是别人"分开）', () => {
   const row = agentRowStatus({ view: null, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '状态未知')
+  assert.equal(row.onlineLabel, '不知道在哪台机器上')
   assert.equal(row.onlineTone, 'unknown')
 })
 
@@ -218,18 +222,18 @@ test('最近活动：还一次都没醒过 / 标识解不出时间 / 读数没�
 
 test('三格各自独立：读数只有一份时，另外那格如实说未知、有读数的那格照说', () => {
   const onlyStatus = agentRowStatus({ view: STATUS, config: null, agentId: 'agent-7' })
-  assert.equal(onlyStatus.onlineLabel, '在本机运行')
+  assert.equal(onlyStatus.onlineLabel, '在这台机器上')
   assert.equal(onlyStatus.modelLabel, '模型：未知')
   assert.ok(!onlyStatus.activityLabel.includes('未知'))
 
   const onlyConfig = agentRowStatus({ view: null, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(onlyConfig.onlineLabel, '状态未知')
+  assert.equal(onlyConfig.onlineLabel, '不知道在哪台机器上')
   assert.equal(onlyConfig.modelLabel, '模型：主钥匙', '状态口读不到不该把模型那一格一起塌掉')
 
   const nothing = agentRowStatus({ view: null, config: null, agentId: 'agent-7' })
   assert.deepEqual(
     [nothing.onlineLabel, nothing.modelLabel, nothing.activityLabel],
-    ['状态未知', '模型：未知', '最近活动：未知'],
+    ['不知道在哪台机器上', '模型：未知', '最近活动：未知'],
   )
 })
 
@@ -465,11 +469,11 @@ test('★ 机器行·三条来路分开：零住户（缺省）/ 老形态 / 有
 // 判据分两半：靠认领结果选标签的那一半（claimed 的本机/远程、unknown-id、elsewhere、
 // unreachable、null），以及**模型那一格不许被状态那一格连累**那一半。
 
-test('行·认领 claimed（本机）：绿点说「在本机运行」，模型用那台机器的读数', () => {
+test('行·认领 claimed（本机）：绿点说「在这台机器上」，模型用那台机器的读数', () => {
   const local = localHomeEntry()
   const resolution = resolveAgentHome([reading(local, STATUS)], 'agent-7')
   const row = agentRowStatusFromHomes({ resolution, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '在本机运行')
+  assert.equal(row.onlineLabel, '在这台机器上')
   assert.equal(row.onlineTone, 'local')
   assert.equal(row.modelLabel, '模型：主钥匙', '有绑定时显示的是那台机器上**绑定的名字**')
 })
@@ -477,7 +481,7 @@ test('行·认领 claimed（本机）：绿点说「在本机运行」，模型�
 test('★ 行·认领 claimed（远程）：**不许说"本机"** —— 住址是它的名字', () => {
   const resolution = resolveAgentHome([reading(REMOTE, STATUS)], 'agent-7')
   const row = agentRowStatusFromHomes({ resolution, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '在书房那台上运行')
+  assert.equal(row.onlineLabel, '在书房那台上')
   assert.ok(!row.onlineLabel.includes('本机'), row.onlineLabel)
 })
 
@@ -499,7 +503,7 @@ test('★ 行·第 2 支（认领靠住户清单）：在线照旧绿，但**活
   assert.equal(resolution.kind, 'claimed')
   assert.equal(resolution.kind === 'claimed' ? resolution.ownReadings : null, false, '认领靠清单那一档')
   const row = agentRowStatusFromHomes({ resolution, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '在本机 · 它的宿主没在跑', '它**自己**那一项里的宿主读数说了算')
+  assert.equal(row.onlineLabel, '在这台机器上 · 它的宿主没在跑', '它**自己**那一项里的宿主读数说了算')
   assert.equal(row.onlineTone, 'local')
   assert.equal(row.modelLabel, '模型：主钥匙', '模型那一格是那台机器的读数，照旧给')
   assert.ok(row.activityLabel.includes('读不到'), row.activityLabel)
@@ -511,14 +515,14 @@ test('行·认领 unknown-id：状态那格说未知，**模型照旧显示**（
   const resolution = resolveAgentHome([reading(localHomeEntry(), noId)], 'agent-7')
   assert.equal(resolution.kind, 'unknown-id')
   const row = agentRowStatusFromHomes({ resolution, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '状态未知')
+  assert.equal(row.onlineLabel, '不知道在哪台机器上')
   assert.equal(row.modelLabel, '模型：主钥匙')
 })
 
 test('★ 行·认领 elsewhere：那些读数**不是 Agent**的 ⇒ 别台的 config 塞进来也不许上这一行', () => {
   const resolution = resolveAgentHome([reading(localHomeEntry(), STATUS)], 'agent-9')
   const row = agentRowStatusFromHomes({ resolution, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '未接入')
+  assert.equal(row.onlineLabel, '不在这台机器上')
   assert.equal(row.modelLabel, '模型：未知', '认领到别人名下时，模型那一格不许拿别台的来顶')
 })
 
@@ -535,7 +539,7 @@ test('★ 行·认领 unreachable：状态塌成未知，**模型那一格不跟
   // 新判据：`mindEntryFor` 挑出的那一条（只配了一个家 ⇒ 没有歧义）算出来的 config
   // 必须**照旧上这一行**（旧实现这里硬写 `config: null`，把它丢掉了）。
   const row = agentRowStatusFromHomes({ resolution, config: CONFIG, agentId: 'agent-7' })
-  assert.equal(row.onlineLabel, '状态未知', '状态口读不到 ⇒ 状态那格如实说未知')
+  assert.equal(row.onlineLabel, '不知道在哪台机器上', '状态口读不到 ⇒ 状态那格如实说未知')
   assert.equal(row.modelLabel, '模型：主钥匙', '状态口读不到不该把模型那一格一起塌掉')
   assert.equal(row.activityLabel, '最近活动：未知')
 })
@@ -544,6 +548,76 @@ test('行·条目还没就绪（resolution = null）：三格全未知，不猜'
   const row = agentRowStatusFromHomes({ resolution: null, config: CONFIG, agentId: 'agent-7' })
   assert.deepEqual(
     [row.onlineLabel, row.modelLabel, row.activityLabel],
-    ['状态未知', '模型：未知', '最近活动：未知'],
+    ['不知道在哪台机器上', '模型：未知', '最近活动：未知'],
+  )
+})
+
+// ── 七、★ 组合断言（T2）：同一行不可能并出两个相反的答案 ──────────────────
+//
+// 真机撞到的那一行：`机器没在跑 · 上次：完成` **紧挨着**绿的「在本机运行」。当时两个用例
+// **各断一半**（一个只断健康那句、一个只断住址那格）⇒ 两条都绿，而屏幕上两个答案相反。
+// 这一条把两半放进**同一行输出**里断：一行里"在不在跑"只说一次，且不可能同真。
+test('★ 组合：同一行里不可能既说"它正在跑"又说"它现在没在跑"（且住址不再借"运行"）', () => {
+  for (const host of ['running', 'running-orphan', 'stopped', 'starting'] as const) {
+    const resolution = resolveAgentHome(
+      [reading(localHomeEntry(), { ...STATUS, host: { state: host } })],
+      'agent-7',
+    )
+    const row = agentRowStatusFromHomes({ resolution, config: CONFIG, agentId: 'agent-7' })
+    const health = agentHealthFromHomes({ resolution })
+    // 一行 = 机器那一句 ＋ 三格（页面就是把它们并排渲染的）。
+    const line = [health.text, row.onlineLabel, row.modelLabel, row.activityLabel].join(' · ')
+    const saysRunning = line.includes('它正在跑')
+    const saysStopped = line.includes('它现在没在跑')
+    assert.ok(!(saysRunning && saysStopped), `这一行同时说了两个相反的答案：${line}`)
+    assert.equal(saysRunning, host === 'running' || host === 'running-orphan', line)
+    assert.equal(saysStopped, host === 'stopped', line)
+    // 住址那一格只说住址：不借「运行」，也不说「未接入」。
+    assert.ok(!row.onlineLabel.includes('运行'), `住址那一格又说"运行"了：${row.onlineLabel}`)
+    assert.ok(!row.onlineLabel.includes('未接入'), `「未接入」又回来了：${row.onlineLabel}`)
+    // 旧主语一个都不许回来。
+    assert.ok(!line.includes('机器在跑') && !line.includes('机器没在跑'), `宿主那套主语又回来了：${line}`)
+  }
+})
+
+// ── 八、四格同因 ⇒ 收成一句（T2 ④）────────────────────────────────────
+//
+// 一份读数都没读回来时，那一行从前并列四句"不知道"（机器这一面读不到 / 不知道在哪台机器上 /
+// 模型：未知 / 最近活动：未知）—— 四个词、一个原因。判据在 `rowSameCauseLine`：
+// **模型那一格也没读到 ＋ 状态那一面是 `unreachable`** 才收（两条缺一条都不收）。
+test('★ 四格同因：一份读数都没读回来 ⇒ 一句原因 ＋ 出口（不再并列四个"不知道"）', () => {
+  const resolution = resolveAgentHome([reading(localHomeEntry(), null, '没连上本机服务')], 'agent-7')
+  const same = rowSameCauseLine({ resolution, config: null })
+  assert.ok(same, '读不到那一档必须收成一句')
+  assert.deepEqual(same, { text: '读不到它现在怎么样（没连上本机服务）。', exit: 'machines' })
+})
+
+test('四格同因：只要有一格读到了，就不收（不许把真读数藏起来）', () => {
+  const resolution = resolveAgentHome([reading(localHomeEntry(), null, '没连上本机服务')], 'agent-7')
+  // 模型那一格读到了 ⇒ 这一行有真事实可说。
+  assert.equal(rowSameCauseLine({ resolution, config: CONFIG }), null)
+  // 状态那一面有一份读数（别人 / 说不准）⇒ 也各有各的话，不收。
+  const elsewhere = resolveAgentHome([reading(localHomeEntry(), STATUS)], 'agent-9')
+  assert.equal(rowSameCauseLine({ resolution: elsewhere, config: null }), null)
+  // "正在读"不是"读不到" —— 拿一段延迟说成一个事实是同族的错。
+  assert.equal(rowSameCauseLine({ resolution: null, config: null }), null)
+})
+
+// ── 九、源级守卫：一行只许一个状态点（T2 ③）──────────────────────────────
+//
+// 这一条量不到像素，量得到**形状**：住址那一格从前自带一颗点（`TONE_DOT` ＋ `onlineTone`），
+// 于是"没在跑（黄字）"旁边挂着绿点。现在圆点只跟 `agentHealth` 的色档走，住址是纯文本 ——
+// 判据：面板里**没有**旧的 `TONE_DOT` 表，且唯一那颗点用的是 `READOUT_TONE_DOT`。
+test('★ 源级：一行只有一个状态点，且它只跟"在不在跑"的色档走', () => {
+  const panel = readFileSync(
+    fileURLToPath(new URL('../src/components/celira/AgentsListPanel.tsx', import.meta.url)),
+    'utf8',
+  )
+  assert.ok(!/const TONE_DOT/.test(panel), '旧的 `TONE_DOT` 表还在（住址那一格又会长出一颗点）')
+  assert.ok(!panel.includes('TONE_DOT[status.onlineTone]'), '住址那一格又在按自己的色档画点')
+  assert.equal(
+    (panel.match(/READOUT_TONE_DOT\[health\.tone\]/g) ?? []).length,
+    1,
+    '状态点必须**只有一颗**，且跟着健康那一句的色档',
   )
 })

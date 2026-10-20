@@ -7,15 +7,17 @@
  *
  * | 那一格 | 读数来源 | 这一格读不到时 |
  * |---|---|---|
- * | 在线 | `/home-status` 的 `agent.agentId` 与这一行的 participant id 比（`agentAgentMatch`） | 「状态未知」 |
+ * | 住址 | `/home-status` 的 `agent.agentId` 与这一行的 participant id 比（`agentAgentMatch`） | 「不知道在哪台机器上」 |
  * | 模型 | 模型配置门的**绑定**那一层，**逐支**读（`residentModelReadout`；老门缺那一格时退回整机 `bound`） | 「模型：未知」 |
  * | 最近活动 | `/home-status` 的 `lastWake` | 「最近活动：未知」 |
  *
  * 两条口径写死在判据里（都是踩出来的）：
  *
- * 1. **`unknown` 不冒充「未接入」**：`different` 才是"这台机器上跑的是别人"；
+ * 1. **`unknown` 不冒充「不在这台机器上」**：`different` 才是"这台机器上跑的是别人"；
  *    `unknown` 是"这一格**没有读数**"（环境根记录读不出来 / 口子版本旧）⇒ 它只能说
- *    「状态未知」。把读不到说成一个事实，正是刀2a 治过的病。
+ *    「不知道在哪台机器上」。把读不到说成一个事实，正是刀2a 治过的病。
+ * 1b. ★ **住址那一格只答住址**（2026-10-20）：从前它写「在本机运行」——
+ *    "在不在跑"另有其格（`api/agentHealth.ts`），一个词答两件事就会并排出两个相反的答案。
  * 2. **`lastWake` 不是时间串**：它是状态口那一行
  *    `wake run=host-<pid>-<毫秒>-<序号> drives=… ending=…` 的**原文**。
  *    直接交给 `formatRuntimeTime` 只会得到 `—`（解不出日期）⇒ 时间从活动标识里还原
@@ -250,14 +252,14 @@ export function agentRowStatus(input: {
  *
  * 认领结果（`resolveAgentHome`）与执行端那一页的「运行」房间是**同一份裁决**，这里只把它翻成三格：
  *
- * | 认领 | 在线那一格 | 模型 / 最近活动 |
+ * | 认领 | 住址那一格 | 模型 / 最近活动 |
  * |---|---|---|
- * | `claimed`（本机） | 「在本机运行」（绿） | 那台机器的读数 |
- * | `claimed`（远程） | 「在<那台的名字>上运行」（绿） | 那台机器的读数 |
- * | `unknown-id`（读数没报 id） | 「状态未知」 | 那台机器的读数（**照旧显示**，不冒充未接入） |
- * | `elsewhere`（都是别人） | 「未接入」（灰） | 未知（那些读数**不是 Agent**的 —— 不许拿别的机器的来顶） |
- * | `unreachable`（一份没读到） | 「状态未知」 | **调用方给的那一条的读数**（`mindEntryFor`：只配了一个家 ⇒ 没有歧义；没有 ⇒ 未知） |
- * | `null`（条目还在读） | 「状态未知」 | 未知 |
+ * | `claimed`（本机） | 「在这台机器上」（绿） | 那台机器的读数 |
+ * | `claimed`（远程） | 「在<那台的名字>上」（绿） | 那台机器的读数 |
+ * | `unknown-id`（读数没报 id） | 「不知道在哪台机器上」 | 那台机器的读数（**照旧显示**，不冒充不在这台） |
+ * | `elsewhere`（都是别人） | 「不在这台机器上」（灰） | 未知（那些读数**不是 Agent**的 —— 不许拿别的机器的来顶） |
+ * | `unreachable`（一份没读到） | 「不知道在哪台机器上」 | **调用方给的那一条的读数**（`mindEntryFor`：只配了一个家 ⇒ 没有歧义；没有 ⇒ 未知） |
+ * | `null`（条目还在读） | 「不知道在哪台机器上」 | 未知 |
  *
  * `config` 是**认领到的那一条**（或 `mindEntryFor` 挑出的那一条）的配置读数（谁的绑定就是
  * 谁的，别台的钥匙不许上这一行）。调用方拿它就调 `mindReadoutFor` —— **不许自己拼**。
@@ -286,21 +288,22 @@ export function agentRowStatusFromHomes(input: {
         onlineLabel: machineMatchLabel('same'),
         onlineTone: 'local',
         modelLabel: modelCell(config, agentId),
-        activityLabel: `${ACTIVITY_PREFIX}读不到（这一支的读数不在这一份里）`,
+        // ⚠ 2026-10-20：「读数」是内行词（`scripts/jargon.mjs`），而且这一句说的是
+        //    "这一份里没有它的记录" —— 不是"没有记录"。
+        activityLabel: `${ACTIVITY_PREFIX}读不到（这一份不是它的）`,
       }
       // 它**自己**那一项里有宿主读数 ⇒ 顺手说清"它的宿主在不在跑"（读不到就照旧不说）。
+      // ⚠ "在不在跑"归健康那一句（`api/agentHealth.ts`），这一格只补一句并列的细节 ——
+      //   两处说的是同一个事实，所以这里只许说"宿主"，不许再说一次"它在跑"。
       if (hostStateOf(host) === 'stopped') {
-        return { ...base, onlineLabel: '在本机 · 它的宿主没在跑' }
-      }
-      if (hostStateOf(host) === 'running') {
-        return { ...base, onlineLabel: '在本机运行' }
+        return { ...base, onlineLabel: `${base.onlineLabel} · 它的宿主没在跑` }
       }
       return base
     }
     const base = agentRowStatus({ view: resolution.view, config, agentId })
     if (resolution.entry.local) return base
-    // 远程那台：绿点（就是 Agent）照旧，但**不许说"本机"** —— 住址是它的名字。
-    return { ...base, onlineLabel: `在${resolution.entry.name}上运行` }
+    // 远程那台：住址就是它的名字（⚠ 只说"在哪台"，不再借"运行"两个字 —— 那是健康那一句的活）。
+    return { ...base, onlineLabel: `在${resolution.entry.name}上` }
   }
   if (resolution.kind === 'unknown-id') {
     return agentRowStatus({ view: resolution.view, config, agentId })
@@ -317,6 +320,40 @@ export function agentRowStatusFromHomes(input: {
   // 是 `mindEntryFor` 挑出的那一条（一份都没读回来而只配了一个家 ⇒ 用它，没有歧义）。
   // 旧实现这里硬写 `config: null`：既违反本文件自己的原则，也让这一行与主页互相矛盾。
   return agentRowStatus({ view: null, config, agentId })
+}
+
+/**
+ * **四格同因 ⇒ 收成一句**（2026-10-20 T2 ④）。
+ *
+ * ## 它治的是什么
+ *
+ * 一份读数都没读回来时（那台机器没开机 / 地址不对 / 配置门也没开），那一行从前并列摆着
+ * 四句"不知道"：`机器这一面读不到` ／ `不知道在哪台机器上` ／ `模型：未知` ／
+ * `最近活动：未知`。四个词、一个原因 —— 用户读到的是"四件不同的事都坏了"，
+ * 而事实是**一件事坏了**（那一份读数没来）。⇒ 同因就收成一句 ＋ 一个出口。
+ *
+ * ## 判据（两条一起看，缺一条都不收）
+ *
+ * - **模型那一格也没读到**（`config === null`）：只要它还读得到，这一行就有真事实可说，
+ *   不该被一句"读不到"盖掉（那会把真读数藏起来）；
+ * - **状态那一面是 `unreachable`**：`claimed` / `unknown-id` / `elsewhere` 三档都
+ *   至少有一份读数在场，它们各有各的话（见 `agentRowStatusFromHomes` 那张表）。
+ *
+ * ⚠ **"正在读"不收**：`resolution === null` 是**还没裁决**，不是"读不到" ——
+ * 那时候收成一句"读不到"就是拿一段延迟说成一个事实（而且首屏会闪一下再回来）。
+ *
+ * ⚠ 出口是「我的执行端」（`/app/runtimes`）：那一页才有"那台机器怎么了"的读数与
+ * 改地址 / 换钥匙的入口 —— 本行不指别的门（同 `agentMachine.ts` 那条"不指假路径"）。
+ */
+export function rowSameCauseLine(input: {
+  resolution: AgentHomeResolution<HomeStatusView> | null
+  config: HomeConfigView | null
+}): { text: string; exit: 'machines' } | null {
+  const { resolution, config } = input
+  if (config !== null) return null
+  if (resolution === null || resolution.kind !== 'unreachable') return null
+  const why = resolution.failure ? `（${resolution.failure}）` : ''
+  return { text: `读不到它现在怎么样${why}。`, exit: 'machines' }
 }
 
 /** 在线那一格：三态**不许压成两态**（见文件头第 1 条）。 */
@@ -399,8 +436,9 @@ function activityCell(view: HomeStatusView | null): string {
  *
  * ⚠ **它今天唯一的生产消费者是 `activityCell`**（"最近活动"那一格）。本节原写「聊天页头部那条
  * Agent 家读数（"Agent 还在不在"刀）」—— **那个消费者已经不存在了**：2026-09-26 主人裁「IM 侧
- * 连 presence 投影也不放」，聊天面从此只剩静态参与者统计 ＋ 进行态 ＋ 对方已读（`ChatHeader.tsx`
- * 逐行可核，一个宿主读数都没有）。**留着那句陈旧注释，下一个人就会照着往 IM 面再塞一条宿主读数**
+ * 连 presence 投影也不放」，聊天面从此只剩静态参与者统计 ＋ 进行态（`ChatHeader.tsx` 逐行可核，
+ * 一个宿主读数都没有）＋ 已读那一格（2026-10-20 起挂在**我最后一条气泡下面**，不在头部：
+ * `MessageBubble` 的 `peerRead`）。**留着那句陈旧注释，下一个人就会照着往 IM 面再塞一条宿主读数**
  * —— 而那正是 `routeRegistry.ts` 文件头那条红线（「IM 侧不能有宿主读数」）。
  */
 export type LastWakeReadout =

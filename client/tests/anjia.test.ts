@@ -353,16 +353,32 @@ test('★ 认领出口不许被读数挡住（源级守卫）：配好模型回�
     fileURLToPath(new URL('../src/components/celira/AgentsListPanel.tsx', import.meta.url)),
     'utf8',
   )
+  // ⚠ **2026-10-20（T1 ④）改过形状**：那一块从 `hasShell && shouldOfferAttach(resolution)`
+  // 变成 `shouldOfferAttach(resolution) && (…)` —— 里面按有没有壳分两支（壳里那颗「接到这台机器上」
+  // ／ 浏览器里那颗深链「去它的机器那一页」）。**判据一字未变**：这一块**不许**被 `readout` 挡住。
+  assert.match(
+    panel,
+    /\{shouldOfferAttach\(resolution\) && \(/,
+    '认领出口的接线不见了（`attachAgent` / 深链那一处）—— 改名/删了？这条守卫要跟着改',
+  )
   assert.ok(
-    panel.includes('hasShell && shouldOfferAttach(resolution)'),
-    '认领出口的接线不见了（`attachAgent` 那一处）—— 改名/删了？这条守卫要跟着改',
+    panel.includes('它还没接到这台机器上'),
+    '那句"它还没接到这台机器上"不见了（出口要有一句话在前面）',
+  )
+  // 浏览器里也必须有真路（2026-10-20 T1 ④）：深链到它的 `#machine` 那一段
+  // （那一段本来就能走远程家，不需要壳）。
+  assert.match(
+    panel,
+    /\/app\/agents\/\$\{[^}]+\}#machine/,
+    '没有壳时那条深链不见了 —— 浏览器里又成"建得出、活不了"了',
   )
   // ⚠ 第一版写成 `!readout && hasShell && shouldOfferAttach(...)` ⇒ 第一次用的路径是
   // 「创建被拒（缺模型源）⇒ 按出口去配好 ⇒ 回到这一页」，而那份拒绝读数是**易失 store 里的
   // 旧话**：配好了它照旧挂着 ⇒ 出口被它挡住 ⇒ 用户**还是没得点**（只能重启 app 才恢复）。
   // 读数说"发生过什么"，出口说"现在能做什么" —— 两件事不互相挡。
   assert.ok(
-    !panel.includes('!readout && hasShell && shouldOfferAttach'),
+    !panel.includes('!readout && shouldOfferAttach') &&
+      !panel.includes('!readout && hasShell && shouldOfferAttach'),
     '认领出口又被 readout 挡住了：配好模型回来还是点不动（只能重启 app）',
   )
 })

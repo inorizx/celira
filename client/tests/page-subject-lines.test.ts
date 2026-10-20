@@ -32,6 +32,25 @@ test('「我的 Agent」那份清单说清它拼了两个平面（每行的数�
   assert.ok(panel.includes('执行端'), '清单页该用产品词「执行端」（不是大白话）')
 })
 
+test('★ 「三步」这个词出现在哪儿，三步的定义就跟到哪儿（2026-10-20 T1 的同一屏自洽）', () => {
+  // 空态那句是「上面那三步走完，它才会回你的第一句话」—— 同一屏里必须有**三步是哪三步**，
+  // 而且那三个名字**只有一处**（`api/firstRun.ts` 的 `FIRST_RUN_TITLES`）：页面再写一遍
+  // 就是第二个权威（改一处忘一处是必然的）。
+  const panel = read('../src/components/celira/AgentsListPanel.tsx')
+  const firstRun = read('../src/api/firstRun.ts')
+  for (const [key, title] of [
+    ['model', '模型源'],
+    ['create', '建一支'],
+    ['attach', '接上一台机器'],
+  ] as const) {
+    assert.ok(firstRun.includes(`${key}: '${title}'`), `三步的名字不在那唯一一处：${key} ⇒ ${title}`)
+    assert.ok(!panel.includes(`'${title}'`), `页面又写了一遍「${title}」（第二个权威）`)
+  }
+  // 两处都在场：空态（没有 Agent 时）＋ 创建面板顶部（创建**之前**就说清还差什么）。
+  const wired = (panel.match(/<FirstRunChecklist/g) ?? []).length
+  assert.ok(wired >= 2, `三步清单没在空态与创建面板两处都摆（实际 ${wired} 处）`)
+})
+
 test('「我的执行端」那份清单说清它列的是什么（跑 Agent 的机器）', () => {
   const page = read('../src/pages/RuntimesPage.tsx')
   assert.ok(page.includes('跑 Agent 的机器'), '机器清单页没有"它列的是什么"那句')
