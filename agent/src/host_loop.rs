@@ -92,11 +92,28 @@ impl RunWatch {
         Self::default()
     }
 
-    /// 一次活动开始：记下它的起点与本活动的细胞写柄。
-    pub fn begin(&self, started: SystemTime, writer: EventCardsWriter) {
+    /// 一次活动开始：记下它的起点与本活动的细胞写柄，并交回一个 **RAII 句柄**。
+    ///
+    /// ⚠ **必须用返回的 [`WatchGuard`]**：收场由它的 `Drop` 兜底（见那边的文档）。丢掉句柄
+    /// 就是立刻收场——这正是要的，"忘了 end"从此构造不出来。
+    pub fn begin(&self, started: SystemTime, writer: EventCardsWriter) -> WatchGuard {
         // 新的一段：到达/渲染两格归零（它们与细胞同命——Run 级）。
         writer.reset_marks();
         *self.in_flight.lock().expect("在跑表只被短临界区持有") = Some((started, writer));
+        WatchGuard {
+            watch: self.clone(),
+            ended: false,
+        }
+    }
+
+    /// **读数**：这一刻有没有活动在跑（门铃的回调与收场读的是同一张表）。
+    ///
+    /// 只回答"有没有"，不回答"是谁"——起点与写柄不离开本模块。
+    pub fn running(&self) -> bool {
+        self.in_flight
+            .lock()
+            .expect("在跑表只被短临界区持有")
+            .is_some()
     }
 
     /// 一次活动收场：清空（细胞随之散掉），并如实回答**这一段收场时世界还有没有没摆到眼前的动静**。
@@ -139,6 +156,47 @@ impl RunWatch {
                 writer.merge(&rows);
             }
         })
+    }
+}
+
+/// 一次活动在跑这一格的 **RAII 句柄**（[`RunWatch::begin`] 的返回值）。
+///
+/// ## 它治的是哪一类缺陷（2026-10-20）
+///
+/// 从前 `begin` 与 `end` 是一对手写的调用：开段之后只要有一条早退路径（装配被拒、唤醒通道
+/// 终结、任何一个 `?`）走掉，"在跑表"就会停在一个**死写柄**上——`end()` 到不了，此后每一
+/// 声音铃都往一张已经散掉的细胞里写。那不是"少了一次收尾"，是**这一类路径还会再犯**。
+///
+/// 现在"开始计数"与"收场"由类型配对：`Drop` 里一定调 [`RunWatch::end`]。正常收场要读
+/// "还有没有没摆到眼前的动静"，调 [`WatchGuard::end`]（消费它）；不读就由 `Drop` 清空。
+///
+/// ⚠ 它**不改变铃的语义**：一声铃仍然不是"一次唤醒"，锚的推进规则与容量 1 的合并一个字未动。
+#[must_use = "丢掉它就是立刻收场；要读 unshown 请调 end()"]
+pub struct WatchGuard {
+    /// 在跑表的另一份句柄（`RunWatch` 是 Arc，克隆只加一次计数）。
+    ///
+    /// 它**自有**而不是借用：开段那一段还要可变借用宿主（`self.since` 等），借住 `self.options`
+    /// 会把借用关系搞复杂——而这张表本来就是共享的。
+    watch: RunWatch,
+    ended: bool,
+}
+
+impl WatchGuard {
+    /// 收场：清空在跑表，并如实回答"这一段收场时世界还有没有没摆到眼前的动静"。
+    ///
+    /// ⚠ 必须在**取走写柄之前**问：细胞一散，那两格计数就没人记得了（与从前的 `end` 同一条）。
+    pub fn end(mut self) -> bool {
+        self.ended = true;
+        self.watch.end()
+    }
+}
+
+impl Drop for WatchGuard {
+    fn drop(&mut self) {
+        if !self.ended {
+            // 早退路径：清空即可。没有读者在这里问 unshown——那一段没有正常收场。
+            self.watch.end();
+        }
     }
 }
 
@@ -663,7 +721,18 @@ impl<'a> Host<'a> {
         // 这一段还有没摆到眼前的动静时才只推到这里。相邻两次投影因此仍把时间**恰好切分**：每条消息
         // 落在且只落在一个窗口里、被且只被一次计数。
         let previous = self.since;
-        let looked_at = options.clock.now(); // **两场之间**：把这张表里**已经到点**的收掉（含离线错过）——它发生在开活动**之前**，
+        let looked_at = options.clock.now();
+        // **事件卡片的计数必须与"看的那一刻"同刻开始**（2026-10-20）：铃回调只在"有活动在跑"
+        // 时才记数（[`RunWatch::sink`]），而从 `looked_at` 到读完世界投影之间是一段网络往返
+        // （最长几十秒）。从前 `begin` 排在投影**之后** ⇒ 落在这段窗口里的一声铃两格都不数
+        // （卡片不记；下一段的增量窗口又从收场起算）。现在把通道与 `begin` 前移到 `looked_at`
+        // 紧后面：**"看的那一刻"与"开始计数的那一刻"是同一刻**。
+        //
+        // 句柄是 RAII 的（[`WatchGuard`]）：装配被拒 / 通道终结这些早退路径由 `Drop` 收场，
+        // 在跑表不会再停在一个死写柄上。
+        let (cards_writer, cards) = EventCardsReport::channel();
+        let watch_guard = options.watch.begin(looked_at, cards_writer);
+        // **两场之间**：把这张表里**已经到点**的收掉（含离线错过）——它发生在开活动**之前**，
         // 因此"Run 里到点不抢占、下一场记账"是这条次序的机械后果（与 im 动静同律）。
         //
         // **返回值不要了**：那一份"待报清单"从前住在本件里（`owed`），而它正是"崩一次就永远不报"
@@ -704,8 +773,6 @@ impl<'a> Host<'a> {
         // **「我睡着的时候有多少」**。而主体**醒着**时到的消息归**事件卡片**那一格
         // （Run 级增量，宿主跑着时听到铃就写）——两格各管一段，不重叠也不留缝。
         // ⚠ **"不漏"由未读那一半兜底**：它按世界记着的读位置算（与锚无关）⇒ 主体没读过的永远算得出来。
-        let (cards_writer, cards) = EventCardsReport::channel();
-        self.options.watch.begin(looked_at, cards_writer);
         let mut session = RunSession::open_declared(
             options.material_root,
             &mut environment,
@@ -772,7 +839,7 @@ impl<'a> Host<'a> {
             }
         };
         // 这一段收场：细胞散掉（下一段是新的一格）。**先问一句"还有没有没摆到眼前的动静"**。
-        let unshown = self.options.watch.end();
+        let unshown = watch_guard.end();
         // **锚在这里推进**（2026-10-10 改）：推到场**收场**的时刻，不是场开头那一刻——
         // 见上面那段。三条纪律：
         //

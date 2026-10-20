@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, mpsc};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use celira_agent::activity_origin::{
     MANUAL_ORIGIN_TEXT, WAKE_CHANGED_ORIGIN_TEXT, WAKE_OPENED_ORIGIN_TEXT,
@@ -34,6 +34,7 @@ use celira_agent::core::{
     Action, ActionId, Decision, ModelError, ModelFailureClass, ModelOutput, ModelPort, View,
 };
 use celira_agent::doorbell::{Doorbell, DoorbellAccess, DoorbellFailure, DoorbellPolicy, Signal};
+use celira_agent::event_cards::EventCardsReport;
 use celira_agent::foundation::{AgentId, Outcome, RunId, SubjectEnding};
 use celira_agent::host_loop::{
     Host, HostFailure, HostOptions, RunNamer, RunWatch, WriteQualification,
@@ -511,6 +512,32 @@ impl Fixture {
     fn trace(&self) -> String {
         std::fs::read_to_string(self.environment_root.join("trace.ndjson")).unwrap_or_default()
     }
+}
+
+// ---------------------------------------------------------------------------
+// 0. 「在跑表」的对称性（T5）
+// ---------------------------------------------------------------------------
+
+/// [`RunWatch::begin`] 交回的句柄必须让"开始计数"与"收场"在**类型上**配对。
+///
+/// 只测对称性，**不测时序**：时间缝（`looked_at` 到投影读之间落进来的一声铃）在现有夹具里
+/// 证不出来——那一半用类型堵（[`WatchGuard`] 的 `Drop`），不用测试堵。
+#[test]
+fn a_watch_guard_clears_the_running_table_when_dropped() {
+    let watch = RunWatch::new();
+    let (writer, _report) = EventCardsReport::channel();
+    let guard = watch.begin(SystemTime::now(), writer);
+    assert!(watch.running(), "begin 之后在跑表必须非空");
+    drop(guard);
+    assert!(
+        !watch.running(),
+        "drop 之后在跑表必须为空（早退路径不再把写柄留在表里）"
+    );
+
+    let (writer, _report) = EventCardsReport::channel();
+    let guard = watch.begin(SystemTime::now(), writer);
+    let _ = guard.end();
+    assert!(!watch.running(), "end 之后同样必须为空");
 }
 
 // ---------------------------------------------------------------------------
