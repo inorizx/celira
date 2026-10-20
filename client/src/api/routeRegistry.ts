@@ -259,7 +259,7 @@ export const ROUTES: readonly RouteDeclaration[] = [
     side: 'world',
     planes: ['world', 'home'],
     page: 'pages/MyAgentsPage.tsx',
-    what: '**两段**：主体是世界侧的公开资料与接线（所有权 / 头像 / 资料 / 接入 / 凭据 / 撤销，只读 core）；末段「机器」（`#machine`）**主语是机器** —— 读家侧裁决（`resolveAgentHome`）说"它住在哪台"并给去 `/app/runtimes/:entryId` 的出口，**不复述**运行状态（那是机器页三个房间的唯一权威）',
+    what: '★ **四段、顺序有判据**（2026-10-20 T4：这一页从"管理台"改成"对象首页"）：①「机器」（`#machine`）**主语是机器** —— 读家侧裁决（`resolveAgentHome`）说"它住在哪台"＋**它现在有没有在跑**（同一句、同源），并给去 `/app/runtimes/:entryId` 的出口（**不复述**运行状态明细，那是机器页三个房间的唯一权威）；②「资料」（`#who`）世界侧的公开资料与归属（只读 core）；③「接线（高级）」（`#wiring`）接入 ＋ 凭据 —— **默认折叠、折叠头带读数、没有生效的接入时默认展开**（2026-10-08 裁决第①类「必须由人同意的」：必须在，但不必在最前）；④「危险操作」（`#danger`）撤销 Agent。首屏两个动作都在页头：**发消息**（判据在 `api/directRoom.ts`，与 `/agent/:id` 同一处）与**在世界里看**（去 `/agent/:id`，那一页才是"它在世界里的样子"的唯一版面）。已撤销的（`revoked`）只渲染页头 ＋ 后果 ＋ 返回（`api/agentRevoked.ts`）',
     guarded: false,
   },
   // ⚠ **2026-10-11 修陈旧**：这一格从前写「…深链接不破，**旧锚点经 `LEGACY_ANCHORS` 映射**」

@@ -824,13 +824,46 @@ try {
   //    `SectionFrame` ⇒ 房间真的没了，而那条断言照样过（装饰性覆盖）。
   //    ⇒ 改成按**房间标题本体**判：`SectionFrame` 把分区名渲成 `section[id] > h2`，
   //      收这些标题，要求「资料」在场、**「服务」不在场**（退役的验收点正在这里）。
+  // ★ **2026-10-20（T4：这一页从管理台改成"对象首页"）**：判据改成量**四段与顺序**：
+  //   ①「机器」（首屏那句 health 的唯一出处）②「资料」③「接线（高级）」④「危险操作」，
+  //   且「服务」仍然不在场（2026-09-28 服务层退役那条验收点不丢）。
   const roomTitles = await page
     .locator('section[id]')
     .evaluateAll((els) => els.map((el) => (el.querySelector('h2')?.textContent ?? '').trim()).filter(Boolean))
+  const expectedRooms = ['机器', '资料', '接线（高级）', '危险操作']
   check(
-    'Agent 的主页有「资料」房间、且**服务那一间已不在场**（2026-09-28 服务层退役）',
-    roomTitles.includes('资料') && !roomTitles.includes('服务'),
+    '★ Agent 的主页四段且顺序对：机器 → 资料 → 接线（高级）→ 危险操作（且「服务」不在场）',
+    expectedRooms.every((title, index) => roomTitles[index] === title) && !roomTitles.includes('服务'),
     `房间标题=${JSON.stringify(roomTitles)} · ${snippet(homeText, 120)}`,
+  )
+
+  // ★ **2026-10-20（T4）首屏那两个动作**：页头就是「发消息」与「在世界里看」——
+  // "去跟它说话"必须是**能点的一颗**（复用 `api/directRoom.ts` 那一处判据），
+  // 而"它在世界里的样子"是去 `/agent/:id`（那一页才是唯一版面，这里不重画）。
+  check(
+    '★ 首屏第一动作：页头有「发消息」与「在世界里看」两颗，且「发消息」是首屏第一个动作按钮',
+    (await page.getByRole('button', { name: '发消息' }).count()) === 1 &&
+      (await page.getByRole('button', { name: '在世界里看' }).count()) === 1,
+    snippet(homeText, 160),
+  )
+  // ★ **接线（高级）默认折叠**（判据在页内 `wiringOpen`）：这一支名下有生效的接入 ⇒ 收着、
+  //   但折叠头**带读数**（"藏起来的是细节，不是事实"）。反例：默认态写成展开、或读数丢了。
+  const wiringCollapsed = await page.locator('section#wiring').innerText()
+  check(
+    '★ 接线（高级）：有生效的接入时默认折叠 ＋ 折叠头带一行读数（1 条接入 / N 张凭证生效中）',
+    wiringCollapsed.includes('条接入') && !wiringCollapsed.includes('解除接入'),
+    snippet(wiringCollapsed, 200),
+  )
+  // 展开之后内容必须在（折叠不是删除）——这一条同时也是"要人动手的那一格没被藏死"的反证。
+  const expandWiring = page.getByRole('button', { name: '展开' })
+  const hadExpand = (await expandWiring.count()) > 0
+  if (hadExpand) await expandWiring.first().click()
+  await page.waitForTimeout(400)
+  const wiringExpanded = await page.locator('section#wiring').innerText()
+  check(
+    '★ 接线（高级）：点「展开」之后接入 / 凭证的内容**真的在**（折叠不是删除）',
+    wiringExpanded.includes('解除接入') && wiringExpanded.includes('凭证'),
+    `展开按钮=${hadExpand} · ${snippet(wiringExpanded, 200)}`,
   )
   // 「机器」那一段的第二句（2026-10-06 加）：**住址之外**还要说"机器在不在跑 ＋ 上次怎么样"。
   // 判据与文案在 `api/agentHealth.ts`（纯函数 ＋ 离线用例），与「我的 Agent」列表**同一句**
@@ -1097,7 +1130,15 @@ try {
   // 资料由 Agent 自己写（`im_write_profile` / `im_write_avatar`）。判据因此从
   // 「头像区在场（含 2 MiB 那句上传提示）」翻成**一对**：头像读数**在场** ＋ 编辑入口**不在场**。
   // 只断"某串不在场"是本仓禁止的形状；两条合起来才是判据。
-  check('「撤销 Agent」按钮可见', homeText.includes('撤销 Agent'), snippet(homeText))
+  // ★ **2026-10-20（T4）**：撤销 Agent 现在在页尾「危险操作」那一节里（不可恢复 ⇒ 一次误点代价太大）。
+  //   判据从"正文里有没有那串"改成"它在不在那一节里"——后者才说明它被放在了该在的地方。
+  const dangerSection = await page.locator('section#danger').innerText().catch(() => '')
+  check(
+    '★ 「撤销 Agent」在页尾「危险操作」那一节里（不在首屏、也不再挨着资料）',
+    dangerSection.includes('撤销 Agent') && dangerSection.includes('再次点击确认撤销') === false,
+    snippet(dangerSection, 160),
+  )
+  check('「撤销 Agent」按钮可见', dangerSection.includes('撤销 Agent'), snippet(homeText))
   const avatarShown = homeText.includes('头像')
   const profileEditable = homeText.includes('保存资料') || homeText.includes('选择图片')
   check(
@@ -2753,8 +2794,15 @@ try {
       // 先正常进一次：绑定读得到 ⇒ 凭据区才渲染（它需要一条 active 绑定）。
       await agentRowForCredentials.first().click()
       await page.waitForTimeout(2000)
+      // ★ 2026-10-20（T4）：接入 / 凭据搬进「接线（高级）」并**默认折叠**（有生效的接入时）⇒
+      //   判据要的那几格在折叠区里，先按页面上那颗「展开」（按钮在就是证据：面板在，只是收着）。
+      const expandForCredentials = page.getByRole('button', { name: '展开' })
+      if ((await expandForCredentials.count()) > 0) await expandForCredentials.first().click()
+      await page.waitForTimeout(400)
       const beforeCredentialsText = await page.locator('body').innerText()
-      if (!beforeCredentialsText.includes('凭证')) {
+      // 判据从"正文里有『凭证』"收紧成"这一支真的有一条生效的接入"（折叠头那句读数里
+      // 「凭证」两个字一直在 ⇒ 旧的裸子串判据会**恒真**，那是装饰性覆盖）。
+      if (!beforeCredentialsText.includes('条接入')) {
         // 「凭证」区需要**一条 active 绑定**才渲染 ⇒ 名下有绑定才判得动
         // （环境没就绪，不是代码问题；文件头那张前置表里写着这一条）。
         check('凭据读数判据的前置：这一页有「凭证」区（名下有接入绑定才判得动 ⇒ 没有即这一轮没验）', null, snippet(beforeCredentialsText, 200))
@@ -2763,6 +2811,10 @@ try {
         await page.route(credentialsRoute, (route) => route.abort())
         await page.reload({ waitUntil: 'domcontentloaded' })
         await page.waitForTimeout(2500)
+        // 重载之后折叠态回到默认（有生效的接入 ⇒ 收着）⇒ 再展开一次才看得到那一格。
+        const expandAfterReload = page.getByRole('button', { name: '展开' })
+        if ((await expandAfterReload.count()) > 0) await expandAfterReload.first().click()
+        await page.waitForTimeout(400)
         const credText = await page.locator('body').innerText()
         await page.unroute(credentialsRoute)
         check('凭据读不到 ⇒ 如实说「凭据还没读到」', credText.includes('凭据还没读到'), snippet(credText, 200))

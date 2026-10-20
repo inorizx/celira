@@ -12,6 +12,7 @@ import type { ProfileView } from '@/api/contracts'
 import { getApi, useAppStore, useRooms } from '@/api/store'
 import { supportsAgentProfile } from '@/api/uiPolicy'
 import { resolveSelfId } from '@/api/selfIdentity'
+import { directRoomOf } from '@/api/directRoom'
 import { errorText } from '@/api/contractErrors'
 
 /**
@@ -93,17 +94,13 @@ export function AgentPage() {
 
   // ── 发消息：**真的**建/进一个直聊房，不再跳写死的演示房号 ──────────────────
   //
-  // 判据与 `ContactDetailCard` 同一条路：已有直聊房 → 原样进入；没有 → 建一个。
+  // 「哪间是我们的房」这条判据**不在本页**（2026-10-20 T4）：它现在也是 Agent 主页首屏
+  // 那颗「发消息」的判据 ⇒ 抽到 `api/directRoom.ts` 的 `directRoomOf`（纯函数、有用例），
+  // 本页只消费它。**写入口仍然只有一处**：`store` 的 `createDirectRoom` / `createHumanDirectRoom`。
   // 建失败（对 Human 而言，契约要求先有 accepted 联系人关系）**如实报错**，
   // 不静默、不假装成功。
   const selfId = resolveSelfId(me?.participant.id)
-  const directRoom = allRooms.find(
-    (r) =>
-      r.participantIds.length === 2 &&
-      r.participantIds.includes(selfId) &&
-      participant != null &&
-      r.participantIds.includes(participant.id),
-  )
+  const directRoom = participant ? directRoomOf(allRooms, selfId, participant.id) : null
   const [creating, setCreating] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 

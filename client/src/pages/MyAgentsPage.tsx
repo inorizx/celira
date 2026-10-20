@@ -4,9 +4,11 @@ import {
   ArrowLeft,
   Check,
   ClipboardCopy,
+  ExternalLink,
   Image as ImageIcon,
   KeyRound,
   Link2,
+  MessageSquarePlus,
   Server,
   ShieldCheck,
   UserRound,
@@ -24,7 +26,7 @@ import { cn } from '@/lib/utils'
 import { scrollToAnchor } from '@/lib/anchorScroll'
 import type { OwnedAgent } from '@/api/domain'
 import type { BackendBindingView, CredentialView, ProfileView } from '@/api/contracts'
-import { getApi, useAppStore, useConnection } from '@/api/store'
+import { getApi, useAppStore, useConnection, useRooms } from '@/api/store'
 import { credentialsOf } from '@/api/credentials'
 import { bindingsOf } from '@/api/agentBindings'
 import { AGENT_REVOKED_CONSEQUENCE, shouldShowAgentAdmin } from '@/api/agentRevoked'
@@ -67,6 +69,8 @@ import {
 } from '@/api/remoteAttach'
 import { agentMachineReadout, modelChoiceMachine, type AgentMachineKind } from '@/api/agentMachine'
 import { agentHealthForClaimedMachine } from '@/api/agentHealth'
+import { directRoomOf } from '@/api/directRoom'
+import { resolveSelfId } from '@/api/selfIdentity'
 import { READOUT_TONE_TEXT } from '@/components/celira/status-tone'
 
 /** content_type → 人话。认不出的照原样显示（Core 才是权威，前端不替它归一）。 */
@@ -91,13 +95,17 @@ function formatBytes(bytes: number): string {
  * ⚠ 从前这里说的是「已连接」＋ 一颗 `presence-online` 绿点（按 2026-10-12 前的设计系统那一行做的）。
  * 那是**用在场那一套词答授权那个问题**：两者会分开 —— 真机上撞到过：绑定 `active`、而这台机器上
  * **一支住户都没有**（没有机器在跑它），页面照样绿着说"已连接"。⇒ 只说它自己的状态，
- * 用与下面「凭证」那一间**同一套词**（生效中 / 已撤销），也不借在场那颗点。
+ * 用与下面「凭证」那一间**同一套词**（生效中 / 已解除），也不借在场那颗点。
  * **"它此刻在不在"的唯一权威是机器页**（本页下面那一段只给住址，不复述运行状态）。
+ *
+ * ⚠ **2026-10-20（T4 命名）**：撤销那一族拆成三个词，各归一件事 ——
+ * **解除**接入（这个授权不再有效）／**作废**凭证（那串 token 当场失效）／**撤销** Agent（不可恢复）。
+ * 所以这一格的终态叫「已解除」，不再与"撤销 Agent"共用一个"撤销"。
  */
 function CoreBindingBadge({ status }: { status: string }) {
   return (
     <span className="inline-flex items-center text-caption text-muted-foreground">
-      {status === 'active' ? '生效中' : '已撤销'}
+      {status === 'active' ? '生效中' : '已解除'}
     </span>
   )
 }
@@ -183,6 +191,22 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
   const [profileLoaded, setProfileLoaded] = useState(false)
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState<string | null>(null)
+  // ★ **首屏第一动作：去跟它说话**（2026-10-20 T4）。判据在 `api/directRoom.ts` 一处
+  //   （`/agent/:id` 那颗「发消息」用的是同一个函数），写入口仍然只有 store 那一个。
+  const allRooms = useRooms()
+  const me = useAppStore((s) => s.me)
+  const createDirectRoom = useAppStore((s) => s.createDirectRoom)
+  const selfId = resolveSelfId(me?.participant.id)
+  const [talkBusy, setTalkBusy] = useState(false)
+  const [talkError, setTalkError] = useState<string | null>(null)
+  /**
+   * 「接线（高级）」的展开态。`null` = 人还没动过 ⇒ **按处境推导**：
+   * - 有生效的接入 ⇒ 收起（日常看不到它，但它就在那儿）；
+   * - **还没有生效的接入**（含读不到）⇒ 展开 —— 那正是"要人去同意"的那一步
+   *   （2026-10-08 那条裁决的第①类），**默认折叠不许把要你动手的那一格藏起来**。
+   * 一旦人点过，就听人的（不再被数据翻动）。
+   */
+  const [wiringChoice, setWiringChoice] = useState<boolean | null>(null)
   // ⚠ 2026-09-29 主人裁「这一页不再代笔」之后，这里**只留读**：原先那一套编辑态
   // （draft / saving / saved、头像的 busy/error/saved/preview 与 objectURL 回收）
   // 随编辑框一起删掉了 —— 它们唯一的消费者就是那个框。
@@ -474,6 +498,61 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
     }
   }
 
+  /**
+   * ★ **首屏第一动作：去跟它说话**（2026-10-20 T4）。
+   *
+   * 判据在 `api/directRoom.ts` 的 `directRoomOf` **一处**（世界侧参与者页那颗「发消息」
+   * 用的是同一个函数）；写入口也只有一处（store 的 `createDirectRoom`）。
+   * 这里**不**自己找房、不自己建 —— 那会是同一条判据的第二份。
+   */
+  const handleTalk = async () => {
+    if (talkBusy) return
+    const existing = directRoomOf(allRooms, selfId, agent.id)
+    if (existing) {
+      navigate(`/app/chat/${existing.id}`)
+      return
+    }
+    setTalkBusy(true)
+    setTalkError(null)
+    try {
+      navigate(`/app/chat/${await createDirectRoom(agent.id)}`)
+    } catch (e) {
+      // 建失败（它已撤销 / 世界不认这一对 / 网络）⇒ 如实报错，不假装进了房间。
+      setTalkError(errorText(e))
+    } finally {
+      setTalkBusy(false)
+    }
+  }
+
+  /**
+   * 「接线（高级）」的**一行读数**与**展开态**（2026-10-20 T4）。
+   *
+   * ⚠ 读数只说这一层自己的事实（几条接入 / 凭证在不在），而且**读不到就说读不到** ——
+   * 不许把"读不到"写成"还没有接入"（`bindingsOf` 的三态在那里，这里只翻成人话）。
+   */
+  const activeWiring = activeBinding(bindings)
+  const activeCredentialCount = credentialsCore.filter((each) => each.status === 'active').length
+  const credentialPart =
+    activeWiring === undefined
+      ? ''
+      : credentialsReadout === null
+        ? ''
+        : credentialsReadout.status !== 'known'
+          ? ' · 凭证读不到'
+          : activeCredentialCount > 0
+            ? ` · ${activeCredentialCount} 张凭证生效中`
+            : ' · 没有生效的凭证'
+  const wiringLine =
+    bindingsReadout === null
+      ? '这一版没有接线这一层'
+      : bindingsReadout.status !== 'known'
+        ? '接线读不到'
+        : activeWiring === undefined
+          ? '还没有接入'
+          : `1 条接入${credentialPart}`
+  // 人没动过 ⇒ 按处境：有生效的接入就收起，没有（或读不到）就展开（那正是要人动手的一格）。
+  const wiringOpen = wiringChoice ?? activeWiring === undefined
+
   // 列表模式：一行一个 Agent（三格读数见 `AgentsListPanel`）＋ 就地创建。
   const list = <AgentsListPanel agents={agentList} onOpen={openAgent} />
 
@@ -585,6 +664,35 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
             </section>
           )}
 
+        </div>
+    </>
+  )
+
+  /**
+   * ★ **「接线（高级）」**（2026-10-20 T4）：接入 ＋ 凭据从「资料」里搬出来、**默认折叠**。
+   *
+   * 三条判据（都不新造事实）：
+   * 1. **它们仍然在**：2026-10-08 那条裁决的第①类是「必须由人同意的（首次跑世界、模型 key、
+   *    凭据 / 撤销）」—— 折叠是**顺序**问题，不是要不要有的问题；
+   * 2. **折叠头带读数**（`wiringLine`）：藏起来的是细节，不是事实；
+   * 3. **没有生效的接入时默认展开**：那是唯一要人动手的处境（`wiringOpen` 的推导在那里）。
+   */
+  const wiringSections = (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-caption text-muted-foreground">{wiringLine}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            aria-expanded={wiringOpen}
+            onClick={() => setWiringChoice(!wiringOpen)}
+          >
+            {wiringOpen ? '收起' : '展开'}
+          </Button>
+        </div>
+        {wiringOpen && (
+          <>
           <section className="space-y-3 rounded-xl border border-border bg-card p-5">
             <div className="flex items-center gap-2 text-title">
               <Link2 className="size-4 text-muted-foreground" />
@@ -613,10 +721,10 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
                         className="text-destructive"
                         onClick={() => void handleRevokeBinding(b.id)}
                       >
-                        撤销
+                        解除接入
                       </Button>
                     ) : (
-                      <span className="text-caption text-muted-foreground">已失效</span>
+                      <span className="text-caption text-muted-foreground">已解除</span>
                     )}
                   </div>
                 ))}
@@ -666,7 +774,7 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
                   {credentialsCore.map((cred) => (
                     <div key={cred.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                       <div className="min-w-0 flex-1">
-                        <div className="text-body">{cred.status === 'active' ? '生效中' : '已撤销'}</div>
+                        <div className="text-body">{cred.status === 'active' ? '生效中' : '已作废'}</div>
                         <div className="text-caption text-muted-foreground">
                           签发 {cred.created_at.slice(0, 16).replace('T', ' ')}
                         </div>
@@ -678,12 +786,12 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
                           className="text-destructive"
                           onClick={() => void handleRevokeCredential(activeBinding(bindings)!, cred.id)}
                         >
-                          撤销
+                          作废凭证
                         </Button>
                       ) : cred.status === 'active' ? (
                         <span className="text-caption text-muted-foreground">生效中</span>
                       ) : (
-                        <span className="text-caption text-muted-foreground">已失效</span>
+                        <span className="text-caption text-muted-foreground">已作废</span>
                       )}
                     </div>
                   ))}
@@ -727,38 +835,55 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
               原来那条"登记在施工报告里"的遗留（`ModelSelectSheet` / `modelId` /
               `modelSheetOpen` 三个"等数据面"）随之关闭：它们不再挂在这一页上。 */}
 
-          {/* 撤销区：core 直连 `DELETE /v1/agents/{id}`（im 服务端既有软撤销
-              端点）经 `revokeAgent` 到达。渲染判据是能力探测（`revokeSupported`）
-              而不是模式表 —— 绑定区 / 凭证区同理（TASK_72 ⑥ 起也是能力探测：
-              `bindingsSupported` / `credentialsSupported`）：没有这个数据面的
-              传输层上，放开只会得到一个没有数据源、点了必然报错的空区。 */}
-          {revokeSupported && (
+          {/* 接线（高级）的右括号（见上一条）：`wiringOpen` 收起时整块不渲染。 */}
+          </>
+        )}
+      </div>
+  )
+
+  /**
+   * ★ **危险操作**（2026-10-20 T4）：撤销 Agent 移到**页尾**，并单独起一节。
+   *
+   * 撤销是**不可恢复**的（软撤销之后它不再接收事件、绑定与凭证一并作废、也接不上机器）——
+   * 这样的一件事不该挨着"看它一眼"。渲染判据照旧是能力探测（`revokeSupported`），不是模式表：
+   * core 直连 `DELETE /v1/agents/{id}`（im 服务端既有软撤销端点）经 `revokeAgent` 到达；
+   * 没有这个数据面的传输层上，放开只会得到一个点了必然报错的空区（TASK_72 ⑥ 同一律）。
+   */
+  const dangerSections = revokeSupported && (
             <section className="rounded-xl border border-destructive/40 bg-card p-5">
-              <div className="text-body text-destructive">撤销 Agent</div>
-              <div className="mt-1 text-caption text-muted-foreground">
-                撤销后该 Agent 停止接收事件，房间成员关系与凭证一并作废；此动作不可撤销。
-              </div>
+              {/* 后果说明**不在这一块里重写**：它就是这一节 `SectionFrame` 的 `subject`
+                  （撤销 Agent 是不可恢复的，那句后果只该有一处）。这里只放动作。 */}
               <Button
                 variant="destructive"
-                className="mt-3 w-full"
+                className="w-full"
                 onClick={() => void handleRevoke()}
               >
                 {revokeArmed ? '再次点击确认撤销' : '撤销 Agent'}
               </Button>
               {revokeError && <p className="mt-2 text-caption text-presence-failed">{revokeError}</p>}
             </section>
-          )}
-        </div>
-    </>
   )
 
   // 列表模式：就一张列表（点一个 Agent ⇒ `openAgent` 带 Agent 去主页）。
   if (!homeMode) return list
 
-  // 主页模式：**一个 Agent，两间**（资料 / 服务）—— 世界侧的那两件事。
+  /**
+   * **主页模式：这一支的「对象首页」**（2026-10-20 T4 改职责）。
+   *
+   * 从前这一页是**管理台**：一进来先看到"所有权 / 接入 / 凭据 / 撤销"，而"它现在怎么样"
+   * 藏在最后一段。判据换了：**一个对象的主页，第一动作是去跟它说话**，其余按顺序退后 ——
+   *
+   * | 位置 | 说什么 | 为什么不更前/更后 |
+   * |---|---|---|
+   * | 页头 | 头像 ＋ 名字 ＋ **发消息 / 在世界里看** | 第一动作是"说话"；"它在世界里什么样"是链接，**不在这页重画一遍** |
+   * | ① 「机器」 | 它住在哪台 ＋ 它现在有没有在跑 ＋ 接上 / 选模型 | 这是首屏那句 health 的**唯一出处**（同源、不复述） |
+   * | ② 「资料」 | 所有权 ＋ 公开资料（只读） | 世界侧公共事实 |
+   * | ③ 「接线（高级）」 | 接入 ＋ 凭据（**默认折叠**，头上有读数） | 2026-10-08 裁决第①类：必须在，但不必在最前 |
+   * | ④ 「危险操作」 | 撤销 Agent（不可恢复） | 页尾，一次误点代价太大 |
+   */
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-4 md:px-6">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-4 md:px-6">
         <Button
           variant="ghost"
           size="icon"
@@ -770,11 +895,35 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
         <ParticipantAvatar participant={agent} size="sm" />
         <span className="text-title">{agent.displayName} 的主页</span>
         <AgentBadge />
+        {/* 首屏那两个动作（都是**出口**，不是新的写入口）：发消息走 store 那一个建/进动作，
+            「在世界里看」只是去 `/agent/:id`（那边才是"它在世界里什么样"的唯一版面）。 */}
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" className="gap-1.5" disabled={talkBusy} onClick={() => void handleTalk()}>
+            <MessageSquarePlus className="size-4" aria-hidden />
+            {talkBusy ? '正在建会话…' : '发消息'}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => navigate(`/agent/${agent.id}`)}
+          >
+            <ExternalLink className="size-4" aria-hidden />
+            在世界里看
+          </Button>
+        </div>
       </div>
+      {talkError && (
+        <p role="alert" className="border-b border-border bg-card px-4 pb-3 text-caption text-presence-failed md:px-6">
+          {talkError}
+        </p>
+      )}
       <AgentHome
         name={agent.displayName}
-        who={whoSections}
         machine={<AgentMachine agentId={agent.id} />}
+        who={whoSections}
+        wiring={wiringSections}
+        danger={dangerSections}
       />
     </div>
   )
@@ -1366,17 +1515,34 @@ function AgentMachine({ agentId }: { agentId: string }) {
  *
  * 看它的运行与模型 ⇒ 那一段给出口，答案在 `/app/runtimes/:entryId` 三个房间里。
  */
+/**
+ * **Agent 主页的外壳：四段，顺序有判据**（2026-10-20 T4 改）。
+ *
+ * | 段 | 锚点 | 说什么 | 为什么在这个位置 |
+ * |---|---|---|---|
+ * | ① 机器 | `#machine` | 住址 ＋ **它现在有没有在跑** ＋ 接上 / 选模型 | 首屏那句 health 的**唯一出处**（主语是机器，判据在 `agentMachine.ts` / `agentHealth.ts`） |
+ * | ② 资料 | `#who` | 所有权 ＋ 公开资料（只读） | 世界侧的公共事实；**不重画**"它在世界里什么样"（那在 `/agent/:id`） |
+ * | ③ 接线（高级） | `#wiring` | 接入 ＋ 凭据 | 2026-10-08 裁决第①类：必须在，但不必在最前；**默认折叠、头上有读数** |
+ * | ④ 危险操作 | `#danger` | 撤销 Agent | 不可恢复 ⇒ 页尾 |
+ *
+ * ⚠ 顺序与「不复述」是同一件事：这一页**只有一处**说 health（①），
+ * ②③④ 一个字节都不重复它 —— 复述就是"同一件事两个答案"。
+ */
 function AgentHome({
   name,
   who,
   machine,
+  wiring,
+  danger,
 }: {
   name: string
   who: React.ReactNode
   machine: React.ReactNode
+  wiring: React.ReactNode
+  danger: React.ReactNode
 }) {
   const { hash } = useLocation()
-  // 深链接带锚点（`/app/agents/<id>#who`）要**滚到那一间** —— 交给共用实现
+  // 深链接带锚点（`/app/agents/<id>#machine`）要**滚到那一间** —— 交给共用实现
   // （`lib/anchorScroll.ts`：那一节会**晚出现**、出现之后还会被上面那一段撑高**顶走**；
   //   它盯住一段时间、用户一动就交还、且有界）。读不到那个 id 就什么都不做（不报错、不跳走）。
   useEffect(() => {
@@ -1385,15 +1551,31 @@ function AgentHome({
 
   return (
     <PageScroll>
+      {machine}
       <SectionFrame
         id="who"
         title="资料"
         icon={<UserRound className="size-4 text-muted-foreground" aria-hidden />}
-        subject={<>{name} 的公开资料与接入方式（服务器上的数据，不在本机）。</>}
+        subject={<>{name} 在世界里的资料与归属（服务器上的数据，不在本机）；想看成什么样，去「在世界里看」。</>}
       >
         {who}
       </SectionFrame>
-      {machine}
+      <SectionFrame
+        id="wiring"
+        title="接线（高级）"
+        icon={<Link2 className="size-4 text-muted-foreground" aria-hidden />}
+        subject="谁被授权替它行动、凭证是什么时候签发的（服务器上的数据）。日常不用看，接不上或要换接入方时才来。"
+      >
+        {wiring}
+      </SectionFrame>
+      <SectionFrame
+        id="danger"
+        title="危险操作"
+        icon={<KeyRound className="size-4 text-destructive" aria-hidden />}
+        subject="这一步不可恢复：撤销之后它就退出这个世界 —— 不再接收事件，接入与凭证随之失效，也接不上机器。"
+      >
+        {danger}
+      </SectionFrame>
     </PageScroll>
   )
 }
