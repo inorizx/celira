@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 export function SplashPage() {
   const navigate = useNavigate()
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-8 bg-gradient-to-br from-brand/10 via-background to-agent/10 px-6">
+    <div className="flex h-full min-h-0 flex-col items-center justify-center gap-8 bg-gradient-to-br from-brand/10 via-background to-agent/10 px-6">
       <img src="/logo/logo-gradient.svg" alt="Celira" className="size-24 md:size-28" />
       <div className="space-y-3 text-center">
         <h1 className="text-display">Celira</h1>

@@ -5,7 +5,7 @@ import { CeliraLogo } from '@/components/celira/CeliraLogo'
 export function NotFoundPage() {
   const navigate = useNavigate()
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-6 bg-background px-6">
+    <div className="flex h-full min-h-0 flex-col items-center justify-center gap-6 bg-background px-6">
       <CeliraLogo className="size-14" />
       <div className="space-y-2 text-center">
         <div className="text-display">404</div>

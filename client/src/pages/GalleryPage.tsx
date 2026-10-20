@@ -422,7 +422,7 @@ function ThemePanel({
 export function GalleryPage() {
   const [previewOpen, setPreviewOpen] = useState(false)
   return (
-    <div className="min-h-screen bg-background px-6 py-10">
+    <div className="min-h-full bg-background px-6 py-10">
       <div className="mx-auto max-w-5xl space-y-6">
         <header className="space-y-1">
           <h1 className="text-display">Celira 组件陈列室</h1>

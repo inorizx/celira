@@ -6,11 +6,16 @@
 // **一条都量不到**（浏览器里这个组件返回 null）。所以按源码判，与 `no-silent-red-path`
 // 同一口径。
 //
+// ★ **2026-10-20 下午：栏搬进了 `AppFrame`（路由根）。** 同一天两次真机抱怨（"这屏没有
+// 关闭按钮" / "提示居然在关闭按钮上面"）是同一个病：**按屏补栏**。现在判据从"数外壳"
+// 换成"唯一写者 + 顺序 + 高度只有一个来源"，见下面那三条。
+//
 // 运行： node --test --experimental-strip-types "tests/*.test.ts"
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const read = (relative: string) =>
@@ -18,7 +23,22 @@ const read = (relative: string) =>
 
 const TITLE_BAR = read('../src/components/celira/TitleBar.tsx')
 const APP_SHELL = read('../src/components/celira/AppShell.tsx')
+const APP_FRAME = read('../src/components/celira/AppFrame.tsx')
+const APP = read('../src/App.tsx')
 const TAURI_CONF = read('../../app/src-tauri/tauri.conf.json')
+
+const SRC = fileURLToPath(new URL('../src', import.meta.url))
+
+/** `src/` 下全部 `.tsx`（判"谁渲染了窗口栏 / 谁自己撑了窗口"只能按文件扫）。 */
+function tsxFiles(dir = SRC): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...tsxFiles(full))
+    else if (entry.name.endsWith('.tsx')) out.push(full)
+  }
+  return out
+}
 
 test('★ 标题栏：只在壳里渲染（浏览器里为 null）', () => {
   assert.match(
@@ -65,19 +85,85 @@ test('★ 标题栏：三个按钮走 Tauri 的窗口动作，关窗与系统那
   )
 })
 
-test('★ 壳：窗口无边框，且标题栏挂在根布局最上面', () => {
+test('★ 壳：窗口无边框，且窗口栏只有一层（挂在路由根的 `AppFrame` 上）', () => {
   assert.match(TAURI_CONF, /"decorations": false/, '窗口无边框（自绘标题栏的前提）')
   // ⚠ 这里**没有** `theme`：这一版窗口配置不收它（`theme: "dark"` 被 schema 拒了，实测），
   //   而应用的深色是自己的（`<html class="dark">` + 令牌），不靠窗口这一格。
-  assert.match(APP_SHELL, /<TitleBar \/>/, '根布局要挂上标题栏')
-  // 顺序判据：标题栏必须在导航/内容**之前**（它是窗口最上面那一条）。
-  const barAt = APP_SHELL.indexOf('<TitleBar />')
-  const navAt = APP_SHELL.indexOf('aria-label="主导航"')
-  assert.ok(barAt > 0 && navAt > barAt, '标题栏要排在主导航之前（在最上面）')
+  assert.match(APP_FRAME, /<TitleBar \/>/, 'AppFrame 里要真的渲染标题栏')
+  assert.ok(
+    !APP_SHELL.includes('<TitleBar'),
+    '★ `AppShell` 不许再画一条：两条栏就是两个写者（2026-10-20 之前正是"按屏补栏"）',
+  )
+  // ★ 唯一写者：全仓只有 `AppFrame.tsx` 渲染窗口栏。第二个文件一出现，就是又一条栏。
+  const barWriters = tsxFiles()
+    .filter((file) => /<TitleBar\b/.test(readFileSync(file, 'utf8')))
+    .map((file) => file.slice(SRC.length + 1))
+  assert.deepEqual(
+    barWriters,
+    [join('components', 'celira', 'AppFrame.tsx')],
+    `渲染窗口栏的文件只该有一个（AppFrame）；现在有：${barWriters.join(' / ') || '（没有）'}`,
+  )
+  assert.match(APP, /<AppFrame\b/, '★ 路由根必须经过 `AppFrame` —— 不然那一屏没有窗口按钮')
+  // 顺序判据：在框里，栏永远是第一件事（内容之前）。
+  assert.ok(
+    APP_FRAME.indexOf('<TitleBar />') < APP_FRAME.indexOf('{children}'),
+    '标题栏要排在内容之前（它是窗口最上面那一条）',
+  )
   assert.ok(
     !APP_SHELL.includes('<CeliraLogo'),
     '★ 导航栏里不再放标记（标题栏已经有品牌 —— 同一个东西画两遍）',
   )
+})
+
+/**
+ * ★★ **提示条不许长在关闭按钮上面**（2026-10-20 主人："你觉得这个提示的位置说得过去吗。
+ * 居然能在关闭窗口的上面的那种"）。
+ *
+ * 病：换世界那条提示排在 `AppShell` **外面**，而窗口是无边框自绘的 ⇒ 它成了窗口最上面
+ * 那一条，把最小化/最大化/关闭挤到第二行；而且 `h-screen` 的壳 ＋ 33px 的条 ＝ 整页多一根
+ * 滚动条（真机截图里看得见）。
+ *
+ * 判据：**栏 → 提示条 → 内容** 这个顺序只能由 `AppFrame` 写；页面根不再自己撑窗口。
+ */
+test('★★ 窗口最上面那一条只归窗口：提示条排在标题栏之后、内容之前', () => {
+  const barAt = APP_FRAME.indexOf('<TitleBar />')
+  const noticeAt = APP_FRAME.indexOf('{notice}')
+  const slotAt = APP_FRAME.indexOf('{children}')
+  assert.ok(barAt >= 0, '框里要有标题栏')
+  assert.ok(
+    noticeAt > barAt,
+    '★ 提示条必须在标题栏**之后**：这一趟旅程的状态属于内容，不属于窗口',
+  )
+  assert.ok(slotAt > noticeAt, '内容排在提示条之后')
+  // 高度：框自己撑满窗口，内容那格 `min-h-0 flex-1` ⇒ 多出来一条时是**页面缩**，不是整页溢出。
+  assert.match(APP_FRAME, /className="flex h-screen flex-col/, '框要撑满窗口')
+  assert.match(
+    APP_FRAME,
+    /className="flex min-h-0 flex-1 flex-col"/,
+    '★ 内容那一格必须 `min-h-0 flex-1`：少了它，提示条一出现就把内容顶出窗口（那根滚动条就是这么来的）',
+  )
+})
+
+/**
+ * ★ **屏幕根不再自己撑窗口**：`h-screen` / `min-h-screen` 只准出现在 `AppFrame`。
+ *
+ * 判据一句话：高度只有一个来源。页面自己写 `min-h-screen`，一旦框里多出任何一条
+ * （提示条、以后的别的条）就是 100vh + 那一条的高度 ⇒ 整页滚动条；写 `h-screen` 则会把
+ * 框给的高度整个忽略掉。这条是上面那个 bug 的**机械复现条件**，所以钉在源码上。
+ */
+test('★ 只有 `AppFrame` 可以写 `h-screen` / `min-h-screen`（高度只有一个来源）', () => {
+  const offenders: string[] = []
+  for (const file of tsxFiles()) {
+    if (file === join(SRC, 'components', 'celira', 'AppFrame.tsx')) continue
+    const text = readFileSync(file, 'utf8')
+    // 只看 `className="..."` 里的字面量：注释里写着这些词不算（本仓注释天天在讲历史）。
+    for (const match of text.matchAll(/className="([^"]*)"/g)) {
+      if (/\b(min-h-screen|h-screen)\b/.test(match[1])) {
+        offenders.push(`${file.slice(SRC.length + 1)}: className="${match[1]}"`)
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `窗口高度只能由 AppFrame 给，这些地方自己撑了：\n${offenders.join('\n')}`)
 })
 
 /**
@@ -119,26 +205,25 @@ test('★★ 自绘标题栏要的五条窗口权限必须在册（少一条就"
 })
 
 /**
- * ★ **第一屏也要有窗口按钮**（2026-10-20 主人真机："为啥这个界面没有那个比如关闭啊什么按钮"）。
+ * ★ **每一屏都带窗口按钮，而这件事不再靠"数外壳"**（2026-10-20）。
  *
- * 病：标题栏只挂在 `AppShell`（**进世界之后**那一层）⇒ 启动加载 / 命名卡 / 正门那一屏
- * 一个窗口按钮都没有；而窗口是 `decorations: false`（自绘）⇒ 人只能 Alt+F4。
- * 判据：这几屏必须经 `FirstScreen`（它渲染 `TitleBar`，浏览器里仍为 null）。
+ * 上一版（上午）的写法是「几屏就要几个 `FirstScreen` 外壳」—— 那是**按屏补栏**：
+ * 判据靠数数成立，漏一屏就没按钮；而栏一旦有两个写者，就出了下午那件事
+ * （提示条长在关闭按钮上面）。现在栏挂在路由根的 `AppFrame` 上 ⇒ 这条判据变成
+ * **"根上那一层在"**：只要 `RootLayout` 的出口是 `AppFrame`，任何一屏都在它里面。
+ *
+ * 反例留着：`RootLayout` 里再出现按屏的 `return <FirstScreen>` / 任何 `<TitleBar />`，
+ * 就是又长出第二个写者 —— 上面那条 `!APP.includes('FirstScreen')` 与
+ * `!APP_SHELL.includes('<TitleBar')` 各自钉着一半。
  */
-test('★ 第一屏（启动 / 命名 / 开机问 / 登录）必须带窗口栏', () => {
-  const APP = read('../src/App.tsx')
-  assert.match(APP, /function FirstScreen\(/, '要有一个共用的第一屏外壳（唯一写者）')
-  assert.match(APP, /<TitleBar \/>/, '外壳里要真的渲染标题栏')
-  // 数量一一对上：几屏就要几个外壳（漏一个 = 那一屏没有关闭按钮）。
-  const screens =
-    (APP.match(/<StartupLoading\b/g) ?? []).length +
-    (APP.match(/<NameYourselfCard\b/g) ?? []).length +
-    (APP.match(/<LoginGate\b/g) ?? []).length
-  const wrappers = (APP.match(/<FirstScreen>/g) ?? []).length
-  assert.ok(screens > 0, '第一屏总得有一张')
-  assert.equal(
-    wrappers,
-    screens,
-    `第一屏 ${screens} 张、外壳 ${wrappers} 个 —— 一对一，不然有一屏没窗口按钮`,
-  )
+test('★ 屏幕不必各自带栏：入口那几屏都在 AppFrame 里面', () => {
+  // `RootLayout` 只有一个出口，且那个出口是框 —— 于是"漏一屏"这种失败模式不可能发生。
+  const rootBody = APP.slice(APP.indexOf('function RootLayout('))
+  assert.match(rootBody, /<AppFrame\b/, 'RootLayout 的出口必须是 AppFrame')
+  const frames = (APP.match(/<AppFrame\b/g) ?? []).length
+  assert.equal(frames, 1, `App.tsx 里有 ${frames} 个 AppFrame —— 只该有一个（多半在 RootLayout）`)
+  // 第一屏那张卡仍然在（它们是被框住的内容，不是自己撑窗口的外壳）。
+  for (const screen of ['StartupLoading', 'NameYourselfCard', 'LoginGate']) {
+    assert.match(APP, new RegExp(`<${screen}\\b`), `第一屏少了一张：${screen}`)
+  }
 })

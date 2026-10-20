@@ -67,7 +67,7 @@
 
 ## 新增一个页面的配方
 
-页面 = 布局容器 + 领域组件 + 数据（经 `src/api/`）。禁止在页面里出现颜色类名与像素魔法数（间距用 Tailwind 标准档）。根容器用 `flex h-full min-h-0 flex-col`，不要自己写 `h-screen`；新页面必须在 App.tsx 注册并走路由级代码分割（`lazy()` + `Suspense`，首屏只保留 SplashPage 静态加载，fallback 用统一 `RouteFallback`）。
+页面 = 布局容器 + 领域组件 + 数据（经 `src/api/`）。禁止在页面里出现颜色类名与像素魔法数（间距用 Tailwind 标准档）。根容器用 `flex h-full min-h-0 flex-col`，**不要自己写 `h-screen`/`min-h-screen`**：窗口高度只有一个来源 —— 路由根的窗口框 `components/celira/AppFrame.tsx`（标题栏 + 提示条 + 内容，`tests/shell-titlebar.test.ts` 机械钉着「只有它写 `h-screen`」）；新页面必须在 App.tsx 注册并走路由级代码分割（`lazy()` + `Suspense`，首屏只保留 SplashPage 静态加载，fallback 用统一 `RouteFallback`）。
 
 ## 排版
 
@@ -93,6 +93,8 @@
 - Radix `ScrollArea` 内容需横向收缩时，必须加 `[&_[data-radix-scroll-area-viewport]>div]:!block`（长文本截断依赖它）。
 
 ## 导航壳
+
+- **窗口框只有一层**（2026-10-20 立）：路由根的 `components/celira/AppFrame.tsx` 画**标题栏**（品牌 + 最小化/最大化/关闭），再按 **栏 → 提示条 → 内容** 排。判据两条：① **窗口最上面那一条只归窗口** —— 换世界/断线这类"这一趟旅程的状态"属于内容，长在栏**下面**（2026-10-20 主人真机："这个提示的位置说得过去吗。居然能在关闭窗口的上面"）；② **高度只由这一层给**（框 `h-screen`、内容那格 `min-h-0 flex-1`，页面根 `h-full`）—— 于是任何一条提示出现时是**页面缩**，不是整页多一根滚动条。别在某一屏里另画一条栏，也别让页面自己撑窗口；`tests/shell-titlebar.test.ts` 把这两条都钉在源码上。
 
 - 路由即产品地图（react-router v7，`src/App.tsx`）：`/`（重定向到 `/splash`）、`/splash`、`/app`（index→chat / chat/:roomId / chat/:roomId/history / contacts / contacts/:participantId / contacts/new / discover / runtime / experience / **runtimes / runtimes/:entryId / runtimes/:entryId/config** / agents / agents/:participantId / profile）、`/settings`（index / general / appearance / notifications / server / homes / about）、`/settings/providers`（**别名** ⇒ 按机器寻址的配置页）、`/agent/:participantId`、`/gallery`、`*`；
   ⚠ 这份清单**必须与 `App.tsx` 同步**：2026-09-26 审计发现它当时缺 `/app/runtimes` 与 `/app/runtimes/:entryId`（最新、最重的两条），并多列了已删除的 `/settings/devices`。**权威是 `routeRegistry.ts` 的 `ROUTES`**（`route-admission.test.ts` 读 `App.tsx` 逐条对表），这一段只是给人看的副本——**改了路由记得改这里**；

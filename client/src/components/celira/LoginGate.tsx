@@ -109,7 +109,7 @@ export function LoginGate({
       setBusy(false)
     }
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 py-10">
+      <div className="flex min-h-full flex-col items-center justify-center gap-6 bg-background px-6 py-10">
         <img src="/logo/logo-gradient.svg" alt="Celira" className="size-20 md:size-24" />
         <div className="max-w-sm space-y-2 text-center">
           <h1 className="text-title">你自己的世界</h1>
@@ -149,7 +149,7 @@ export function LoginGate({
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 py-10">
+    <div className="flex min-h-full flex-col items-center justify-center gap-6 bg-background px-6 py-10">
       <img src="/logo/logo-gradient.svg" alt="Celira" className="size-20 md:size-24" />
       <div className="max-w-sm space-y-2 text-center">
         <h1 className="text-title">连接你的世界</h1>

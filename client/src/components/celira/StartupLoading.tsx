@@ -12,7 +12,7 @@ import { Loader2 } from 'lucide-react'
  */
 export function StartupLoading() {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-6 bg-background px-6">
+    <div className="flex h-full min-h-0 flex-col items-center justify-center gap-6 bg-background px-6">
       <img src="/logo/logo-gradient.svg" alt="Celira" className="size-20 md:size-24" />
       <div className="flex items-center gap-2 text-muted-foreground">
         <Loader2 className="size-5 animate-spin" aria-hidden />

@@ -12,7 +12,6 @@ import { isRealWorldSession } from '@/api/prefs'
 import { useAppStore, useConnection, useRooms } from '@/api/store'
 import { useUnreadIndicators } from '@/hooks/use-unread'
 import { isSecondaryMobileRoute, navGroupsFor } from './navGroups'
-import { TitleBar } from './TitleBar'
 import { ParticipantAvatar } from './ParticipantAvatar'
 import { ThemeToggle } from './ThemeToggle'
 
@@ -85,9 +84,10 @@ export function AppShell() {
   }, [navigate])
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
-      {/* 壳自己的标题栏（浏览器里返回 null ⇒ web 版布局不变；判据与三条纪律见那个文件头）。 */}
-      <TitleBar />
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+      {/* ⚠ **这里不再画标题栏**（2026-10-20 下午）：窗口栏只有一层，在路由根的
+          `AppFrame`（栏 + 提示条 + 内容，高度也由它给）。壳这一层只负责"进世界之后"
+          的形状：导航 + 内容 + 移动端 TabBar，根用 `h-full` 填满框给的高度。 */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
         {/* 桌面图标栏：与移动 TabBar 同源（`navGroupsFor`），上组「世界」、
             下组「家」之间用分隔线呈现分区（设计系统「导航壳」）。

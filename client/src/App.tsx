@@ -32,8 +32,7 @@ import {
   disableLocalWorld,
 } from '@/api/shellLocal'
 import { NameYourselfCard } from '@/components/celira/NameYourselfCard'
-import { TitleBar } from '@/components/celira/TitleBar'
-import { isTauriRuntime } from '@/api/shell'
+import { AppFrame } from '@/components/celira/AppFrame'
 import { cn } from '@/lib/utils'
 
 const ChatPage = lazy(() => import('@/pages/ChatPage').then((m) => ({ default: m.ChatPage })))
@@ -101,12 +100,8 @@ function RouteFallback() {
 function EntryLanding() {
   const { token } = useConnection()
   if (!token.trim()) return <Navigate to="/splash" replace />
-  // 它也是**第一屏**（有凭据时的诚实等待态）⇒ 同样要带窗口栏（`FirstScreen`，2026-10-20）。
-  return (
-    <FirstScreen>
-      <StartupLoading />
-    </FirstScreen>
-  )
+  // 它也是**第一屏**（有凭据时的诚实等待态）；窗口栏归 `AppFrame`（路由根那一层），这一屏只管填满。
+  return <StartupLoading />
 }
 
 /**
@@ -517,32 +512,16 @@ export async function declineLocalWorld(): Promise<void> {
   useAppStore.getState().setNeedsLogin(true)
 }
 
-/**
- * **第一屏也要有窗口按钮**（2026-10-20 主人："为啥这个界面没有那个比如关闭啊什么按钮"）。
- *
- * 病：标题栏只挂在 `AppShell`（**进世界之后**那一层）⇒ 启动加载 / 命名卡 / 正门这几屏
- * 一个窗口按钮都没有；而窗口是 `decorations: false`（自绘），于是人**只能** Alt+F4 或
- * 任务栏右键 —— 这在一个"我还没进来"的屏幕上尤其糟。
- *
- * 判据两条：
- * 1. **凡是不在 `AppShell` 里的一屏，都经过这一层**（只有一个写者，不会出现两条栏）；
- * 2. 它是**浮层**（`fixed`），不改任何一屏的布局：那几屏自己都是 `min-h-screen` 的居中卡，
- *    把栏塞进 flex 流里就会多出 36px 的溢出。
- *
- * 浏览器里 `TitleBar` 自己返回 null（`isTauriRuntime`）⇒ web 版布局一行都不变。
- */
-function FirstScreen({ children }: { children: ReactNode }) {
-  return (
-    <>
-      {isTauriRuntime() && (
-        <div className="fixed inset-x-0 top-0 z-50">
-          <TitleBar />
-        </div>
-      )}
-      {children}
-    </>
-  )
-}
+// ⚠ **这里不再有「第一屏外壳」**（`FirstScreen` 已删，2026-10-20 下午）。
+//
+// 它 2026-10-20 上午被加进来，是为了让启动 / 命名 / 正门几屏也有窗口按钮 —— 但那是一次
+// **按屏补栏**：栏从此有两个写者（`AppShell` 与那个浮层），而"栏"本该只有一层。
+// 同一天下午就撞上了它的代价：换世界那条提示排在 `AppShell` 外面，于是长在了**关闭按钮上面**
+// （主人原话："居然能在关闭窗口的上面的那种"）。
+//
+// 现在窗口栏只有一处：路由根的 `components/celira/AppFrame.tsx`（栏 + 提示条 + 内容，
+// 高度也由它给）。各屏因此只需把自己的根从 `h-screen` / `min-h-screen` 换成
+// `h-full` / `min-h-full`：高度由框给，撑不下时照旧整页滚。
 
 function RootLayout() {
   const location = useLocation()
@@ -609,23 +588,21 @@ function RootLayout() {
 
   // 首屏定案之前：无论当前路径是什么，都不渲染 Splash / fixtures 内容，
   // 只显示诚实的加载态。
+  //
+  // ★ 四格「这一趟是哪一屏」只决定 **`screen` 是什么**，不再各写一个 return：
+  //   窗口框（`AppFrame`）在它们外面只出现一次 ⇒ 换世界那条提示永远排在标题栏**下面**，
+  //   也永远不会把某一屏挤出一根滚动条（2026-10-20 主人："居然能在关闭窗口的上面的那种"）。
+  let screen: ReactNode
   if (startupPending) {
-    return (
-      <FirstScreen>
-        <StartupLoading />
-        <DemoSwitcher />
-      </FirstScreen>
-    )
-  }
-  // 正门优先于一切：**入口路径**（`/`、`/splash`）且没有可复用的直连凭据时，
-  // 第一屏就是这张卡。
-  // 深链接（/app/…、/gallery 等）保持各自既有语义，不做拦截——首访者总是从
-  // 入口路径进来，而深链接的语义（见得 `FixtureRouteGuard` 与各页面自身）
-  // 本来就是「已经决定过连接之后」的路径。
-  if (needsName && isEntryPath) {
-    return (
-      <FirstScreen>
-        <NameYourselfCard
+    screen = <StartupLoading />
+  } else if (needsName && isEntryPath) {
+    // 正门优先于一切：**入口路径**（`/`、`/splash`）且没有可复用的直连凭据时，
+    // 第一屏就是这张卡。
+    // 深链接（/app/…、/gallery 等）保持各自既有语义，不做拦截——首访者总是从
+    // 入口路径进来，而深链接的语义（见得 `FixtureRouteGuard` 与各页面自身）
+    // 本来就是「已经决定过连接之后」的路径。
+    screen = (
+      <NameYourselfCard
         onSubmit={async (displayName) => {
           const done = await nameLocalHuman(displayName)
           if (done.ok) {
@@ -640,14 +617,11 @@ function RootLayout() {
           await declineLocalWorld()
           setNeedsName(false)
         }}
-        />
-      </FirstScreen>
+      />
     )
-  }
-  if (localAsk && isEntryPath) {
-    return (
-      <FirstScreen>
-        <LoginGate
+  } else if (localAsk && isEntryPath) {
+    screen = (
+      <LoginGate
         mode="run-local"
         localFailure={localFailure}
         onRunLocal={async () => {
@@ -675,53 +649,58 @@ function RootLayout() {
           await declineLocalWorld()
           setLocalAsk(false)
         }}
-        />
-      </FirstScreen>
+      />
     )
-  }
-  if (needsLogin && isEntryPath) {
-    return (
-      <FirstScreen>
-        <LoginGate />
-      </FirstScreen>
-    )
-  }
-  return (
-    <>
-      {/*
-        ★ **换了世界就说出来**（2026-10-08）。为什么必须有这一条：静默换世界就是**欺骗** ——
-        用户会以为自己还在原来那个世界（那里的房间与人都在，只是此刻够不着）。
-        一次性的（只活这一次启动），并且**说清怎么回去**（连接设置在 `/settings/general`，
-        那里是地址与 token 两格 —— 那是"换一个世界"的出口，不是假路径）。
-      */}
-      {switchedFrom && (
-        <div
-          role="status"
-          className="flex items-center gap-3 border-b border-border bg-card px-4 py-2 text-caption text-muted-foreground"
-        >
-          <span className="min-w-0 flex-1">
-            上次连的世界（{switchedFrom}）连不上，已经带你来这台机器上的世界。要回到那个世界：设置 →
-            连接设置。
-          </span>
-          <Button variant="ghost" size="sm" onClick={() => setSwitchedFrom(null)}>
-            知道了
-          </Button>
-        </div>
-      )}
-      {/*
+  } else if (needsLogin && isEntryPath) {
+    screen = <LoginGate />
+  } else {
+    screen = (
+      /*
         **渲染错误边界（内层）** —— 覆盖全部路由。
         本仓的红路径纪律（`tests/no-silent-red-path.test.ts`）原先只管"动作失败要有话"，
         没管"整个界面塌掉"：React 在没有边界时会把整棵树卸载 = 白屏，而那是最彻底的静默。
         `resetKey` 传 pathname ⇒ 出错后一旦换路由就复位（用户点「返回消息」走的正是这条路）。
         判据与两类文案见 `lib/renderFailure.ts`。
-      */}
+      */
       <RouteErrorBoundary resetKey={location.pathname}>
         <Suspense fallback={<RouteFallback />}>
           <Outlet />
         </Suspense>
       </RouteErrorBoundary>
+    )
+  }
+
+  return (
+    <AppFrame
+      notice={
+        /*
+          ★ **换了世界就说出来**（2026-10-08）。为什么必须有这一条：静默换世界就是**欺骗** ——
+          用户会以为自己还在原来那个世界（那里的房间与人都在，只是此刻够不着）。
+          一次性的（只活这一次启动），并且**说清怎么回去**（连接设置在 `/settings/general`，
+          那里是地址与 token 两格 —— 那是"换一个世界"的出口，不是假路径）。
+
+          ★ 位置（2026-10-20）：交给 `AppFrame` 排在标题栏**之后** —— 它是这一趟旅程的状态，
+          属于内容；窗口最上面那一条永远归窗口（品牌 + 最小化/最大化/关闭）。
+        */
+        switchedFrom ? (
+          <div
+            role="status"
+            className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-4 py-2 text-caption text-muted-foreground"
+          >
+            <span className="min-w-0 flex-1">
+              上次连的世界（{switchedFrom}）连不上，已经带你来这台机器上的世界。要回到那个世界：设置 →
+              连接设置。
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => setSwitchedFrom(null)}>
+              知道了
+            </Button>
+          </div>
+        ) : null
+      }
+    >
+      {screen}
       <DemoSwitcher />
-    </>
+    </AppFrame>
   )
 }
 

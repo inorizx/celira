@@ -5,7 +5,8 @@
  *
  * `flex-1` 的子项默认 `min-height: auto` ⇒ 内容比容器高时它**被内容撑高**（而不是被压住）
  * ⇒ 滚动区（`ScrollArea` 的视口 / `overflow-y-auto` 那一层）**永远不溢出** ⇒ 没有滚动条、
- * 滚轮也没得滚；而页面根 `AppShell` 是 `h-screen … overflow-hidden` ⇒ 多出来的部分被**直接裁掉**。
+ * 滚轮也没得滚；而它上面那几层是定高的（`AppFrame` 的 `h-screen` + 内容那格
+ * `min-h-0 flex-1`，页面根 `h-full … overflow-hidden`）⇒ 多出来的部分被**直接裁掉**。
  * 用户看到的是两件事同时发生：**内容显示不全 ＋ 滚轮不动**。
  *
  * 这条坑仓库里写着（`src/pages/settings/SettingsLayout.tsx` 那句注释），但 2026-10-09 一次中了
@@ -30,7 +31,7 @@
  *
  * - 只看**字面量** className：`className={cn('flex-1', x && 'min-h-0')}` 这类动态拼法读不全
  *   （保守放过，不误报）；
- * - 它量不到"这一页压根没放滚动区"那种形状（例如 `GalleryPage` 的 `min-h-screen`）——
+ * - 它量不到"这一页压根没放滚动区"那种形状（例如 `GalleryPage` 的 `min-h-full`）——
  *   那要真机上的**行为**判据（`verify-ui` 量"内容比窗口高时滚得动"），不在这条静态守卫的射程里。
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'

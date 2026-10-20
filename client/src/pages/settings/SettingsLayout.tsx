@@ -93,7 +93,9 @@ export function SettingsLayout() {
   const current = groups.flatMap((g) => g.items).find((item) => location.pathname.startsWith(item.to))
 
   return (
-    <div className="flex h-screen bg-background">
+    // 高度由窗口框给（`components/celira/AppFrame.tsx` 的 `flex-1` 那一格）；本页只填满
+    // ⇒ `h-full min-h-0`，不写 `h-screen`（写了就会把标题栏那 36px 加成一整页的溢出）。
+    <div className="flex h-full min-h-0 bg-background">
       {/* 目录栏：桌面常显为窄栏；移动端仅在 /settings 首页全宽显示 */}
       <div
         className={cn(

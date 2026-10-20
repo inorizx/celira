@@ -127,7 +127,7 @@ export function AgentPage() {
 
   if (!participant) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background px-6">
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-background px-6">
         <div className="text-body">没有这位参与者的资料</div>
         {/* ⚠ 不许把它说成"这个人不存在"：读不到 ≠ 不存在（这一页的目录只认
             "和你同处过一个房间"的参与者，读不到是**我们**的视野边界，不是它的事实）。 */}
@@ -142,7 +142,7 @@ export function AgentPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-4">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="返回">
           <ArrowLeft className="size-4" />
@@ -232,7 +232,7 @@ export function AgentPage() {
 
           <Separator />
           <p className="text-center text-caption text-muted-foreground">
-            这一页只说它在世界里是什么样。它跑在哪台机器上、用什么模型，在执行端那一页。
+            这一页只说它在世界里是什么样。它跑在哪台机器上、用什么模型，在「我的机器」那一页。
           </p>
         </div>
       </ScrollArea>
