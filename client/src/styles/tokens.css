@@ -89,7 +89,11 @@
   --overlay: #00000080;
 
   --brand: #a284f4;
-  --agent: #6ec6ff;
+  /* Agent 身份的青色压一档（2026-10-20）：原来是 `#6ec6ff`（sat 57% / V 100%），和紫色主色、
+     绿色在线点同屏就是三个高饱和色 ⇒ 抢主色。`#8cc4e8` 同色相（203.5°）、sat 40% / V 91%，
+     对底 9.6:1、对 `--agent-surface` 8.0:1 —— 名字和 AGENT 徽章仍然一眼能读，但不发光。
+     `--presence-thinking` 跟它同值：两个青不要各走各的（"在想"本来就是 Agent 那一族）。 */
+  --agent: #8cc4e8;
   --agent-surface: #1c2830;
   --bubble-self-from: #7f6fe0;
   --bubble-self-to: #9a86ec;
@@ -97,7 +101,7 @@
   --bubble-peer: #211e2b;
   --bubble-peer-foreground: #e4e2ec;
   --presence-online: #7bd88f;
-  --presence-thinking: #6ec6ff;
+  --presence-thinking: #8cc4e8; /* 与 `--agent` 同值：两个青不要各走各的 */
   --presence-silent: #797390;
   --presence-timeout: #e0b25d;
   --presence-failed: #ef6b6b;
