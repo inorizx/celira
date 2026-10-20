@@ -939,7 +939,7 @@ export function ChatPage() {
                         data-index={row.key}
                         id={`${MESSAGE_ANCHOR_PREFIX}${row.message.id}`}
                       >
-                        <div className="mx-auto w-full max-w-5xl px-4 md:px-6">
+                        <div className="mx-auto w-full max-w-5xl 2xl:max-w-6xl px-4 md:px-6">
                           <div className={cn(row.compact ? 'py-1' : 'py-3')}>
                             {row.dayChanged && row.message.day && (
                               <div className="pb-6">
@@ -998,7 +998,7 @@ export function ChatPage() {
                     )
                   })}
                   {/* 空态 / 失败态（`chatFeed` 说的是**世界里**的条数）—— 它排在最后一条后面。 */}
-                  <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 md:px-6">
+                  <div className="mx-auto w-full max-w-5xl 2xl:max-w-6xl space-y-6 px-4 py-6 md:px-6">
                     {chatFeed.kind !== 'messages' && (
                       <div className="px-6 pt-24 text-center">
                         {chatFeed.kind === 'failed' ? (

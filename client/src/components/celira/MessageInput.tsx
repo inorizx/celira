@@ -601,7 +601,7 @@ export function MessageInput({
         }
       }}
     >
-      <div className="relative mx-auto w-full max-w-5xl">
+      <div className="relative mx-auto w-full max-w-5xl 2xl:max-w-6xl">
         {mention && canMention && (
           <MentionPopover
             members={roomMembers}

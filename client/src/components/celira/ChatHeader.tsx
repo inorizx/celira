@@ -75,7 +75,7 @@ export function ChatHeader({
   }
   return (
     <header className="border-b border-border bg-card px-4 py-4 md:px-6">
-      <div className="mx-auto flex w-full max-w-5xl items-center gap-3">
+      <div className="mx-auto flex w-full max-w-5xl 2xl:max-w-6xl items-center gap-3">
       {onBack && (
         <Button
           variant="ghost"

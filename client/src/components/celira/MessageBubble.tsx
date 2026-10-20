@@ -129,7 +129,7 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        'group/msgline flex max-w-[85%] gap-3 md:max-w-[70%]',
+        'group/msgline flex max-w-[85%] gap-3 md:max-w-[70%] xl:max-w-[76%]',
         isSelf && 'ml-auto flex-row-reverse',
       )}
     >
