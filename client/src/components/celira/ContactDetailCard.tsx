@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Cable, Copy, Cpu, MessageSquarePlus, Settings2, UserRound } from 'lucide-react'
+import { Cable, Cpu, MessageSquarePlus, Settings2, UserRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { getModel, getProvider, myAgentConfig } from '@/fixtures/data'
@@ -12,6 +12,7 @@ import { getApi, useAppStore, useConnection, useRooms } from '@/api/store'
 import { errorText } from '@/api/contractErrors'
 import { isRealWorldSession } from '@/api/prefs'
 import { AgentBadge } from './AgentBadge'
+import { CopyIdButton } from './CopyIdButton'
 import { OfficialBadge } from './OfficialBadge'
 import { ParticipantAvatar } from './ParticipantAvatar'
 
@@ -178,7 +179,7 @@ export function ContactDetailCard({ participant }: { participant: Participant })
         <div className="flex items-baseline gap-4 px-5 py-3">
           <span className="w-16 shrink-0 text-caption text-muted-foreground">身份 ID</span>
           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-caption">{participant.id}</code>
-          <Copy className="size-3 shrink-0 cursor-pointer self-center text-muted-foreground transition-colors hover:text-foreground" />
+          <CopyIdButton value={participant.id} className="self-center" />
         </div>
         {participant.signature && (
           <InfoRow label="签名" value={participant.signature} truncate />

@@ -573,7 +573,7 @@ node home.js up              # 全新奠基：新 Home Identity、新 Human（to
 ### `node home.js up --agent <这支的 id>`（**给这一支**安家）
 
 **什么时候用**：两支来路都行 —— ① 家不知道它是谁了（`home.conf` 丢了 / 被换了 / 从一份旧备份回来），
-世界里它还在（客户端「我的 Agent」里看得到那个 id）；② 世界里**新**建了一支 Agent（客户端「添加 Agent」），
+世界里它还在（客户端「我的 Agent」里看得到那个 id）；② 世界里**新**建了一支 Agent（客户端「我的 Agent」→ 右上角「添加」），
 要在这台机器上给它安个家（**它才会回话**）。
 
 ```powershell

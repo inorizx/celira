@@ -586,6 +586,14 @@ try {
     meText.includes('房间成员') || meText.includes('还没有任何房间'),
     snippet(meText, 200),
   )
+  // ⚠ 2026-10-20：这格原先是一颗**没有 onClick 的 `Copy` 图标**（看着能复制、按了什么也不发生）。
+  //    加人/加 Agent 在这个世界里唯一的握手就是"对方把这串 ID 给你"，所以它是真按钮才算数。
+  const copyIdButtons = await page.getByRole('button', { name: '复制身份 ID' }).count()
+  check(
+    '★ 我的：「身份 ID」旁边那颗复制是**真按钮**（不是画上去的图标）',
+    copyIdButtons === 1,
+    `复制按钮=${copyIdButtons}`,
+  )
 
   // ---- 我的 Agent：**列表**（刀2a 起点一个 Agent ⇒ Agent 的主页；填肉刀起每行是三格读数）----
   await goto(`${args.base}/app/agents`, '我的 Agent 列表')
@@ -1879,18 +1887,40 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)
 
-  // ---- 「添加 Agent」面板：同一句说明不许渲染两遍（2026-09-29 真机实测修）----
-  await goto(`${args.base}/app/contacts/new`, '新的朋友（添加 Agent 面板）')
-  await page.waitForTimeout(2500)
-  await page.getByRole('button', { name: '添加 Agent' }).click()
-  await page.waitForTimeout(800)
-  const agentPanelText = await page.locator('body').innerText()
-  const dupSentence = 'Agent「用哪条模型源」在执行端那一页的「模型」房间。'
-  const dupCount = agentPanelText.split(dupSentence).length - 1
+  // ---- 「新的朋友」= **一个输入框**（2026-10-20：按 kind 分叉的两个页签 + 「创建 Agent」都撤走）----
+  //
+  // 判据来自契约，不来自喜好：`POST /v1/contacts/requests` 的字段是 **`participant_id`**，
+  // 目标"可以是任意 active 主体"（`CORE_V1_CONTACT_REVERSIBILITY.md` §5.2）。所以：
+  //   ① 页面上不许再有「添加真人 / 添加 Agent」—— 那是客户端把世界拆掉的分叉装回来；
+  //   ② 只有一个输入框，且明说 Human 与 Agent 同一串；
+  //   ③ 贴一串**不是 id** 的东西 ⇒ 当场说清，不发请求（真机门禁不写，见上面那条纪律）。
+  // ⚠ 「添加 Agent」现在是**创建所有权**，住在 `/app/agents` 右上角那颗「添加」里 ——
+  //   这一页不该再有它（同一件事两个入口，迟早说两句不同的话）。
+  await goto(`${args.base}/app/contacts/new`, '新的朋友（一个输入框）')
+  await page.waitForTimeout(1500)
+  const newContactText = await page.locator('body').innerText()
+  const kindTabs =
+    (await page.getByRole('button', { name: '添加真人' }).count()) +
+    (await page.getByRole('button', { name: '添加 Agent' }).count())
   check(
-    '★ 「添加 Agent」面板那句说明只出现一次（原先渲染两遍）',
-    dupCount === 1,
-    `出现 ${dupCount} 次`,
+    '★ 「新的朋友」不按 kind 分页签（世界只认一串 participant_id）',
+    kindTabs === 0,
+    `kind 页签=${kindTabs}`,
+  )
+  check(
+    '「新的朋友」说清 Human 与 Agent 用同一串 ID',
+    newContactText.includes('Human 与 Agent 都用这一串'),
+    snippet(newContactText, 200),
+  )
+  const contactInputs = await page.locator('input').count()
+  check('「新的朋友」只有一个输入框（没有第二个名字输入框 / 创建表单）', contactInputs === 1, `输入框=${contactInputs}`)
+  await page.locator('#contact-id').fill('张三')
+  await page.waitForTimeout(400)
+  const junkText = await page.locator('body').innerText()
+  check(
+    '★ 贴一串不是 ID 的东西 ⇒ 当场说清（"名字在这里查不到人"，且不发请求）',
+    junkText.includes('这不像一串身份 ID'),
+    snippet(junkText, 200),
   )
 
   // ---- 设置区：模型配置**搬出去了**（2026-10-11 按机器寻址）+ 新的服务器节 ----

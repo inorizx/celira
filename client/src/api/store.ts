@@ -12,6 +12,7 @@ import type { CallStreamEvent, CallView } from './contracts'
 import type {
   Attachment,
   BlockedPeer,
+  ContactRequestReceipt,
   DeliveryState,
   Message,
   OwnedAgent,
@@ -346,7 +347,8 @@ interface AppState {
   loadRoomMessages: (roomId: string) => Promise<void>
   loadOlder: (roomId: string) => Promise<number>
   refreshContacts: () => Promise<void>
-  sendContactRequest: (humanId: string, idempotencyKey?: string) => Promise<void>
+  /** 发一段关系申请；回执带着「对方是谁」与「这条在等谁」（见 `ContactRequestReceipt`）。 */
+  sendContactRequest: (participantId: string, idempotencyKey?: string) => Promise<ContactRequestReceipt>
   acceptContact: (humanId: string) => Promise<void>
   /** 拒绝给我的那条 pending 申请（只有 `direction === 'incoming'` 的才该有入口）。 */
   declineContact: (participantId: string) => Promise<void>
@@ -1384,11 +1386,23 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
     },
 
-    sendContactRequest: async (humanId, idempotencyKey) => {
-      if (!api?.sendContactRequest) return
+    /**
+     * 发一段关系申请，**把回执交回去**（页面拿它说"这条现在在等谁"）。
+     *
+     * 两条：
+     * - 没有这条能力的连接上**抛错**，不静默返回 —— 从前它 `return` 一个 `undefined`，
+     *   页面照样把按钮切成「请求已发送」，那是对着一件没发生的事报成功；
+     * - 落定之后重读关系账（对端可能刚接受，或这条其实是对面先发过来的）：世界说了算，
+     *   本地不猜。重读是 fire-and-forget，不挡住回执。
+     */
+    sendContactRequest: async (participantId, idempotencyKey) => {
+      const apiNow = api
+      if (!apiNow?.sendContactRequest) throw new Error('当前连接不提供发起联系人申请的能力')
       // idempotencyKey 由 core.ts 内部自生成（调用方传的被忽略）；
       // 授权/关系/幂等裁决全在 Core。
-      await api.sendContactRequest(humanId, idempotencyKey)
+      const receipt = await apiNow.sendContactRequest(participantId, idempotencyKey)
+      void get().refreshContacts()
+      return receipt
     },
 
     acceptContact: async (humanId) => {

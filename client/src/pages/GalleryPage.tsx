@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { AgentBadge } from '@/components/celira/AgentBadge'
+import { CopyIdButton } from '@/components/celira/CopyIdButton'
 import { ParticipantAvatar } from '@/components/celira/ParticipantAvatar'
 import { MessageBubble } from '@/components/celira/MessageBubble'
 import { MarkdownText } from '@/components/celira/MarkdownText'
@@ -148,6 +149,13 @@ function ThemePanel({
             </Button>
             <Badge>默认徽章</Badge>
             <AgentBadge />
+            {/* 复制身份 ID：**唯一**需要"这一串从哪来"的那颗按钮（加联系人靠它）。 */}
+            <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
+              <code className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                3f2504e0-4f89-41d3-9a0c-0305e82c3301
+              </code>
+              <CopyIdButton value="3f2504e0-4f89-41d3-9a0c-0305e82c3301" />
+            </span>
             <ThemeToggle />
           </div>
           <Input placeholder="输入框占位" className="max-w-xs" />

@@ -13,6 +13,8 @@ import test from 'node:test'
 import {
   agentProfileFieldError,
   attachmentInputMode,
+  classifyContactRequest,
+  looksLikeParticipantId,
   presentationFieldError,
   roomPeerNameOf,
   roomPreview,
@@ -26,7 +28,7 @@ import {
   supportsAgentDetail,
   supportsAgentModels,
   supportsAgentProfile,
-  supportsContactRequestByHumanId,
+  supportsContactRequest,
   supportsRoomCreation,
   supportsMemberPresentations,
 } from '../src/api/uiPolicy.ts'
@@ -123,11 +125,58 @@ test('Agent「模型」区判据 = 供应商目录数据面 `listProviders` 真�
   assert.equal(supportsAgentModels({ listProviders: 'yes' }), false, '非函数不算能力')
 })
 
-test('那句「输入对方 Human 的 UUID」的判据 = `sendContactRequest` 真的在', () => {
-  assert.equal(supportsContactRequestByHumanId({ sendContactRequest: async () => {} }), true)
-  assert.equal(supportsContactRequestByHumanId({ mode: 'core' }), false)
-  assert.equal(supportsContactRequestByHumanId(undefined), false)
-  assert.equal(supportsContactRequestByHumanId({ sendContactRequest: 'yes' }), false)
+test('「贴上对方的身份 ID」那块提示的判据 = `sendContactRequest` 真的在', () => {
+  assert.equal(supportsContactRequest({ sendContactRequest: async () => {} }), true)
+  assert.equal(supportsContactRequest({ mode: 'core' }), false)
+  assert.equal(supportsContactRequest(undefined), false)
+  assert.equal(supportsContactRequest({ sendContactRequest: 'yes' }), false)
+})
+
+// —— 关系申请：输入形状 ＋ 回执的四个分支（2026-10-20）——
+//
+// 这一页（`/app/contacts/new`）只有一个输入框、一个按钮，所以它的两个判断都不许含糊：
+// ① 贴进来的是不是一串 id（不是"这个人存不存在"——那只有服务端能答）；
+// ② 回执说的是哪一件事（「我刚发出去」与「对方先发给我、该我点头」是反的两件事）。
+
+test('身份 ID 的形状：只认规范形 UUID v4（大小写与首尾空白宽容，其余一律不算）', () => {
+  const canon = '3f2504e0-4f89-41d3-9a0c-0305e82c3301'
+  assert.equal(looksLikeParticipantId(canon), true)
+  assert.equal(looksLikeParticipantId(`  ${canon}  `), true, '贴进来常带空白')
+  assert.equal(looksLikeParticipantId(canon.toUpperCase()), true, '大写是同一个 id（发出去之前统一小写）')
+
+  // 反例：这一格存在的理由就是这些 —— 名字会被服务端当 id 查，回一个"找不到"，
+  // 而那是**服务端说没有这个人**，不是"你贴了一串名字"。
+  assert.equal(looksLikeParticipantId('张三'), false)
+  assert.equal(looksLikeParticipantId('hm_01J8XKM3T2'), false, '演示夹具的假 id 不是世界里的形状')
+  assert.equal(looksLikeParticipantId(''), false)
+  // v1 / 非 v4：服务端 `ParticipantId::parse_stable` 也只认 v4（`participant.rs:20`）。
+  assert.equal(looksLikeParticipantId('3f2504e0-4f89-11d3-9a0c-0305e82c3301'), false)
+  // 少一段 / 多一段。
+  assert.equal(looksLikeParticipantId('3f2504e0-4f89-41d3-9a0c-0305e82c33'), false)
+  assert.equal(looksLikeParticipantId('3f2504e0-4f89-41d3-9a0c-0305e82c3301x'), false)
+})
+
+test('★ 回执的四个分支不许合并成「请求已发送」', () => {
+  const peer = { id: 'p', kind: 'agent' as const, displayName: '助手', initials: '助' }
+  const base = { peer, status: 'pending' as const, direction: 'outgoing' as const }
+
+  // 201：刚建的段。
+  assert.equal(classifyContactRequest({ ...base, replayed: false }), 'sent')
+  // 200 + outgoing：我之前发过，还在等。
+  assert.equal(classifyContactRequest({ ...base, replayed: true }), 'awaiting-them')
+  // 200 + incoming：**对方先发过给我** —— 这一支从前被说成「已发送，等对方」，
+  // 而真实处境是"轮到我点头"（反了）。
+  assert.equal(
+    classifyContactRequest({ ...base, direction: 'incoming', replayed: true }),
+    'needs-my-answer',
+  )
+  // 200 + accepted：早就是联系人（不是"刚发出去"）。
+  assert.equal(
+    classifyContactRequest({ ...base, status: 'accepted', direction: 'incoming', replayed: true }),
+    'now-contact',
+  )
+  // accepted 优先于方向：accepted 段的方向对"发生了什么"没有意义。
+  assert.equal(classifyContactRequest({ ...base, status: 'accepted', replayed: true }), 'now-contact')
 })
 
 // —— 写面判据（2026-09-26 立）：**读得到 ≠ 改得动** ——

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Bell, ChevronRight, Copy, ImagePlus, Info, Loader2, Trash2 } from 'lucide-react'
+import { Bell, ChevronRight, ImagePlus, Info, Loader2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -11,6 +11,7 @@ import { getParticipant } from '@/api/participantDirectory'
 import { toParticipant } from '@/api/participantProjection'
 import { isRealWorldSession } from '@/api/prefs'
 import { AgentBadge } from '@/components/celira/AgentBadge'
+import { CopyIdButton } from '@/components/celira/CopyIdButton'
 import { ParticipantAvatar } from '@/components/celira/ParticipantAvatar'
 import { ThemeToggle } from '@/components/celira/ThemeToggle'
 import { getApi, useAppStore, useConnection } from '@/api/store'
@@ -158,7 +159,7 @@ export function ProfilePage() {
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono">
                   {realWorld ? (me?.participant.id ?? '—') : 'hm_01J8XKM3T2'}
                 </code>
-                <Copy className="size-3 cursor-pointer transition-colors hover:text-foreground" />
+                <CopyIdButton value={realWorld ? (me?.participant.id ?? '') : 'hm_01J8XKM3T2'} />
               </div>
               <div className="text-caption text-muted-foreground">
                 {realWorld

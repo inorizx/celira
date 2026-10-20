@@ -367,7 +367,7 @@ test('★ 认领出口不许被读数挡住（源级守卫）：配好模型回�
   )
 })
 
-test('★ 落地页接线（源级守卫）：列表行渲染四态读数；「新的朋友」把刚创建那一支的 id 交给它', () => {
+test('★ 落地页接线（源级守卫）：列表行渲染四态读数；创建读数落在**就地面板**里', () => {
   const panel = readFileSync(
     fileURLToPath(new URL('../src/components/celira/AgentsListPanel.tsx', import.meta.url)),
     'utf8',
@@ -378,22 +378,32 @@ test('★ 落地页接线（源级守卫）：列表行渲染四态读数；「�
     panel.includes('anjiaReadout(anjia.kind, anjia.sub)'),
     '列表行必须渲染 anjiaReadout 的人话（含 refused 子词）',
   )
-  assert.ok(panel.includes('createdAgentId'), '列表要认「刚创建那一支」的 id（读数落在它那一行上）')
-  // 无桥那一支照旧说 CREATE_WONT_REPLY（不许改成"看起来成功"）。
+  // ⚠ **2026-10-20**：`createdAgentId`（「新的朋友 → 添加 Agent」创建完跳过来、读数落在那一行）
+  // 随那个入口一起删除 —— 创建是**所有权**，不是关系，只发生在这一页的就地面板里，
+  // 而读数由面板自己那张卡说。**别把它当"反正没人用"留着**：那是一句永远不成立的判断。
+  // 判据落在**代码形状**上（`const justCreated` / `useLocation()`），不落在注释里提没提到这个名字：
+  // 上面两段注释是**记这件事为什么被删**，它们必须留着。
   assert.ok(
-    panel.includes('{!readout && justCreated && !hasShell && ('),
-    '刚创建 + 没有壳的那一行必须渲染诚实横幅',
+    !panel.includes('const justCreated') && !panel.includes('useLocation()'),
+    '创建入口只剩这一页：不该再有"从别处创建完跳过来、按地址状态认领"那条路（已删）',
   )
+  // 无壳那一支照旧说 CREATE_WONT_REPLY（不许改成"看起来成功"）。
+  assert.ok(panel.includes('{CREATE_WONT_REPLY}'), '没有壳时必须渲染那句诚实横幅（常量，不内联字符串）')
+
   const page = readFileSync(
     fileURLToPath(new URL('../src/pages/NewContactPage.tsx', import.meta.url)),
     'utf8',
   )
+  // 「新的朋友」只发关系申请：**不许**再创建 Agent（那是所有权，归 /app/agents）。
+  assert.ok(!page.includes('createAgent('), '「新的朋友」不该再创建 Agent')
+  // 回执必须被用上：四种处境（刚发出 / 之前发过 / **对方先发过、该我点头** / 早就是联系人）
+  // 说成同一句，就是替系统撒谎 —— 判据是 `api/uiPolicy.ts` 的 `classifyContactRequest`。
   assert.ok(
-    page.includes('state: { createdAgentId: agentId || null }'),
-    '「新的朋友」创建完要把刚创建那一支的 id 交给落地页',
+    page.includes('classifyContactRequest'),
+    '「新的朋友」必须按回执分处境，不许只说一句"已发送"',
   )
   assert.ok(
-    page.includes('await refreshOwnedAgents()'),
-    '跳转前要权威重读列表（落地页第一眼就看得见那一支）',
+    !page.includes('请求已发送，等待对方确认'),
+    '那句把四种处境压成一种的话不许回来（它还会让"对方先发给我"变成"等对方"）',
   )
 })

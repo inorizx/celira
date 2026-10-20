@@ -9,7 +9,7 @@
 // 留在带 `host` 名字的文件里会让人以为它们属于 Host 模式（并会在 Host 删除刀里
 // 被误删）。
 
-import type { Message, Participant, Room } from './domain'
+import type { ContactRequestReceipt, Message, Participant, Room } from './domain'
 
 // ── 能力探测 ────────────────────────────────────────────────────────────────
 //
@@ -89,13 +89,55 @@ export function supportsAgentProfile(api: unknown): boolean {
 }
 
 /**
- * **按 Human 身份发联系人请求**的唯一判据：`sendContactRequest`。
+ * **发起关系申请**的唯一判据：`sendContactRequest`。
  *
- * 它同时决定那句提示准不准：「直接输入对方 Human 的 UUID」只在**这台后端真按
- * Human 身份收请求**时才成立（没有这个能力的传输层上，那句话是误导）。
+ * 它同时决定「贴上对方的身份 ID」那块提示说不说（没有这个能力的传输层上，那句话是误导）。
+ *
+ * ⚠ 名字里的 `ByHumanId` 已摘（2026-10-20）：契约在批次三第二刀把目标从 Human 放宽到
+ * **任意 active 主体**（`CORE_V1_CONTACT_REVERSIBILITY.md` §5.2），旧名字从那以后就是一句假话。
  */
-export function supportsContactRequestByHumanId(api: unknown): boolean {
+export function supportsContactRequest(api: unknown): boolean {
   return has(api, 'sendContactRequest')
+}
+
+/**
+ * 规范形的 Participant ID 形状：UUID v4、小写连字符。
+ *
+ * 判据来源是服务端自己的规则（`im/server/src/domain/participant.rs` 的
+ * `ParticipantId::parse_stable` 只认 UUID v4，两端同一种 id 形状）。
+ *
+ * ⚠ 这是**输入形状**的判断，不是"这个人存不存在"的判断 —— 后者只有服务端能答，且契约
+ * 故意把"坏 id"与"不存在"答成同一个 404（不泄露）。所以它只用来挡住"把名字当 id 贴进来"
+ * 这种当场就能看出来的错，**绝不**替代服务端的裁决。
+ */
+export function looksLikeParticipantId(raw: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+    raw.trim().toLowerCase(),
+  )
+}
+
+/**
+ * 一段关系申请**落在哪一种处境**上（回执的四个分支，一个都不许合并）。
+ *
+ * 判据完全来自服务端，客户端不猜：
+ * - `201` = 刚建的段 ⇒ `sent`；
+ * - `200` = 既有段（幂等重放或反向请求），此时看 `direction` 相对**我**的方向：
+ *   `incoming` = 对方向我发起、等我回答（`needs-my-answer`），`outgoing` = 我发起的（`awaiting-them`）；
+ * - 既有段已经是 `accepted` ⇒ 早就是联系人（`now-contact`）。
+ *
+ * ⚠ 为什么不能压成一句「请求已发送」：`needs-my-answer` 那一支**不是**在等对方，
+ * 而是**对方在等我**。说反了，人就会在那儿干等一件已经轮到自己做的事。
+ */
+export type ContactRequestOutcome =
+  | 'sent'
+  | 'awaiting-them'
+  | 'needs-my-answer'
+  | 'now-contact'
+
+export function classifyContactRequest(receipt: ContactRequestReceipt): ContactRequestOutcome {
+  if (receipt.status === 'accepted') return 'now-contact'
+  if (receipt.direction === 'incoming') return 'needs-my-answer'
+  return receipt.replayed ? 'awaiting-them' : 'sent'
 }
 
 /**

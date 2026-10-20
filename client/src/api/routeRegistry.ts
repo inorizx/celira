@@ -188,12 +188,13 @@ export const ROUTES: readonly RouteDeclaration[] = [
   { path: '/app/chat/:roomId/history', side: 'world', planes: ['world'], page: 'pages/ChatHistoryPage.tsx', what: '查找聊天记录（关键词/类型筛选 + 定位跳回）', guarded: false },
   { path: '/app/contacts', side: 'world', planes: ['world'], page: 'pages/ContactsPage.tsx', what: '联系人列表（Human 与 Agent 都是居民）', guarded: false },
   { path: '/app/contacts/:participantId', side: 'world', planes: ['world'], page: 'pages/ContactsPage.tsx', what: '某位联系人的资料卡', guarded: false },
-  // ⚠ **`planes` 是两格，而 `side` 仍是 `world`**（2026-10-11 守卫量出来的）：这一页除了世界的
-  //   联系人请求，还读**家面** —— 它 import 了 `AgentsListPanel`（家面组件）里的**一句文案**
-  //   （`CREATE_WONT_REPLY`）⇒ 那个模块的整个家面闭包都跟着进来（守卫当场报出 8 个家面权威模块）。
-  //   这一页**确实**要说机器侧那一句（"创建完会不会自动接到这台机器上"）⇒ 两格是事实，不是误报；
-  //   但**来路是一句文案**（正解：把那个常量搬到中立模块，那一刀不在这里）。主体仍是世界侧。
-  { path: '/app/contacts/new', side: 'world', planes: ['world', 'home'], page: 'pages/NewContactPage.tsx', what: '新的朋友：发起联系人请求 / 接受 pending / 添加 Agent', guarded: false },
+  // ⚠ **两格 → 一格（2026-10-20）**：这一页原先的 `planes` 是 `['world', 'home']`，理由很具体
+  //   （见 git 历史）：它 import 了 `AgentsListPanel` 里的**一句文案**（`CREATE_WONT_REPLY`），
+  //   而那是家面组件 ⇒ 整个家面闭包跟着进来。那一刀把「创建 Agent」从这一页撤走之后
+  //   （创建是所有权，归 `/app/agents`；这一页只发关系申请），那句文案也不再需要 ⇒
+  //   这一页现在**只读世界面**。声明跟着事实收窄：两格会在 `route-planes.test.ts` 里变成
+  //   "声明含 home 而一个家面模块都不读"的相反事实。
+  { path: '/app/contacts/new', side: 'world', planes: ['world'], page: 'pages/NewContactPage.tsx', what: '新的朋友：贴上对方的身份 ID，发一段关系申请（Human 与 Agent 同一串 id）', guarded: false },
   {
     path: '/agent/:participantId',
     side: 'world',

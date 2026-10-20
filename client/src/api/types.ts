@@ -1,4 +1,12 @@
-import type { Attachment, BlockedPeer, Message, OwnedAgent, Participant, Room } from '@/api/domain'
+import type {
+  Attachment,
+  BlockedPeer,
+  ContactRequestReceipt,
+  Message,
+  OwnedAgent,
+  Participant,
+  Room,
+} from '@/api/domain'
 import type {
   BackendBindingView,
   CredentialView,
@@ -193,10 +201,17 @@ export interface RelationApi {
     pending: Participant[]
   }>
   /**
-   * 向目标 Human 发起联系人请求。`idempotencyKey` 由 core.ts 内部自生成，
-   * 调用方传入的值被忽略（每个「逻辑发送」一支新 key）。授权/关系裁决全在 Core。
+   * 向**任意 active 主体**发起关系申请（Human 或 Agent，同一串 `participant_id`）。
+   * `idempotencyKey` 由 core.ts 内部自生成，调用方传入的值被忽略（每个「逻辑发送」一支新 key）。
+   * 授权/关系裁决全在 Core。
+   *
+   * ⚠ 回执**必须**用上：它带着「对方是谁」（含 `kind`）与「这条在等谁」（`direction`）。
+   * 只报一句"已发送"，会把「对方早就申请过我」说成「我刚发出去」。
    */
-  sendContactRequest?(humanId: string, idempotencyKey?: string): Promise<void>
+  sendContactRequest?(
+    participantId: string,
+    idempotencyKey?: string,
+  ): Promise<ContactRequestReceipt>
   /** 作为 addressee 接受 pending 联系人请求。无 body、无 Idempotency-Key。 */
   acceptContact?(humanId: string): Promise<void>
   /**

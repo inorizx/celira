@@ -37,7 +37,14 @@
  * | 群成员增删 / 转让 / 建房 | 只在本地内存里改，进程退出即还原 |
  */
 
-import type { Attachment, BlockedPeer, Message, Participant, Room } from '@/api/domain'
+import type {
+  Attachment,
+  BlockedPeer,
+  ContactRequestReceipt,
+  Message,
+  Participant,
+  Room,
+} from '@/api/domain'
 import {
   type BackendBindingView,
   type CredentialView,
@@ -60,6 +67,7 @@ import type {
   RoomApi,
   RoomListEntry,
   HomeApi,} from './types'
+import { ApiError } from './client'
 import {
   SELF_ID,
   agentOwnerships,
@@ -366,10 +374,23 @@ export class MockApi implements RoomApi, RelationApi, ParticipantApi, HomeApi {
     return { accepted, pending }
   }
 
-  async sendContactRequest(humanId: string): Promise<void> {
-    const target = participantOf(humanId)
-    if (target && !this.extraContacts.some((p) => p.id === target.id)) {
-      this.extraContacts = [...this.extraContacts, target]
+  /**
+   * 演示通道的"发一段关系申请"：目标必须在夹具里，否则与真机同形地 404
+   * （`participant_not_found`）—— 这一格从前**静默成功**，页面于是对着一串瞎贴的 id
+   * 说「请求已发送」，那是演示通道替真机撒谎。
+   *
+   * ⚠ 发出去的那一半**不进** `extraContacts`：那份读数是「**等我回答**」（`direction ===
+   * 'incoming'`，与 `core.ts` 的 `listContacts` 同一判据）。真实世界里 outgoing 的那条
+   * 不在任何列表里，唯一的反馈就是这张回执 —— 演示通道跟着这条走，不另造一份。
+   */
+  async sendContactRequest(participantId: string): Promise<ContactRequestReceipt> {
+    const target = participantOf(participantId)
+    if (!target) throw new ApiError(404, 'participant_not_found')
+    return {
+      peer: target,
+      status: 'pending',
+      direction: 'outgoing',
+      replayed: false,
     }
   }
 

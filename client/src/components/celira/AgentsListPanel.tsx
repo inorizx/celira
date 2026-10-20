@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import { Check, ChevronRight, Plus, Server } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,11 +37,9 @@ import { anjiaReadout, hasAnjiaBridge, type AnjiaResult } from '@/api/anjia'
  * 三格就用那台机器的读数；认领到远程那台时在线那一格如实写「在<名字>上运行」；
  * 谁都不是 ⇒ 「未接入」（不拿别的机器的读数顶）。
  *
- * **四态跟到落地页**（2026-10-02 刀）：从「新的朋友 → 添加 Agent」创建完跳过来时，
- * 刚创建那一支的 id 在地址状态里（`createdAgentId`），而机器侧的读数**已经在 store 里**
- * （`anjiaByAgent`，创建时壳报回来的）—— 这一页把 `anjiaReadout` 的人话直接渲染在
- * **那一行里**（四态：进行中 / 成功 / 失败 / 读不到），不发新请求。没有壳时（浏览器）
- * 那一行照旧说 `CREATE_WONT_REPLY` —— 在这个运行环境里它是事实，不许改成"看起来成功"。
+ * **创建只在这一页**（2026-10-20）：创建是**所有权**，不是关系 —— 「新的朋友」只发关系申请。
+ * 所以创建完的四态读数落在**就地面板**里（`CreateAgentInline`，它自己那张卡），不再有
+ * "从别处创建完跳过来、读数要落在这一行"那条路（`createdAgentId` 随入口一起删掉）。
  */
 
 /** 在线那一格的色标：**实心绿**（就是 Agent）／**实心灰**（是别人）／**空心灰**（没有读数）。 */
@@ -65,6 +63,8 @@ const TONE_DOT: Record<AgentRowTone, string> = {
  * ⚠ 2026-09-26：**导出**它，让「新的朋友」页的第二个创建入口也用它 ——
  * 那句事实（`client/README.md`「已知缺口」）**只能有一个权威位置**，而当时它只在
  * 这一个入口说，另一个入口的按钮还写着「创建并接入」（承诺不实）。
+ * ⚠ **2026-10-20**：「新的朋友」那个创建入口已删（创建归这一页），导出的外部消费者
+ * 随之消失。**仍然导出**：它是这句话的唯一权威位置，而唯一性不取决于外面还有几个人用。
  */
 export const CREATE_WONT_REPLY = '它不会回复 —— 还没有模型，也没有机器在跑它'
 
@@ -128,11 +128,6 @@ export function AgentsListPanel({
   const attachAgent = useAppStore((s) => s.attachAgent)
   // 这一版页面**有没有壳**（与创建面板同一判据；承 `shell.ts` 判内部注入，不判平台名）。
   const hasShell = hasAnjiaBridge()
-  // 「新的朋友」创建完跳过来时，刚创建那一支的 id 在地址状态里
-  // （`NewContactPage` 的 `navigate('/app/agents', { state: { createdAgentId } })`）——
-  // 四态读数要落在**它**那一行上；从别的入口进来时这里没有它，一切照旧。
-  const createdAgentId =
-    (useLocation().state as { createdAgentId?: string | null } | null)?.createdAgentId ?? null
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -193,7 +188,6 @@ export function AgentsListPanel({
             // 页面只把 `text` 原样渲染（两处各写一套话就是两个答案）。
             const anjia = anjiaByAgent[participant.id]
             const readout = anjia ? anjiaReadout(anjia.kind, anjia.sub) : null
-            const justCreated = participant.id === createdAgentId
             return (
               /* ⚠ **一行 = 一张卡，而卡里不止一个按钮**（2026-10-08）：拒绝那一句现在带一个出口
                  （`ModelSourceExit`），而交互元素不许套在按钮里（嵌套的按钮既不合规范，点内层
@@ -289,12 +283,10 @@ export function AgentsListPanel({
                     </Button>
                   </div>
                 )}
-                {/* 没有壳（浏览器）：这一支刚创建、没人试过接它 —— 那句诚实横幅一个字不改。
-                    ⚠ 只对**刚创建那一支**说：对列表里更早的 Agent 说这句就是一句没根据的断言
-                    （它们可能早就接在别的机器上，只是这个浏览器读不到）。 */}
-                {!readout && justCreated && !hasShell && (
-                  <p className="px-4 pb-3 text-caption text-muted-foreground">{CREATE_WONT_REPLY}</p>
-                )}
+                {/* ⚠ 2026-10-20：这里原有的一格「刚创建那一支 · 浏览器里说 CREATE_WONT_REPLY」
+                    随 `createdAgentId` 一起删除 —— 创建只发生在本页的就地面板里，而那句话
+                    已经由面板自己说（`CreateAgentInline` 的成功横幅）。留着它就是一个**永远
+                    不会成立的判断**（`justCreated` 恒 false），形状比事实多。 */}
               </div>
             )
           })}

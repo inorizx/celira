@@ -42,6 +42,25 @@ export interface BlockedPeer extends Participant {
   blockedAt?: string
 }
 
+/**
+ * 一次关系申请的**回执**（`POST /v1/contacts/requests` 回来的那段事实上限）。
+ *
+ * ⚠ 为什么必须留住它：服务端在那个响应里已经回答了两件事 —— 「这个 id 是谁」（`peer` 自带
+ * `kind` 与名字）和「这条现在在等谁」（`direction`，相对**我**）。客户端从前把整个响应当
+ * `void` 丢掉 ⇒ 界面只能对四种完全不同的处境说同一句「请求已发送」：
+ *
+ * - 刚发出去（201）；对方**早就**发过给我（200 + `incoming`）＝ 该我点头，不是等对方；
+ * - 我**之前**发过（200 + `outgoing`）＝ 还在等；已经接受了（200 + `accepted`）＝ 早就是联系人。
+ *
+ * 把四种说成一种，就是替系统撒谎。
+ */
+export interface ContactRequestReceipt {
+  peer: Participant
+  status: 'pending' | 'accepted'
+  direction: 'incoming' | 'outgoing'
+  replayed: boolean
+}
+
 export type AgentActivity = 'idle' | 'thinking' | 'silent' | 'timeout' | 'failed'
 
 export interface Room {

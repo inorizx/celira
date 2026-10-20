@@ -55,7 +55,15 @@ import type {
   RoomListEntry,
   HomeApi,
 } from './types'
-import type { Attachment, BlockedPeer, Message, OwnedAgent, Participant, Room } from '@/api/domain'
+import type {
+  Attachment,
+  BlockedPeer,
+  ContactRequestReceipt,
+  Message,
+  OwnedAgent,
+  Participant,
+  Room,
+} from '@/api/domain'
 import { agentProfilePath, buildAgentProfilePutRequest } from './profile.ts'
 import {
   buildRoomPresentationPutRequest,
@@ -307,13 +315,24 @@ export class CoreApi implements RoomApi, RelationApi, ParticipantApi, HomeApi, C
   /**
    * 发起联系人请求。字段名 `participant_id`（批次三第二刀由 `human_id` 改名）：
    * 目标从此可以是任意 active 主体——Human 或 Agent 都可以加。
+   *
+   * 返回**回执**而不是 `void`：服务端在响应里已经给了对方是谁（`contact.peer` 自带 `kind`）
+   * 与这条在等谁（`direction`）。丢掉它，界面就只剩「请求已发送」一句话 —— 而那句话会把
+   * 「对方早就申请过我」和「我刚发出去」说成同一件事（`domain.ts` 的
+   * `ContactRequestReceipt` 里列了全部四种处境）。
    */
-  async sendContactRequest(participantId: string): Promise<void> {
-    await this.api<CreateContactResponse>('/v1/contacts/requests', {
+  async sendContactRequest(participantId: string): Promise<ContactRequestReceipt> {
+    const res = await this.api<CreateContactResponse>('/v1/contacts/requests', {
       method: 'POST',
       idempotencyKey: newIdempotencyKey(),
       body: { participant_id: participantId },
     })
+    return {
+      peer: toParticipant(res.contact.peer),
+      status: res.contact.status,
+      direction: res.contact.direction,
+      replayed: res.idempotency_replayed,
+    }
   }
 
   async acceptContact(humanId: string): Promise<void> {

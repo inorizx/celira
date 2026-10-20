@@ -130,7 +130,7 @@ src/api/store.ts（zustand：状态管理、乐观更新、事件恢复循环）
 | `/app/chat`、`/app/chat/:roomId` | ChatPage | 消息模块（壳内，房间可深链；虚拟化消息列表） |
 | `/app/chat/:roomId/history` | ChatHistoryPage | 查找聊天记录（关键词/类型筛选 + 定位跳回） |
 | `/app/contacts`、`/app/contacts/:participantId` | ContactsPage | 联系人（分组列表 + 资料卡） |
-| `/app/contacts/new` | NewContactPage | 新的朋友（添加真人全模式可用；「添加 Agent」经 **core 直连** 真实创建壳 Agent——`src/api/core.ts` 的 `createAgent` 打 `POST /v1/agents`；Host BFF 版已随 2026-09-20 删除刀移除） |
+| `/app/contacts/new` | NewContactPage | 新的朋友：**一个输入框**——贴对方的身份 ID（`participant_id`，Human 与 Agent **同一串**；契约 `CORE_V1_CONTACT_REVERSIBILITY.md` §5.2），发一段关系申请。落定后按**回执**分四种处境说（刚发出 / 之前发过 / **对方先发过、该我点头** / 早就是联系人，判据 `api/uiPolicy.ts` 的 `classifyContactRequest`），并对 pending 给「撤回」。⚠ **这一页不创建 Agent**：创建是**所有权**、不是关系，唯一入口是 `/app/agents` 的「添加」 |
 | ~~`/app/services`~~ | ~~MyServicesPage~~ | **已删除（2026-09-28，Agent 服务层退役）**：那一页是「我的服务」（已获服务访问与开服务会话，`src/api/service.ts`）。服务层（Publication / Service Access / 服务房）整体退役后，页面、`ServiceApi` 与协议面一并下线；路由级"不许回来"由 `tests/route-admission.test.ts` 钉住 |
 | `/app/discover` | DiscoverPage | 发现（官方 Agent + 外部接入口；真实世界由 `FixtureRouteGuard` 诚实拦住——Core 无 Directory 契约） |
 | `/app/agents` | MyAgentsPage（`AgentsListPanel`） | **我的 Agent——列表**（`side: 'home'`：**Agent 索引的执行侧视图**，每行拼世界侧所有权 + 家侧**那一句 ＋ 三格读数**）。⚠ **2026-10-06 起那一句在最前**：宿主进程在不在跑 ＋ 上次怎么样（判据与文案在 `api/agentHealth.ts`，纯函数 ＋ 离线用例）。⚠ 它与 IM 里的「在线」**不是一件事**（那一个是连接派生的易失投影，这一个读的是机器侧的宿主进程）——两个平面不许互相冒充，因此**分开摆**。点一个 Agent 进 Agent 的主页。⚠ **2026-09-29 起它是壳层「执行端」组的第二个一级入口**——在那之前它**不在任何分区里**（只从「我的」页与「新的朋友」页进得去），一级内容拿二级待遇 |
@@ -280,14 +280,25 @@ src/api/store.ts（zustand：状态管理、乐观更新、事件恢复循环）
 手册有专节；2026-09-27 落）。本机那条家的归属仍是 `up` 在**家里还没有 `agent_id` 时**自建一个
 （`scripts/home/provision.js`）—— **不是**上面那条路。
 
+**发出去的关系申请，只有发的那一刻看得见。**
+
+`GET /v1/contacts` 的客户端投影只把 `direction === 'incoming'` 的 pending 列进「待确认」
+（`src/api/core.ts` 的 `listContacts`；判据是"接受/拒绝归 addressee"，批次三第三刀补的
+`direction` 才让这条判据可用）。**我自己发出去、还没被答复的那一条，离开「新的朋友」之后
+在界面上就不存在了。** 两处兜底：① 同一页落定后给「撤回这条申请」（`DELETE
+/v1/contacts/{participant_id}` 对 pending 段成立，段以 `ended` 闭合）；② 对方接受之后它自然
+出现在「联系人」里。**没做**的是"我发出的"那份列表 —— 那要改 `listContacts` 的投影，是另
+一件事，不在这一页的射程里。
+
 **2026-10-03（完整 app 那一刀）之后的缺口**：
 
 1. **本机那条家在壳里已经接通**（原缺口 ① 收了）：壳把本机的 loopback 地址（世界 + 家的门两个口）
    解析出来交给页面（`api/shellLocal.ts`，`app/src-tauri/src/local_world.rs`），页面用
    `homes.ts` 的 `setLocalHomeBase` 把它装成"本机条目的地址" ⇒ **家面三格在 app 里读得到了**
    （§8.4 推论 2：本机地址由 app 解析）。⚠ **远程条目仍是"用户填的绝对地址 + 家钥匙"**，
-   与以前一字不差。**四态读数已经跟到落地页**（2026-10-02 刀：「新的朋友 → 添加 Agent」创建完
-   落到「我的 Agent」页时，刚创建那一支的读数就渲染在**它那一行里**；无壳时那一行仍是
+   与以前一字不差。**四态读数就在创建的那一刻说**（2026-10-20 收窄：创建入口只剩
+   「我的 Agent」页右上角那颗「添加」，它是**就地**开一块面板、不跳走 ⇒ 读数落在**那块面板**里，
+   不再有"从「新的朋友」创建完跳过来、读数要认领到某一行"那条路；无壳时那句仍是
    `CREATE_WONT_REPLY`）。`refused` 另带**封闭子词**
    （缺模型凭据 / 缺可执行件 / 仓根找不到 / 家没布置 / id 形状 / 绑定读不懂 / 凭据文件读不懂 / 空 id），
    页面按子词给人话与下一步，未知子词回退通用句（`api/anjia.ts` 的 `REFUSED_SUBS`）；
