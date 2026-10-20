@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FileText, Image as ImageIcon, Keyboard, Mic, Paperclip, Plus, SendHorizonal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -33,6 +33,13 @@ import { cn } from '@/lib/utils'
 
 const MAX_ATTACHMENTS = 8
 const MAX_FILE_BYTES = 16 * 1024 * 1024
+
+/**
+ * 输入框长高的上限（像素）。见下面那个量高度的 `useEffect`：
+ * 到这个高度就不再长，改为自己滚 —— 一屏留给对话，不留给草稿。
+ * 约 7 行（行高 21 × 7 ＋ 内距）。
+ */
+const MAX_COMPOSER_PX = 160
 
 /**
  * typing 上报节流（毫秒）。服务端 `TYPING_TTL` 是 6 秒，2 秒一次足够续期，
@@ -201,6 +208,25 @@ export function MessageInput({
   useEffect(() => {
     if (replyTo) textareaRef.current?.focus()
   }, [replyTo])
+
+  /**
+   * **输入框自己量高度**（2026-10-20 真机："这个高度好像容易出问题，有时候高有时候低，
+   * 我切换窗口他就变那种"）。
+   *
+   * 病根是 CSS 的 `field-sizing: content`：高度由内容**隐式**推导，而它不会随着
+   * "内容变少 / 布局重算（换窗口、缩放、切主题）"可靠地缩回去 —— 实测就是同一行草稿
+   * 有时 36px、有时 130px。⇒ 这里改成**显式量**：先把高度归零、读 `scrollHeight`、
+   * 写回一个确定值（上限 `MAX_COMPOSER_PX`，超过就自己滚）。
+   * 判据：**同一段内容，任何一次重排后算出来的高度必须逐像素相同**。
+   */
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const next = Math.min(el.scrollHeight, MAX_COMPOSER_PX)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > MAX_COMPOSER_PX ? 'auto' : 'hidden'
+  }, [value, voiceMode, isMobileUi])
 
   useEffect(() => {
     if (!editRequest) return

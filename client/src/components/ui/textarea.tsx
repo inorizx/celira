@@ -14,13 +14,16 @@ import { cn } from "@/lib/utils"
  *   焦点环由**容器**给（`focus-within:border-ring`），不是被删掉。
  */
 const textareaVariants = cva(
-  "flex field-sizing-content w-full transition-[color,box-shadow] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+  "flex w-full transition-[color,box-shadow] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
   {
     variants: {
       variant: {
         default:
-          "min-h-16 rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:aria-invalid:ring-destructive/40",
-        bare: "min-h-0 rounded-none border-0 bg-transparent p-0 text-body shadow-none focus-visible:ring-0 dark:bg-transparent",
+          "field-sizing-content min-h-16 rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:aria-invalid:ring-destructive/40",
+        // ⚠ `field-sizing-fixed` 不是装饰：`field-sizing: content` 会**压过**显式 height，
+        //   而消息输入框是自己量高度再写死的（判据在 `MessageInput` 那个 useEffect 里）。
+        //   不锁成 fixed，删字数之后那块高度就缩不回去 —— 真机上表现为"一会儿高一会儿低"。
+        bare: "field-sizing-fixed min-h-0 rounded-none border-0 bg-transparent p-0 text-body shadow-none focus-visible:ring-0 dark:bg-transparent",
       },
     },
     defaultVariants: { variant: "default" },
