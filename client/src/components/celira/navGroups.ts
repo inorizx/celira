@@ -80,10 +80,17 @@ export const NAV_GROUPS: NavGroup[] = [
     // 看一个 Agent 的运行/模型：先有机器（`/app/runtimes`），或者从 Agent 那一页的
     // 「机器」那一段跳过去（`/app/agents/:id#machine`）—— **两个方向都通**。
     // Agent 自己的公开资料与接入方式在世界侧（`/app/contacts` → 资料卡 → Agent 页）。
+    //
+    // ★ **2026-10-20（T5 命名统一）**：组标与入口名从「执行端 / 我的执行端」改成
+    //   「机器 / 我的机器」。判据在 `AGENTS.md` 与 `docs/runtime/AGENT_VOCABULARY.md`：
+    //   **`执行端` 是平面名**（"本节的名字全部属于执行端平面"），而"承载执行端的机器或部署
+    //   位置"那个词是**执行点**；把平面名当机器名用，一句跨平面的话就分不清主语是哪一个。
+    //   ⇒ 屏幕上的产品词是**机器**（用户操作的对象），`执行端` 只在机器页那句**定义**里
+    //   出现一次（说清"这台机器上跑着 Agent 的执行端"）。
     id: 'agent',
-    label: '执行端',
+    label: '机器',
     items: [
-      { id: 'runtimes', label: '我的执行端', icon: Bot, to: '/app/runtimes' },
+      { id: 'runtimes', label: '我的机器', icon: Bot, to: '/app/runtimes' },
       { id: 'agents', label: '我的 Agent', icon: Sparkles, to: '/app/agents' },
     ],
   },

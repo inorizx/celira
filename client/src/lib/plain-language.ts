@@ -73,7 +73,7 @@ export function runStateLabel(state: string | null | undefined): string | null {
  * 并指向 app 的日志 —— **不编一个具体原因**（那是拿缺省当事实）。
  */
 export function legacyHomeNote(blocker: string | null | undefined): string {
-  const head = '这个家还是住户化之前的形状（一支一个环境根）—— 这台 app 会在开机时自己把它搬成新形态'
+  const head = '这台机器的布局还是住户化之前的样子（一支一个环境根）—— 这台 app 会在开机时自己把它搬成新形态'
   if (blocker === 'host-running') {
     return `${head}；**这一轮没搬成**：那支 Agent 这会儿正跑着。先把它停下来，下次开机 app 自己就搬。`
   }

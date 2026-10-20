@@ -201,7 +201,7 @@ async function waitForAgentHomeText(page) {
       // 现在认「机器」那一段的四态里**说得出话**的那三句（住址 / 说不准 / 都没报它）。
       text.includes('它住在') ||
       text.includes('没报上上面跑的是谁') ||
-      text.includes('能读到的执行端')
+      text.includes('能读到的机器')
     if (settled) return text
     const transient = text.includes('正在读取') || text.includes('正在准备连接')
     // 别的形状（不是这一页 / 抛错了）立刻返回，交给断言把原文报出来。
@@ -230,8 +230,8 @@ const AGENT_MIND_UNREACHABLE_TITLE = '读不到模型配置'
 // —— 真实世界下 `发现`（`/app/discover`）**不进导航**：它 `side: 'demo'`，点进去只有
 // "尚未提供"（判据在 `routeRegistry.reachableInRealWorld`，过滤在 `navGroupsFor`）。
 // 世界契约（Directory）落地后它自动回来，这里跟着改（上面那条锁会红着提醒）。
-const EXPECTED_NAV = ['消息', '联系人', '我的执行端', '我的 Agent']
-const EXPECTED_GROUPS = ['世界', '执行端']
+const EXPECTED_NAV = ['消息', '联系人', '我的机器', '我的 Agent']
+const EXPECTED_GROUPS = ['世界', '机器']
 
 /**
  * ★ 人话自检的词表（2026-09-22 主人裁决：设计词汇给设计者，界面语言给用户）。
@@ -564,7 +564,7 @@ try {
   const missing = EXPECTED_NAV.filter((label) => !uniqueNav.includes(label))
   check('一级入口齐全', missing.length === 0, missing.length ? `缺 ${JSON.stringify(missing)}` : `实际 ${JSON.stringify(uniqueNav)}`)
   check(
-    '「家」组只剩一个一级入口：运行状态 / Agent 的经历 / 模型配置 都不再是一级入口（刀2a）',
+    '「机器」组只剩一个一级入口：运行状态 / Agent 的经历 / 模型配置 都不再是一级入口（刀2a）',
     !['运行状态', 'Agent 的经历', '模型配置', '模型服务'].some((label) => uniqueNav.includes(label)),
     `实际 ${JSON.stringify(uniqueNav)}`,
   )
@@ -621,7 +621,7 @@ try {
   check(
     '列表行读数：住址（三态之一）+ 模型 + 最近活动（或四格同因收成一句 ＋ 出口）',
     collapsed
-      ? listText.includes('去我的执行端')
+      ? listText.includes('去我的机器')
       : onlineSeen !== '' && listText.includes('模型：') && listText.includes('最近活动：'),
     collapsed
       ? `四格同因 ⇒ 收成一句 · ${snippet(listText, 200)}`
@@ -1373,13 +1373,13 @@ try {
   await goto(`${args.base}/app/agents`, '我的 Agent（一级入口）')
   await page.waitForTimeout(1200)
   const listTabBar = await visibleMainNav()
-  await goto(`${args.base}/app/runtimes`, '我的执行端（一级入口）')
+  await goto(`${args.base}/app/runtimes`, '我的机器（一级入口）')
   await page.waitForTimeout(1200)
   const runtimesTabBar = await visibleMainNav()
   check(
     '★ 移动端：两个**一级入口**都保留 TabBar（从前 `/app/agents` 被当成二级页 ⇒ TabBar 让位）',
     listTabBar === 1 && runtimesTabBar === 1,
-    `我的 Agent=${listTabBar} · 我的执行端=${runtimesTabBar}`,
+    `我的 Agent=${listTabBar} · 我的机器=${runtimesTabBar}`,
   )
   // 正对照：**二级页** TabBar 让位 —— 否则上面那条可能只是"TabBar 永远在场"。
   // ⚠ 用一条**房地址**（`/app/chat/<id>`）：外壳那条判据是**纯路径**的（`navGroups.ts`），
@@ -1601,7 +1601,7 @@ try {
   // 而**这一条没有跟着改** ⇒ 它自那天起就是红的，只是一直没人跑这支脚本
   // （审计 P1 猜的正是这件事：「`npm run verify:ui` 可能已经是红的」）。
   //
-  // 现在断的是**当前事实**：不 404、且落到执行端那一页（列表标题「我的执行端」）。
+  // 现在断的是**当前事实**：不 404、且落到机器那一页（列表标题「我的机器」）。
   // 同一次整改还把重定向改成**不带 hash**（列表页没有房间可滚，H12）——
   // 旧锚点只在带 entryId 的地址上有效，所以这里**不再**断"滚到哪一间"。
   for (const legacy of ['/app/runtime', '/app/experience']) {
@@ -1609,8 +1609,8 @@ try {
     await page.waitForTimeout(3500)
     const text = await page.locator('body').innerText()
     check(
-      `${legacy} 不 404（重定向到执行端机器列表）`,
-      !text.includes('404') && text.includes('我的执行端'),
+      `${legacy} 不 404（重定向到机器列表）`,
+      !text.includes('404') && text.includes('我的机器'),
       snippet(text, 120),
     )
   }
@@ -2140,7 +2140,7 @@ try {
   //   这一族是"带意图过去、在那一页加、在那一页移除"。现在**清单只有一处**：
   //   ① 加：清单页那颗「添加」**就地**开表单（不再 navigate 走人）；
   //   ② 管（钥匙 / 移除）：进**那台机器自己那一页** ⇒ 「这台机器的设置」就地展开。
-  await goto(`${args.base}/app/runtimes`, '我的执行端（清单）')
+  await goto(`${args.base}/app/runtimes`, '我的机器（清单）')
   await page.waitForTimeout(2000)
   await page.getByRole('button', { name: '添加', exact: true }).click()
   const nameField = page.getByLabel('名字', { exact: true })
@@ -2153,10 +2153,10 @@ try {
 
   const probeHomeName = '探针：不存在的家'
   await nameField.fill(probeHomeName)
-  await page.getByLabel('家地址', { exact: true }).fill('https://127.0.0.1')
+  await page.getByLabel('机器地址', { exact: true }).fill('https://127.0.0.1')
   await page.getByLabel('状态口端口', { exact: true }).fill('1')
   await page.getByLabel('配置门端口', { exact: true }).fill('1')
-  await page.getByLabel('家钥匙', { exact: true }).fill('probe-key-not-a-real-key')
+  await page.getByLabel('机器钥匙', { exact: true }).fill('probe-key-not-a-real-key')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await page.waitForTimeout(2500)
 
@@ -2199,7 +2199,7 @@ try {
   await confirmRemoveButton.click()
   await page.waitForTimeout(1500)
   // 移除之后回清单：那一条没了，且不留残留。
-  await goto(`${args.base}/app/runtimes`, '我的执行端（移除之后）')
+  await goto(`${args.base}/app/runtimes`, '我的机器（移除之后）')
   await page.waitForTimeout(2000)
   const afterRemovalText = await page.locator('body').innerText()
   check(
@@ -2233,7 +2233,7 @@ try {
   await goto(`${args.base}/settings/providers`, '旧地址（没有机器上下文）')
   await page.waitForTimeout(1500)
   check(
-    '★ 旧地址 /settings/providers（无上下文）⇒ 落**执行端列表**，不猜是哪台',
+    '★ 旧地址 /settings/providers（无上下文）⇒ 落**机器列表**，不猜是哪台',
     page.url().endsWith('/app/runtimes'),
     `落在 ${page.url()}`,
   )
@@ -2256,8 +2256,8 @@ try {
   await page.waitForTimeout(1500)
   const missingMachineText = await page.locator('body').innerText()
   check(
-    '★ 地址里那台机器不在列表里 ⇒ 如实说「没有这台执行端」，且**不回落本机**（不画配置面板）',
-    missingMachineText.includes('没有这台执行端') && !missingMachineText.includes('DeepSeek'),
+    '★ 地址里那台机器不在列表里 ⇒ 如实说「没有这台机器」，且**不回落本机**（不画配置面板）',
+    missingMachineText.includes('没有这台机器') && !missingMachineText.includes('DeepSeek'),
     snippet(missingMachineText, 160),
   )
 

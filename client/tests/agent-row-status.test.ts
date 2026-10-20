@@ -448,7 +448,9 @@ test('★ 机器行·三条来路分开：零住户（缺省）/ 老形态 / 有
 
   const legacy = machineSituation({ ...common, agentState: 'no-resident', legacyHome: true })
   assert.equal(legacy.kind, 'legacy-home')
-  assert.ok(legacy.text.includes('老形态'), legacy.text)
+  // ★ 2026-10-20（T5 命名统一）：这句从「这个家还是老形态」改成「这台机器的布局还是老的」
+  //   —— 屏上的产品词是**机器**（`家` 退出界面语言，只留在架构文档里）。
+  assert.ok(legacy.text.includes('布局还是老的'), legacy.text)
   assert.ok(
     !legacy.text.includes('还没有 Agent'),
     `老形态不许说成"还没有 Agent"（那一支明明在，只是住在旧布局里）：${legacy.text}`,

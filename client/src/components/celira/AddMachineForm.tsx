@@ -13,7 +13,7 @@ import {
 } from '@/api/homes'
 
 /**
- * **加一台机器**（名字 + 家地址 + 端口对 + 家钥匙）——从 `/settings/homes` 那一页搬进
+ * **加一台机器**（名字 + 机器地址 + 端口对 + 机器钥匙）——从 `/settings/homes` 那一页搬进
  * 机器清单（2026-10-12：清单**只留一个门**，所以"加"跟着清单走，不在设置里另开一处）。
  *
  * ⚠ 落盘与校验**只有这一处**（`saveHomeEntry` ＋ `homeEntryDraftErrors`）：别处只带意图过来
@@ -73,7 +73,7 @@ export function AddMachineForm({
 
   return (
     <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-      <div className="text-body">添加一台执行端</div>
+      <div className="text-body">添加一台机器</div>
       <label className="block space-y-1.5">
         <span className="text-caption text-muted-foreground">名字</span>
         <Input
@@ -84,7 +84,7 @@ export function AddMachineForm({
         />
       </label>
       <label className="block space-y-1.5">
-        <span className="text-caption text-muted-foreground">家地址</span>
+        <span className="text-caption text-muted-foreground">机器地址</span>
         <Input
           value={draft.baseUrl}
           onChange={(event) => {
@@ -123,7 +123,7 @@ export function AddMachineForm({
         </label>
       </div>
       <label className="block space-y-1.5">
-        <span className="text-caption text-muted-foreground">家钥匙</span>
+        <span className="text-caption text-muted-foreground">机器钥匙</span>
         <Input
           type="password"
           value={draft.key}

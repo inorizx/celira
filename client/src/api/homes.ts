@@ -8,7 +8,7 @@
  *
  * | 模块 | 它装的是裁决表里的哪一侧 | 权威在哪 |
  * |---|---|---|
- * | **本模块**（`HomeEntry` / 家钥匙） | **家**：**执行端机器**（`home.js` 管的那一整套本机环境：Agent 的环境、资料、日志、模型配置） | 本机 IndexedDB + 那台机器的状态口 / 配置门 |
+ * | **本模块**（`HomeEntry` / 机器钥匙） | **家**：**执行端机器**（`home.js` 管的那一整套本机环境：Agent 的环境、资料、日志、模型配置） | 本机 IndexedDB + 那台机器的状态口 / 配置门 |
  * | `api/worldIdentity.ts`（`home_id` → `worldId`） | **世界**：那个逻辑 im 服务端与它裁决的公共事实。契约语境里它写作专名 `Home`，那边读作**世界** | im 服务端 `GET /v1/home` |
  *
  * 两者**没有从属关系**：一个世界可以有 N 台「家」（执行点），一台「家」也可以被
@@ -42,7 +42,7 @@
  *
  * ## 为什么有 `port` 这一格
  *
- * 家条目的形状是 `{ 名字, 家地址, 端口对(默认5190/5191), 家钥匙 }`（任务书 C7）。
+ * 家条目的形状是 `{ 名字, 机器地址, 端口对(默认5190/5191), 机器钥匙 }`（任务书 C7）。
  * 端口**缺省**住在 `paths.js` 那份默认值里（5190/5191）—— 用户不填就按默认，
  * 填了就按填的（与 `home.conf` 的可覆盖同一条纪律）。
  *
@@ -62,7 +62,7 @@ export const LOCAL_HOME_ID = 'local'
 export const REMOTE_HOME_ID_PREFIX = 'home-'
 
 /** 远程条目的钥匙**必填**，否则连不了（本机那条钥匙为空 = 同源代转）。 */
-export const HOME_KEY_ERROR = '家钥匙不能为空（在它那台机器上跑 node home.js issue-home-key 拿）'
+export const HOME_KEY_ERROR = '机器钥匙不能为空（在它那台机器上跑 node home.js issue-home-key 拿）'
 
 /**
  * 家条目的**端口对**：缺省住在 `scripts/home/paths.js` 那份默认值（`DEFAULT_STATUS_PORT` /
@@ -71,7 +71,7 @@ export const HOME_KEY_ERROR = '家钥匙不能为空（在它那台机器上跑 
 export const DEFAULT_HOME_PORTS = { status: 5190, config: 5191 }
 
 /**
- * 家地址的**归一化**：去空白与尾斜杠；没写 scheme 时补 `https://`
+ * 机器地址的**归一化**：去空白与尾斜杠；没写 scheme 时补 `https://`
  * （与登录页那条"地址"同一条省事纪律：用户多半只敲 `192.168.1.20`）。
  * 远程的家只开在 TLS 上 ⇒ 补的是 **https**（不补 http —— 那会给出一个必然连不上的地址）。
  */
@@ -82,17 +82,17 @@ export function normalizeHomeAddress(input: string): string {
   return withScheme.replace(/\/+$/, '')
 }
 
-/** 家地址的校验：必须是 https 绝对地址（模式二只开在 TLS 上）。返回人话或 null。 */
+/** 机器地址的校验：必须是 https 绝对地址（模式二只开在 TLS 上）。返回人话或 null。 */
 export function homeAddressError(input: string): string | null {
   const value = normalizeHomeAddress(input)
-  if (!value) return '家地址不能为空'
+  if (!value) return '机器地址不能为空'
   let url: URL
   try {
     url = new URL(value)
   } catch {
-    return '家地址读不懂（示例：https://192.168.1.20）'
+    return '机器地址读不懂（示例：https://192.168.1.20）'
   }
-  if (url.protocol !== 'https:') return '家地址只支持 https（远程的家必须走 TLS）'
+  if (url.protocol !== 'https:') return '机器地址只支持 https（远程的家必须走 TLS）'
   return null
 }
 
@@ -114,7 +114,7 @@ export interface StoredHomeEntry {
   baseUrl: string
   statusPort: number | null
   configPort: number | null
-  /** 家钥匙原文（本机那条必为空）。 ⚠ 它就是用户贴进来的那把，原样存原样用。 */
+  /** 机器钥匙原文（本机那条必为空）。 ⚠ 它就是用户贴进来的那把，原样存原样用。 */
   key: string
 }
 
@@ -275,7 +275,7 @@ export function configRequestUrl(entry: HomeEntry, path: string): string {
   return `${stripSlash(entry.baseUrl)}:${entry.configPort}${path}`
 }
 
-/** 远程请求要带的头（Bearer 家钥匙）；本机 ⇒ `{}`（同源代转，不带任何头）。 */
+/** 远程请求要带的头（Bearer 机器钥匙）；本机 ⇒ `{}`（同源代转，不带任何头）。 */
 export function homeRequestHeaders(entry: HomeEntry): Record<string, string> {
   if (entry.local || !entry.key) return {}
   return { authorization: `Bearer ${entry.key}` }

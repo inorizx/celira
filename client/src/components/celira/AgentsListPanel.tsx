@@ -200,7 +200,7 @@ export function AgentsListPanel({
               是**让人跨得过这个词**（与 `/app/runtimes` 底部那句同款）。
               ⚠ 放在行**之前**（那一页那句在列表末尾）：这里要先说清数字从哪来，再让人看数字。 */}
           <p className="px-1 pb-1 text-micro text-muted-foreground">
-            这份清单拼两件事：世界里你拥有的 Agent，＋ 它们在哪台机器（执行端）上、在不在跑（机器上的数据）。
+            这份清单拼两件事：世界里你拥有的 Agent，＋ 它们在哪台机器上、在不在跑（机器上的数据）。
             点一行进去看它的公开资料。
           </p>
           {createOpen && (
@@ -307,7 +307,7 @@ export function AgentsListPanel({
                       onClick={() => navigate('/app/runtimes')}
                     >
                       <Server className="size-4" />
-                      去我的执行端
+                      去我的机器
                     </Button>
                   </div>
                 )}
@@ -346,7 +346,7 @@ export function AgentsListPanel({
                     （`/home-control/attach`，不需要壳），而且它**不复制**接上的逻辑 ——
                     写入口仍然只有那一段的按钮 ／ 壳那六步。
                     一条机器都没有时**不给按钮**，说清前提（要一台装了 Celira 的机器）并指
-                    「我的执行端」：加一台的入口在那里，不指假路径。 */}
+                    「我的机器」：加一台的入口在那里，不指假路径。 */}
                 {shouldOfferAttach(resolution) && (
                   <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
                     <p role="status" className="text-caption text-muted-foreground">
@@ -374,7 +374,7 @@ export function AgentsListPanel({
                       </Button>
                     ) : (
                       <p className="text-caption text-muted-foreground">
-                        要一台装着 Celira 的机器 —— 在「我的执行端」里填上它的家地址和家钥匙。
+                        要一台装着 Celira 的机器 —— 在「我的机器」里填上它的机器地址和机器钥匙。
                       </p>
                     )}
                   </div>

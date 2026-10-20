@@ -37,7 +37,7 @@ import { PageScroll } from '@/components/celira/SectionFrame'
  *
  * ⚠ **2026-09-26 补一句**：`/app/agents`（标题「我的 Agent」）**仍然存在** ——
  * 它是**Agent 索引的执行侧视图**（`side: 'home'`：每行拼世界侧所有权 + 家侧三格读数），
- * 不在壳层导航的任何分区里（⚠ **2026-09-29 已修**：它现在是「执行端」组的第二个一级入口，
+ * 不在壳层导航的任何分区里（⚠ **2026-09-29 已修**：它现在是「机器」组的第二个一级入口，
  * 见 `navGroups.ts`）。两页看的是同一批机器事实，**索引不同**（机器索引 / Agent 索引）。
  * 所以本页提到它时是**引用那一页的名字**，不是拿它当这一区的轴 —— 这一区的轴是机器。
  *
@@ -46,7 +46,7 @@ import { PageScroll } from '@/components/celira/SectionFrame'
  * | | 组织轴 | 主语 | 在哪 |
  * |---|---|---|---|
  * | 世界（IM） | **Agent 即 Participant** | 一个 Agent = 一个联系人 | `/app/contacts`、`/app/agents/:id` |
- * | 执行端（Agent 产品） | **执行端机器** | 一台机器 = 一行 | **本页** |
+ * | 机器（Agent 产品） | **执行端机器** | 一台机器 = 一行 | **本页** |
  *
  * ⚠ **Agent 侧因此没有独立列表页**：看一个 Agent 的运行与模型，得先有机器。
  * 这是机器优先的既定代价（轴与事实一致换来的）。
@@ -85,10 +85,10 @@ function RuntimeList() {
     <div className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-4">
         {/* ★ **一级入口不带返回箭头**（2026-10-11）：这一页是导航里的一级入口
-            （`navGroups.ts` 的「执行端」组），原先却顶着一颗 `aria-label="返回我的"`
+            （`navGroups.ts` 的「机器」组），原先却顶着一颗 `aria-label="返回我的"`
             —— 等于告诉用户"你在「我的」下面一层"，而导航里它就在自己那一层 ✗。
-            （二级页那颗还在，见下面 `DetailHeader` 的「返回我的执行端」。） */}
-        <span className="text-title">我的执行端</span>
+            （二级页那颗还在，见下面 `DetailHeader` 的「返回我的机器」。） */}
+        <span className="text-title">我的机器</span>
         <span className="ml-2 text-caption text-muted-foreground">
           {state.kind === 'ready' ? `${state.entries.length} 台` : ''}
         </span>
@@ -125,7 +125,7 @@ function RuntimeList() {
             />
           )}
           {state.kind === 'loading' && (
-            <p className="py-12 text-center text-caption text-muted-foreground">正在读取你的执行端…</p>
+            <p className="py-12 text-center text-caption text-muted-foreground">正在读取你的机器…</p>
           )}
           {state.kind === 'unavailable' && <EntriesUnavailableCard message={state.message} onRetry={retry} />}
           {state.kind === 'ready' &&
@@ -141,7 +141,7 @@ function RuntimeList() {
             ))}
           {state.kind === 'ready' && (
             <p className="px-1 pt-2 text-micro text-muted-foreground">
-              这里列的是跑 Agent 的机器（执行端）。世界侧的联系人与会话在「消息」与「联系人」里。
+              这里列的是机器：每台机器上跑着 Agent 的执行端（进程、模型源、活动记录都在那一台）。世界侧的联系人与会话在「消息」与「联系人」里。
             </p>
           )}
         </div>
@@ -286,15 +286,15 @@ function RuntimeDetail({ entryId }: { entryId: string }) {
   if (state.kind === 'ready' && !entry) {
     return (
       <div className="flex h-full min-h-0 flex-col bg-background">
-        <DetailHeader title="执行端" onBack={() => navigate('/app/runtimes')} />
+        <DetailHeader title="机器" onBack={() => navigate('/app/runtimes')} />
         <div className="flex flex-1 items-center justify-center px-6 text-center">
           <div className="space-y-2">
-            <p className="text-body">没有这台执行端</p>
+            <p className="text-body">没有这台机器</p>
             <p className="text-caption text-muted-foreground">
               地址里那台机器不在这份列表里（可能已被删除，或地址写错了）。
             </p>
             <Button variant="outline" size="sm" onClick={() => navigate('/app/runtimes')}>
-              回到我的执行端
+              回到我的机器
             </Button>
           </div>
         </div>
@@ -341,7 +341,7 @@ function RuntimeDetail({ entryId }: { entryId: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <DetailHeader
-        title={entry ? (entry.local ? '本机' : entry.name) : '执行端'}
+        title={entry ? (entry.local ? '本机' : entry.name) : '机器'}
         onBack={() => navigate('/app/runtimes')}
       />
       <PageScroll>
@@ -415,7 +415,7 @@ function RuntimeDetail({ entryId }: { entryId: string }) {
  * - **零新状态**：判据取自页面上**已有**的那份读数（`useHomeEntries` 的 `config`）——
  *   不新开请求、不落偏好 ⇒ 配好之后它自己消失。
  * - ⚠ **它消失之后"建一支 Agent"那个指针也跟着消失** —— **那是有意的**：它只服务"第一次"
- *   那一段路，一次就够；再要找那个入口，它在壳层导航「执行端」组的「我的 Agent」里。
+ *   那一段路，一次就够；再要找那个入口，它在壳层导航「机器」组的「我的 Agent」里。
  */
 function FirstModelStep({
   entryId,
@@ -456,7 +456,7 @@ function FirstModelStep({
 function DetailHeader({ title, onBack }: { title: string; onBack: () => void }) {
   return (
     <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-4">
-      <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回我的执行端">
+      <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回我的机器">
         <ArrowLeft className="size-4" />
       </Button>
       <span className="text-title">{title}</span>
@@ -492,7 +492,7 @@ function MachineCard({
     <section className="space-y-3 rounded-xl border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <Server className="size-4 text-muted-foreground" aria-hidden />
-        <span className="text-body">{entry ? (entry.local ? '本机' : entry.name) : '这台执行端'}</span>
+        <span className="text-body">{entry ? (entry.local ? '本机' : entry.name) : '这台机器'}</span>
         {entry && !entry.local && (
           <code className="truncate font-mono text-caption text-muted-foreground">{entry.baseUrl}</code>
         )}
@@ -508,7 +508,7 @@ function MachineCard({
         {situation.kind === 'unreadable' && '这台机器这次没读到。'}
         {situation.kind === 'no-resident' && '这台机器上还没有 Agent。'}
         {situation.kind === 'legacy-home' &&
-          '这个家还是老形态 —— 上面那一支住在旧布局里，所以这一格读不出是谁。'}
+          '这台机器的布局还是老的 —— 上面那一支住在旧布局里，所以这一格读不出是谁。'}
         {situation.kind === 'no-id' &&
           '这台机器没报上上面跑的是谁（可能是记录读不出来，或口子版本旧）。'}
         {situation.kind === 'unknown-agent' &&

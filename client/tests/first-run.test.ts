@@ -19,7 +19,7 @@
 //
 // - **"读不到"不许说成"没有"**：所有权清单没读到时第二步是 `unknown`（不是 `todo`）；
 //   机器一份都没答话时第三步也是 `unknown`（不是"它还没接上"——那是替系统断言）。
-// - **一条机器都没有时只说前提**：出口指「我的执行端」（加一台的入口在那儿），
+// - **一条机器都没有时只说前提**：出口指「我的机器」（加一台的入口在那儿），
 //   不许指一条不存在的"就地接上"（`AGENTS.md` 的假路径纪律）。
 //
 // ⚠ 本文件逐条对齐**渲染出来的那几个词**：`tests/page-subject-lines.test.ts` 另有源级断言
@@ -264,13 +264,13 @@ test('壳刚接过一次（成功那一档）⇒ 就地收成一行，且那句�
   assert.ok(attach.detail.includes('接'), attach.detail)
 })
 
-test('一条机器都没有 ⇒ 只说前提 ＋ 指「我的执行端」，不摆"接上"的按钮', () => {
+test('一条机器都没有 ⇒ 只说前提 ＋ 指「我的机器」，不摆"接上"的按钮', () => {
   const attach = step(
     firstRunPlan(input({ machines: 0, agentsCount: 1, agentId: 'agent-1', resolution: { kind: 'elsewhere' } })),
     'attach',
   )
   assert.equal(attach.state, 'todo')
-  assert.deepEqual(attach.exit, { kind: 'machines', label: '去我的执行端' })
+  assert.deepEqual(attach.exit, { kind: 'machines', label: '去我的机器' })
   assert.ok(attach.detail.includes('装着 Celira 的机器'), `没有机器时该说清前提：${attach.detail}`)
 })
 

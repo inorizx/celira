@@ -503,7 +503,7 @@ check(
 )
 check(
   '本机服务面板：Agent 那一行读得到（住户数 / 老形态 / 还没有 Agent 三态之一）',
-  panelSettled && /Agent/.test(machineText) && /(支在跑|这个家还是老形态|这台机器上还没有 Agent)/.test(machineText),
+  panelSettled && /Agent/.test(machineText) && /(支在跑|这台机器的布局还是老的|这台机器上还没有 Agent)/.test(machineText),
   // ⚠ 这里原先是按 `indexOf('Agent')` 取 120 字 —— 那**锚在面板的说明文字上**，红的时侯
   //   看不到真正那一行，于是没人查得动（2026-10-08 实测三次：一红一绿一红，读数都没用）。
   //   取**含 Agent 的那一行**整行：断言一个字没动，只是让红的那次说得出它在读什么。

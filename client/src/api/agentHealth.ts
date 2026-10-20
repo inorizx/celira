@@ -109,7 +109,7 @@ export function agentHealthFromHomes(input: {
     // ⚠ **带作用域**（2026-10-11）：`elsewhere` 说的是"**读得到的**执行端都没有报它在跑"，
     // 不是"**这台机器**上跑的是别的 Agent" —— 后者把"我没看见"说成了"没有"
     // （跨平面的话必须带作用域；说法与 `agentMachine.ts` 那一句一致）。
-    return { tone: 'muted', text: '未接入 —— 能读到的执行端都没有报它在跑' }
+    return { tone: 'muted', text: '未接入 —— 能读到的机器都没有报它在跑' }
   }
   // `unreachable`：一份都没读到。
   return agentHealthReadout(null)
@@ -220,7 +220,7 @@ function ledgerPart(view: HomeStatusView): string {
  */
 function emptyLedgerText(state: string, legacyHome: boolean): string {
   if (state === 'loaded') return '还没有过活动'
-  if (state === 'no-resident') return legacyHome ? '这个家还是老形态' : '这台机器上还没有 Agent'
+  if (state === 'no-resident') return legacyHome ? '这台机器的布局还是老的' : '这台机器上还没有 Agent'
   if (state === 'missing-binary') return '这台机器上找不到它的程序'
   if (state === 'busy') return '它的记录这一面正忙'
   return '它的记录读不到'

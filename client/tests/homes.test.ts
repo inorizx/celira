@@ -93,7 +93,7 @@ test('地址归一化：没写 scheme 补 https、去尾斜杠（远程的家只
   assert.equal(normalizeHomeAddress('https://a.example/'), 'https://a.example')
   assert.equal(normalizeHomeAddress('http://a.example'), 'http://a.example', '写了的照写（校验再拦）')
   assert.equal(normalizeHomeAddress(''), '')
-  assert.equal(homeAddressError(''), '家地址不能为空')
+  assert.equal(homeAddressError(''), '机器地址不能为空')
   assert.equal(homeAddressError('192.168.1.20'), null, '裸主机名归一后是合法 https 地址')
   assert.match(homeAddressError('http://a.example') ?? '', /https/)
   // 读不懂的地址（URL 解析不了）：空格进不了主机名 ⇒ 明确报错，不猜。

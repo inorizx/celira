@@ -46,7 +46,7 @@ import type { AgentHomeResolution, HomeEntry } from './homes.ts'
  * - `reading`：家条目还在读（还没有裁决）；
  * - `claimed`：某台机器报的就是这个 Agent ⇒ 说得出住址；
  * - `no-id`：有读数、但那台**没报上上面跑的是谁** ⇒ **说不准**，不许说成"未接入"；
- * - `elsewhere`：读到的机器报的都是**别人**的 id ⇒ 「**能读到的执行端都没有报它在跑**」
+ * - `elsewhere`：读到的机器报的都是**别人**的 id ⇒ 「**能读到的机器都没有报它在跑**」
  *   （这是事实，不是错误）；
  * - `unreachable`：一份都没读回来 ⇒ 「读不到」，把原因原样交出去。
  *
@@ -111,7 +111,7 @@ export function agentMachineReadout(input: {
   if (resolution.kind === 'elsewhere') {
     // **作用域写进句子里**（见文件头那条）：这一档知道的是"读得到的机器都没报它"，
     // 不是"没有机器在跑它" —— 少一个字就从"我没看见"变成"没有"。
-    return { kind: 'elsewhere', text: '能读到的执行端都没有报它在跑。', target: null }
+    return { kind: 'elsewhere', text: '能读到的机器都没有报它在跑。', target: null }
   }
   // unreachable：原因（`homeFailureText` 给的固定人话）原样带上，**不吞** ——
   // 吞掉它就等于把"读不到"说成一个事实。
@@ -182,7 +182,7 @@ export function shouldOfferAttach(
  *
  * ⚠ **这不是"张冠李戴"**：`claimed` 之外，本函数**不读任何机器的读数**（不拿别人的状态或
  * 账本顶给它）—— 它只回答"这一笔写该发给谁"，而那一笔写的主语是**用户自己点的那一下**。
- * 机器侧那句"能读到的执行端都没有报它在跑"照旧由 `agentMachineReadout` 说（那一格没变）。
+ * 机器侧那句"能读到的机器都没有报它在跑"照旧由 `agentMachineReadout` 说（那一格没变）。
  */
 export function modelChoiceMachine(input: {
   /** 归属裁决；`null` = 家条目还没就绪（还在读）。 */

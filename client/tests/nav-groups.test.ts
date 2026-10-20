@@ -50,14 +50,18 @@ test('「我的」页不再给「运行」捷径（刀2b；2026-09-26 理由修�
   )
 })
 
-test('壳层导航分两组：上组「世界」（IM）、下组「执行端」（Agent 产品）', () => {
+test('壳层导航分两组：上组「世界」（IM）、下组「机器」（Agent 产品）', () => {
   assert.deepEqual(
     NAV_GROUPS.map((g) => g.id),
     ['world', 'agent'],
   )
+  // ★ **2026-10-20（T5 命名统一）**：组标从「执行端」改成「机器」——
+  //   `执行端` 在 `docs/runtime/AGENT_VOCABULARY.md` 里是**平面名**，而"承载执行端的机器"
+  //   那个词是**执行点**；屏幕上的产品词取后者的人话（机器），`执行端` 只在机器页那句
+  //   定义里出现一次（"每台机器上跑着 Agent 的执行端"）。
   assert.deepEqual(
     NAV_GROUPS.map((g) => g.label),
-    ['世界', '执行端'],
+    ['世界', '机器'],
   )
   assert.deepEqual(
     NAV_GROUPS[0].items.map((i) => i.id),
@@ -110,14 +114,14 @@ test('两端共享同一数组派生：摊平结果只是两个分区的直接�
   )
 })
 
-test('2026-09-25 组织轴刀：下组入口是「我的执行端」，且旧入口不许换个名字回来', () => {
+test('2026-09-25 组织轴刀：下组入口是「我的机器」，且旧入口不许换个名字回来', () => {
   const flat = flattenNavItems()
   assert.equal(
     flat.find((i) => i.id === 'runtimes')?.to,
     '/app/runtimes',
-    '「我的执行端」指向机器列表（点进去才是那一台机器的一页）',
+    '「我的机器」指向机器列表（点进去才是那一台机器的一页）',
   )
-  assert.equal(flat.find((i) => i.id === 'runtimes')?.label, '我的执行端')
+  assert.equal(flat.find((i) => i.id === 'runtimes')?.label, '我的机器')
   for (const gone of ['providers', 'runtime', 'experience']) {
     assert.ok(
       !flat.some((i) => i.id === gone),
@@ -210,7 +214,7 @@ test('★ 那条判据只有一处实现，且外壳里不许再留一份（旧�
 
 test('★ 一级入口的头部**不带**返回箭头（二级页那颗照旧在）', () => {
   const listPages = [
-    ['我的执行端', '../src/pages/RuntimesPage.tsx'],
+    ['我的机器', '../src/pages/RuntimesPage.tsx'],
     ['我的 Agent', '../src/components/celira/AgentsListPanel.tsx'],
   ] as const
   for (const [label, relative] of listPages) {
@@ -224,7 +228,7 @@ test('★ 一级入口的头部**不带**返回箭头（二级页那颗照旧在
   // ⚠ 它们在**各自的文件**里 —— 一级入口那一份只是不该有「返回我的」，
   //   而 `AgentsListPanel` 里根本没有二级出口（那一支的详情页是 `MyAgentsPage`）。
   const detailArrows = [
-    ['../src/pages/RuntimesPage.tsx', '返回我的执行端'],
+    ['../src/pages/RuntimesPage.tsx', '返回我的机器'],
     ['../src/pages/MyAgentsPage.tsx', '返回我的 Agent'],
   ] as const
   for (const [relative, arrow] of detailArrows) {

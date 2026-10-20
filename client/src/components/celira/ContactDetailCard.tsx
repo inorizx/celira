@@ -235,7 +235,7 @@ export function ContactDetailCard({ participant }: { participant: Participant })
             <span className="text-body">
               {isMine
                 ? isReal
-                  ? '由本机执行端驱动'
+                  ? '由你这台机器驱动'
                   : myAgentConfig.backendLabel
                 : '接入方由其归属人管理'}
             </span>
@@ -380,7 +380,7 @@ export function ContactDetailCard({ participant }: { participant: Participant })
 
       <Separator />
       <p className="text-center text-caption text-muted-foreground">
-        它跑在哪台机器上、用什么模型，在执行端那一页。
+        它跑在哪台机器上、用什么模型，在「我的机器」那一页。
       </p>
     </div>
   )

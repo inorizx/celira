@@ -217,7 +217,7 @@ test('一场活动都没有 / 记录那一面读不到：各说各的（缺省�
     agentHealthReadout(
       view({ host: { state: 'running' }, agent: { state: 'no-resident', runs: [] }, legacyHome: true }),
     ).text,
-    '它正在跑 · 这个家还是老形态',
+    '它正在跑 · 这台机器的布局还是老的',
   )
   assert.equal(
     agentHealthReadout(
@@ -303,7 +303,7 @@ test('按认领算：认到别人那台时不许拿它的读数顶', () => {
   assert.equal(other.tone, 'muted')
   // ★ 2026-10-11 **带作用域**：`elsewhere` 说的是"**读得到的**执行端都没有报它在跑"，
   // 不是"**这台机器**上跑的是别的 Agent"——后者把"我没看见"说成了"没有"。
-  assert.equal(other.text, '未接入 —— 能读到的执行端都没有报它在跑')
+  assert.equal(other.text, '未接入 —— 能读到的机器都没有报它在跑')
   // 一份都没读到：说"读不到"，不说"没在跑"。
   assert.equal(agentHealthFromHomes({ resolution: resolution('unreachable') }).text, '机器这一面读不到')
   // 家条目还没就绪：说"正在读"。

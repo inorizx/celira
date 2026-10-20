@@ -29,7 +29,7 @@ test('「我的 Agent」那份清单说清它拼了两个平面（每行的数�
   const panel = read('../src/components/celira/AgentsListPanel.tsx')
   assert.ok(panel.includes('拼两件事'), '清单页没有那句"拼两件事"')
   assert.ok(panel.includes('机器上的数据'), '清单页没有说清那一半来自机器')
-  assert.ok(panel.includes('执行端'), '清单页该用产品词「执行端」（不是大白话）')
+  assert.ok(panel.includes('机器'), '清单页该用产品词「机器」（`执行端` 只留在机器页的定义句里）')
 })
 
 test('★ 「三步」这个词出现在哪儿，三步的定义就跟到哪儿（2026-10-20 T1 的同一屏自洽）', () => {
@@ -51,10 +51,22 @@ test('★ 「三步」这个词出现在哪儿，三步的定义就跟到哪儿�
   assert.ok(wired >= 2, `三步清单没在空态与创建面板两处都摆（实际 ${wired} 处）`)
 })
 
-test('「我的执行端」那份清单说清它列的是什么（跑 Agent 的机器）', () => {
+test('「我的机器」那份清单说清它列的是什么（跑 Agent 的机器）', () => {
   const page = read('../src/pages/RuntimesPage.tsx')
-  assert.ok(page.includes('跑 Agent 的机器'), '机器清单页没有"它列的是什么"那句')
-  assert.ok(page.includes('执行端'), '该用产品词「执行端」')
+  // ★ 2026-10-20（T5 命名统一）：屏幕词是**机器**，`执行端` 只在这句定义里出现**一次**
+  //   （"每台机器上跑着 Agent 的执行端"）—— 判据从"有没有那半句"改成"定义在不在、
+  //   而且它解释的是机器与执行端的关系"。
+  assert.ok(page.includes('每台机器上跑着 Agent 的执行端'), '机器清单页没有"它列的是什么"那句定义')
+  assert.ok(page.includes('这里列的是机器'), '那句定义得先说清这一页列的是机器')
+  // ★ **一个产品词只留一处定义**：`执行端` 在**渲染出来的代码**里只许出现那一次
+  //   （`docs/runtime/AGENT_VOCABULARY.md`：它是**平面名**；屏幕词取"机器"）。
+  //   ⚠ 先剥注释再数：注释里提平面名是正当的（那是给读代码的人）。
+  const withoutComments = page
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  const rendered = (withoutComments.match(/执行端/g) ?? []).length
+  assert.equal(rendered, 1, `屏幕上的 \`执行端\` 只该在那句定义里出现一次，实际 ${rendered} 处`)
 })
 
 test('「活动」这个词出现在哪儿，定义就跟到哪儿（同一屏那句要自洽）', () => {

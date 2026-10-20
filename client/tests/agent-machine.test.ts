@@ -105,7 +105,7 @@ test('★ elsewhere（报的都是别人的 id）⇒ 那句**带作用域**；**
   const other: HomeStatusView = { ...STATUS, agent: { ...STATUS.agent, agentId: 'someone-else' } }
   const readout = readoutOf([reading(LOCAL, other)], 'agent-7')
   assert.equal(readout.kind, 'elsewhere')
-  assert.equal(readout.text, '能读到的执行端都没有报它在跑。')
+  assert.equal(readout.text, '能读到的机器都没有报它在跑。')
   assert.equal(readout.target, null)
   // ⚠ **作用域不许丢**（2026-10-11）：这一档的判据是"**读到的**都不是它"（`homes.ts`：
   //    `readings.some(view !== null)` 且无一匹配 ⇒ 另有条目可能**没读到**）。

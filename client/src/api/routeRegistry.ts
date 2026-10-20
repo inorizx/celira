@@ -245,8 +245,8 @@ export const ROUTES: readonly RouteDeclaration[] = [
   //
   // ⚠ **2026-09-29 第二处**：`/app/agents` 进了壳层导航的「执行端」组（第二个入口）——
   //    它原先**不在任何分区里**（唯一入口是「我的」页那张卡），一级内容拿二级待遇。
-  { path: '/app/runtimes', side: 'home', planes: ['home'], page: 'pages/RuntimesPage.tsx', what: '我的执行端：跑 Agent 的机器列表（一台一行；本机那条是预置的）', guarded: false },
-  { path: '/app/runtimes/:entryId', side: 'home', planes: ['home'], page: 'pages/RuntimesPage.tsx', what: '一台执行端：运行 / 活动 / 模型三个房间 + 上面跑着谁', guarded: false },
+  { path: '/app/runtimes', side: 'home', planes: ['home'], page: 'pages/RuntimesPage.tsx', what: '我的机器：跑 Agent 的机器列表（一台一行；本机那条是预置的）', guarded: false },
+  { path: '/app/runtimes/:entryId', side: 'home', planes: ['home'], page: 'pages/RuntimesPage.tsx', what: '一台机器：运行 / 活动 / 模型三个房间 + 上面跑着谁', guarded: false },
   // ★ **2026-10-11 按机器寻址**：这一页管的是**这一台机器**上的钥匙清单（清单归机器、
   //   绑定归住户）⇒ 它挂在机器那条路径下，与「模型」那一间是同一台机器的两个深度
   //   （那一间给读数与换绑，这一页给增删改）。判据一句话：**配置跟着它的对象走。**
@@ -266,8 +266,8 @@ export const ROUTES: readonly RouteDeclaration[] = [
   //   —— 而这个别名**故意不带锚点**（`App.tsx` 的 `LegacyRuntimeRedirect` 里写着为什么：
   //   那张映射表住在需要 `entryId` 的机器页里）。映射服务的是**直接深链到机器页**的旧书签
   //   （`/app/runtimes/<entryId>#home`），不是这条别名 ⇒ 那句话把两件事说成了一件。
-  { path: '/app/runtime', side: 'home', planes: [], page: null, what: '旧「运行状态」地址 ⇒ 重定向到执行端列表（**不带锚点**；锚点映射服务的是直接深链到机器页的旧书签）', guarded: false },
-  { path: '/app/experience', side: 'home', planes: [], page: null, what: '旧「经历」地址 ⇒ 重定向到执行端列表（深链接不破）', guarded: false },
+  { path: '/app/runtime', side: 'home', planes: [], page: null, what: '旧「运行状态」地址 ⇒ 重定向到机器列表（**不带锚点**；锚点映射服务的是直接深链到机器页的旧书签）', guarded: false },
+  { path: '/app/experience', side: 'home', planes: [], page: null, what: '旧「经历」地址 ⇒ 重定向到机器列表（深链接不破）', guarded: false },
 
   // ── 设置区（关于我和这台设备）────────────────────────────────────────────
   // ⚠ **`planes` 在这一区最要紧**（2026-10-11）：`side: 'settings'` 是"两侧都可能"的逃逸口，
@@ -292,7 +292,7 @@ export const ROUTES: readonly RouteDeclaration[] = [
   //   清单在 `/app/runtimes`（一级入口），"加一台"跟着清单走（清单页那颗「添加」就地开表单）、
   //   "管某一台"跟着那台机器（机器页的「这台机器的设置」就地展开）。
   //   从前两页列同一批条目、各说一半 ✗ ⇒ 人要记得"加一台去设置、看状态回执行端"。
-  { path: '/settings/homes', side: 'settings', planes: [], page: null, what: '旧「家」地址 ⇒ 重定向到执行端列表（清单只留一个门；钥匙与移除在那台机器自己那一页）', guarded: false },
+  { path: '/settings/homes', side: 'settings', planes: [], page: null, what: '旧「家」地址 ⇒ 重定向到机器列表（清单只留一个门；钥匙与移除在那台机器自己那一页）', guarded: false },
   // ⚠ **2026-10-11：模型配置按机器寻址**（`/app/runtimes/:entryId/config`，见上面执行端那一块）。
   //   判据：它管的是**某台机器**的钥匙清单（`<家>/model_sources.json`）⇒ 配置跟着它的对象走。
   //   这一条从此是**别名**（重定向）：带 `?home=<id>` 落那台机器，没有上下文落执行端列表

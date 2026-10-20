@@ -179,11 +179,11 @@ interface ModelProvidersPageProps {
  * （`<环境根>/model_binding.json`，在机器页的「模型」那一间换）——"钥匙串归房子，
  * 用哪把钥匙归住户"。旧地址 `/settings/providers` 里**没有机器上下文**，于是它自己
  * 长了一行"配哪台机器"的选择器；现在**地址就是那台机器**，那一行随之退场
- * （旧地址保留成别名：带 `?home=` 落那台、没有上下文落执行端列表 —— 见 `App.tsx`）。
+ * （旧地址保留成别名：带 `?home=` 落那台、没有上下文落机器列表 —— 见 `App.tsx`）。
  *
  * ⚠ **认不出那台机器就如实说，绝不回落本机**（2026-10-11 修）：旧实现是
  * `find(...) ?? localHomeEntry()` —— 地址里点名了一台不在列表里的机器时，页面会**默默去配本机**，
- * 而用户以为自己在配那台。判据与机器页那句「没有这台执行端」同款（**地址里点名了谁，
+ * 而用户以为自己在配那台。判据与机器页那句「没有这台机器」同款（**地址里点名了谁，
  * 页面就说谁**；说不出来就说说不出来）。
  */
 export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
@@ -199,7 +199,7 @@ export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
   const entry: HomeEntry | null =
     homeEntries.find((candidate) => candidate.id === entryId) ?? null
   const goBack = onBack ?? (() => navigate(entry ? `/app/runtimes/${entry.id}` : '/app/runtimes'))
-  const whereLabel = entry === null ? '这台执行端' : entry.local ? '本机' : entry.name
+  const whereLabel = entry === null ? '这台机器' : entry.local ? '本机' : entry.name
 
   const [reading, setReading] = useState<Reading>({ kind: 'loading' })
   /**
@@ -701,7 +701,7 @@ export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
     return (
       <div className="flex h-full min-h-0 flex-col bg-background">
         <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-4">
-          <Button variant="ghost" size="icon" onClick={goBack} aria-label="返回我的执行端">
+          <Button variant="ghost" size="icon" onClick={goBack} aria-label="返回我的机器">
             <ArrowLeft className="size-4" />
           </Button>
           <div className="text-title">模型配置</div>
@@ -709,17 +709,17 @@ export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
         <div className="flex flex-1 items-center justify-center px-6 text-center">
           {homesSettled ? (
             <div className="space-y-2">
-              <p className="text-body">没有这台执行端</p>
+              <p className="text-body">没有这台机器</p>
               <p className="text-caption text-muted-foreground">
                 地址里那台机器不在这份列表里（可能已被移除，或地址写错了）—— 所以这里什么都不配，
                 <strong>也不会转去配本机</strong>。
               </p>
               <Button variant="outline" size="sm" onClick={() => navigate('/app/runtimes')}>
-                回到我的执行端
+                回到我的机器
               </Button>
             </div>
           ) : (
-            <p className="text-body">正在读取你的执行端…</p>
+            <p className="text-body">正在读取你的机器…</p>
           )}
         </div>
       </div>
@@ -729,7 +729,7 @@ export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-4">
-        <Button variant="ghost" size="icon" onClick={goBack} aria-label="返回这台执行端">
+        <Button variant="ghost" size="icon" onClick={goBack} aria-label="返回这台机器">
           <ArrowLeft className="size-4" />
         </Button>
         <div>
@@ -746,7 +746,7 @@ export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
 
       {/* ⚠ **"配哪台机器"那一行没有了**（2026-10-11）：**地址就是那台机器**
           （`/app/runtimes/:entryId/config`）—— 留着它等于让页面上同时有两个答案。
-          要配另一台：回执行端列表，进那一台。 */}
+          要配另一台：回机器列表，进那一台。 */}
 
       {/*
         ⚠ **页面级两层**（2026-09-23 二次回炉，形状回到 2026-09-02 那版 `15f1fae`）：

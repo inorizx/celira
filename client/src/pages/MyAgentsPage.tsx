@@ -936,7 +936,7 @@ function MyAgentsShell({ participantId }: { participantId?: string }) {
  *
  * 在这一段之前，这一页是个**死胡同**：出口只有「返回我的 Agent」与「撤销 Agent」。
  * 而「我的 Agent」列表每一行上摆着「状态 / 模型 / 最近活动」三格，点进来**一个字都不说**
- * 它在哪台机器上 —— 用户要问"它现在在跑吗"，得退回去、自己想起来去「我的执行端」、
+ * 它在哪台机器上 —— 用户要问"它现在在跑吗"，得退回去、自己想起来去「我的机器」、
  * 再从机器那一头找。机器页开口就说「上面跑的是 X」：**答案一直在，只是只从另一端说**。
  *
  * ## 边界（两条，都不是审美）
@@ -1481,7 +1481,7 @@ function AgentMachine({ agentId }: { agentId: string }) {
             }
           >
             <Server className="size-3.5" />
-            {readout.target ? '去那台机器' : '去我的执行端'}
+            {readout.target ? '去那台机器' : '去我的机器'}
           </Button>
         )}
       </div>

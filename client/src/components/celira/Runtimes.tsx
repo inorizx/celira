@@ -118,7 +118,7 @@ export function UnreachableCard({
         <span className="text-body">读不到{what}</span>
       </div>
       <p className="text-caption text-muted-foreground">
-        联系不上这台执行端，所以这里没有数据 —— 这不是 Agent 停了。
+        联系不上这台机器，所以这里没有数据 —— 这不是 Agent 停了。
       </p>
       {reason && <p className="text-caption text-muted-foreground">{reason}</p>}
       {local && (
@@ -157,7 +157,7 @@ export function EntriesUnavailableCard({ message, onRetry }: { message: string; 
     <div className="space-y-3 rounded-xl border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <AlertTriangle className="size-4 text-presence-timeout" aria-hidden />
-        <span className="text-body">读不到你的执行端列表</span>
+        <span className="text-body">读不到你的机器列表</span>
       </div>
       <p className="text-caption text-muted-foreground">{message}</p>
       {onRetry && (
@@ -250,7 +250,7 @@ function EntryCatalog({ id, entry }: { id: string; entry: HomeEntry | null }) {
 // ---------------------------------------------------------------------------
 
 /**
- * **运行**：这台执行端跑得怎么样 —— **这一间给"当下的答案"**（在不在跑 / 能不能开始新活动 /
+ * **运行**：这台机器跑得怎么样 —— **这一间给"当下的答案"**（在不在跑 / 能不能开始新活动 /
  * 上次那一次成没成 / 被什么挡住），活动明细是它下面**默认收起**的一层下钻（2026-10-12 主人裁）。
  *
  * 主语是机器（"这台机器上的 Agent 在不在跑"），所以这里**不需要认领**——
@@ -272,7 +272,7 @@ export function RuntimeRunSection({
       id="run"
       title="运行"
       icon={<House className="size-4 text-muted-foreground" aria-hidden />}
-      subject="这台执行端上的 Agent 在不在跑、现在能不能开始新活动、醒过几次。"
+      subject="这台机器上的 Agent 在不在跑、现在能不能开始新活动、醒过几次。"
     >
       {state.kind === 'loading' && <LoadingCard what="运行情况" />}
       {state.kind === 'unavailable' && <EntriesUnavailableCard message={state.message} onRetry={onRetry} />}
@@ -356,7 +356,7 @@ function RunCard({ view, agentNames }: { view: HomeStatusView; agentNames: Recor
           ? // **老形态 ≠ 没有 Agent**（2026-10-05）：壳只认新布局，而老家（`<家>/env`）
             // 是 `up.js` 负责搬的（app 不做迁移）⇒ 认不出就说认不出，别把它说成不存在。
             view.legacyHome === true
-            ? '这个家还是老形态'
+            ? '这台机器的布局还是老的'
             : '这台机器上还没有 Agent'
           : agent.state === 'missing-binary'
             ? '读不到（本机缺少必要的程序）'
@@ -511,7 +511,7 @@ function activityMissingText(view: HomeStatusView): { title: string; note: strin
   if (view.agent.state === 'no-resident') {
     // ⚠ **老形态 ≠ 没有 Agent**：先看那一格（"我认不出这个形状"与"它不存在"是两件事）。
     if (view.legacyHome === true) {
-      return { title: '这个家还是老形态', note: legacyNoteFor(view) }
+      return { title: '这台机器的布局还是老的', note: legacyNoteFor(view) }
     }
     return {
       title: '还没有活动记录',
@@ -712,7 +712,7 @@ function ActivityRow({ day, thin = false }: { day: AgentDay; thin?: boolean }) {
 // ---------------------------------------------------------------------------
 
 /**
- * **模型**：这台执行端上的模型源清单与"这一个 Agent 用哪一条"，以及**换成别的**。
+ * **模型**：这台机器上的模型源清单与"这一个 Agent 用哪一条"，以及**换成别的**。
  *
  * 清单（这台机器上有哪些钥匙）与绑定（这一个 Agent 用哪一条）是两件事：
  * 前者归机器、后者归住在机器上的那个 Agent —— 所以换绑在这里做，
@@ -867,7 +867,7 @@ export function RuntimeModelSection({
       icon={<Brain className="size-4 text-muted-foreground" aria-hidden />}
       subject={
         <>
-          这台执行端上的模型源，以及它承载的 Agent 正在用哪一条。只显示配没配，
+          这台机器上的模型源，以及它承载的 Agent 正在用哪一条。只显示配没配，
           <strong>不显示密钥内容</strong>。
         </>
       }

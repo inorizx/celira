@@ -351,7 +351,7 @@ export interface LocalServicesReadout {
    * **这个家还是住户化之前的形状**（环境根 `<家>/env`）——2026-10-05 加。
    *
    * ⚠ 它与「运行」那一页的 `HomeStatusView.legacyHome` 是**同一格事实**（壳同一个判据），
-   * 只是两条读数各带一份：那一页说"这个家还是老形态"，这一格就不能说"这台机器上还没有 Agent"
+   * 只是两条读数各带一份：那一页说"这台机器的布局还是老的"，这一格就不能说"这台机器上还没有 Agent"
    * ——同一屏两句话不能互相打脸（判据：**认不出的形状不许说成不存在**）。
    */
   legacyHome: boolean
@@ -489,7 +489,7 @@ export function localServiceRows(readout: LocalServicesReadout | null): LocalSer
         readout.residents > 0
           ? `${readout.residentsRunning} / ${readout.residents} 支在跑`
           : readout.legacyHome
-            ? '这个家还是老形态（住户化之前）'
+            ? '这台机器的布局还是老的（住户化之前）'
             : '这台机器上还没有 Agent',
       // 老形态那一格是"认不出"，不是"没在跑" ⇒ 灰（`muted`），不给 `off` 那个"确实没有"的灯。
       tone:

@@ -65,7 +65,7 @@ export type MachineSituationTone = 'ok' | 'warn' | 'muted'
  * 当时修的是「运行」那一间、漏了这里）。⇒ **三态分开，谁也不冒充谁**：
  *
  * - `no-resident`：这台机器上还没有 Agent（**缺省**，不是故障）；
- * - `legacy-home`：这个家还是老形态（那一支住在旧布局里 ⇒ 报不出 id）；
+ * - `legacy-home`：这台机器的布局还是老的（那一支住在旧布局里 ⇒ 报不出 id）；
  * - `no-id`：有读数、但那台**没报**是谁（记录读不出来 / 口子版本旧）。
  *
  * 页面按 `kind` 决定**自己那一段怎么说**（机器页那张卡说得更完整、家列表那行说"住"），
@@ -96,7 +96,7 @@ export function machineSituation(input: {
   failure: string | null
   /** 那台机器上报的 Agent 状态（`'no-resident'` = 一台都没有）。 */
   agentState: string | null
-  /** 那台机器说这个家还是老形态（旧布局 ⇒ 报不出 id）。 */
+  /** 那台机器说这台机器的布局还是老的（旧布局 ⇒ 报不出 id）。 */
   legacyHome: boolean
   /** 那台机器上报的 Agent id（`null` = 它没报）。 */
   agentId: string | null
@@ -131,7 +131,7 @@ export function machineSituation(input: {
   // 再判"报没报上来是谁" —— 顺序反了就会把新家说成"读不出来"。
   if (input.agentState === 'no-resident') {
     return input.legacyHome
-      ? { kind: 'legacy-home', tone: 'muted', text: '已连上 · 这个家还是老形态' }
+      ? { kind: 'legacy-home', tone: 'muted', text: '已连上 · 这台机器的布局还是老的' }
       : { kind: 'no-resident', tone: 'muted', text: '已连上 · 这台机器上还没有 Agent' }
   }
   // ★ **多支那一档**（2026-10-16）：顶层只有第一支 ⇒ 住户表在场且不止一支时，说**全**。

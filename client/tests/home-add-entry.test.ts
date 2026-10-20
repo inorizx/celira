@@ -57,7 +57,7 @@ test('★ 清单页那颗「添加」**就地**开表单（不是 navigate 走�
 
 test('★ 加机器这件事**只有一处权威**：清单页里不许出现表单字段或落盘调用', () => {
   const listCode = code(LIST)
-  for (const forbidden of ['saveHomeEntry(', '家钥匙', '状态口端口', '配置门端口']) {
+  for (const forbidden of ['saveHomeEntry(', '机器钥匙', '状态口端口', '配置门端口']) {
     assert.ok(
       !listCode.includes(forbidden),
       `清单页的**代码**里出现了「${forbidden}」 —— 加机器那一套被复制成第二份了（两份权威一定会漂）`,
@@ -65,12 +65,12 @@ test('★ 加机器这件事**只有一处权威**：清单页里不许出现表
   }
   // 正对照：那一套确实在表单那一个文件里（否则上面的断言是空跑）。
   assert.ok(
-    FORM.includes('状态口端口') && FORM.includes('配置门端口') && FORM.includes('家钥匙'),
+    FORM.includes('状态口端口') && FORM.includes('配置门端口') && FORM.includes('机器钥匙'),
     '表单字段不见了 —— 上面那条"清单页不许有"的断言会变成空跑',
   )
 })
 
-test('★ 旧地址留成**别名**（`/settings/homes` ⇒ 执行端列表）：旧书签照旧到得了', () => {
+test('★ 旧地址留成**别名**（`/settings/homes` ⇒ 机器列表）：旧书签照旧到得了', () => {
   const appCode = code(APP)
   assert.ok(
     /path:\s*'homes'[\s\S]{0,120}?<Navigate to="\/app\/runtimes" replace \/>/.test(appCode),
