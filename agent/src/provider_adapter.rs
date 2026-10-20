@@ -1071,6 +1071,12 @@ pub(crate) const FINISH_DESCRIPTION: &str = "End this activity yourself, because
 /// 路（那正是主体重开一段的唯一办法）。⇒ 这里只写**机械事实**，不写"你该怎么用"：
 /// ① 搁下之后主体在哪（仍在席）；② 上下文会怎么样（继续累积）；③ 什么时候会被再叫（有事）；
 /// ④ 这一段**只有** `finish_run` 能收。
+///
+/// ⚠ **"加不加第四个原生动词"登记为欠着的**（那会动"工具头恰好三件"那条逐字节契约）：主体今天
+/// 靠两个已有的动词组合出"重开一段"（`finish_run` ＋ 约一个**现在就到点**的时刻），那条组合路的
+/// 承重点由 `tests/host_doorbell.rs` 的
+/// `the_same_due_timer_drives_the_open_segment_and_opens_a_new_one_after_it_ends` 钉着。
+/// **触发条件**：真出现"主体需要重开一段，而组合路不好用"的读数。
 pub(crate) const HOLD_DESCRIPTION: &str = "Put this activity down for now: stop here, with nothing \
      left to do at this moment. No arguments. You stay in this activity: it does not end, and your \
      context keeps growing for as long as you stay. You will be called again when something happens \
@@ -1250,6 +1256,11 @@ pub(crate) enum ArgumentShape {
 ///
 /// ⚠ 它替换的是"整段清醒期判死"（2026-10-13 按真机补）：保留名走的是**它们自己的形状**，
 /// 非法字符是拼写问题——两种都是**那一次调用**的事。
+///
+/// ⚠ 这句读数的另一半读者是**操作者**（`AGENTS.md`「三类读者」：人不许比系统知道得更少）：
+/// 一条只留稳定分类、不留名字的路，让系统知道是哪个名字而人不知道——那样**整段都做对了**的
+/// 活动会被记成一行模型失败，操作者连该翻哪一条记录都无从下手。读数把那个名字交出来，
+/// 于是同一个故障在主体的视野里与操作者的读数里**指的是同一个名字**。
 pub(crate) fn tool_name_reading(name: &str) -> String {
     if name == FINISH_TOOL || name == HOLD_TOOL || name == INVOKE_TOOL {
         format!(

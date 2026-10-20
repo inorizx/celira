@@ -14,6 +14,20 @@
 //!    它每轮被丢弃）。`encrypted_content` 是"服务端加密、客户端保存"——与自存铁律同构；
 //! 3. **词表不跨层**：失败分类复用 chat 侧那九类（同一个 [`ProviderFailure`]，同样的状态码映射）。
 //!
+//! ## 一个名字不能用，是那一次调用的事
+//!
+//! 头部声明的三件（入口 / 收场 / 搁下）**每一件都要在解码处有自己的分支**：缺一件，那次调用
+//! 就会掉进"以动作名直调"那条路、被**保留名**规则拒掉。判据（与 chat 侧同一条）：名字不能用是
+//! **那一次调用**的拒绝（带一句读数、点着那个名字），不是整段清醒期判死刑；名字的合法性归
+//! **声明侧**，回放侧只负责把模型当时说过的那次调用**原样引回去**（那次调用从未派发，回放它
+//! 对配对是必需的，而且无损）。
+//!
+//! ⚠ **如实登记：本文件只做到解码那半，而且那半被自己的判序压住了。** `translate_response`
+//! 里 `invoke` 那一支**不可达**（外层先拿保留名规则把它拒了），`history_items` 那边**仍旧**逐
+//! 个校验名字 ⇒ 一次"名字不能用"的拒绝在下一轮**回放不出来**，整段仍以 `reserved-tool-name` /
+//! `unsupported-tool-name` 收场。它是**已知缺口，不是已修事实**：两处各自在本文件的注释里点明，
+//! **修法与归属待人工裁定**。同一条覆盖边界：这条 wire 的 `invoke` 解码**一条用例都没有**。
+//!
 //! ## 与 chat 侧的 wire 差异（本文件自己那一半）
 //!
 //! | | chat completions | 本文件（Responses） |
@@ -451,7 +465,8 @@ fn function_call_output_item_with(
     serde_json::json!({"type": "function_call_output", "call_id": call_id, "output": parts})
 }
 
-/// 生成**平铺**的 `tools` 声明：**永远恰好两件**——[`INVOKE_TOOL`] 与 [`FINISH_TOOL`]（TASK_68 裁决 1）。
+/// 生成**平铺**的 `tools` 声明：**永远恰好三件**——[`INVOKE_TOOL`] / [`FINISH_TOOL`] /
+/// [`HOLD_TOOL`]（TASK_68 裁决 1；第三件是 2026-10-10 裁决三加的），与 chat 侧同一个头部。
 ///
 /// 与另一条 wire **同源同形**：`invoke` 的说明与参数形状都从 `provider_adapter` 借，
 /// 所以两条协议给模型的**说明书逐字相同**，差别只在声明本身的形状（嵌套 vs 平铺）。
@@ -499,6 +514,12 @@ struct AwaitingReceipt {
 ///
 /// 配对规则是**结构性**的，与 chat 侧逐条对应：见本文件头部那段。三个冲刷边界也一样——
 /// 非空注入批之前、下一条模型响应之前、轨迹遍历结束。
+///
+/// ⚠ **如实登记（待人工归属）**：重建时**仍逐个校验名字**（下面那一处 `tool_name(…)?`）⇒
+/// 一次"名字不能用"的拒绝**回放不出来**：请求重建当场失败，整段仍以 `reserved-tool-name` /
+/// `unsupported-tool-name` 收场，那次拒绝白做。另一条 wire 已经改成**一律原样引用**（那次调用
+/// 从未派发、准入会拒它，紧跟着它的就是我们的拒绝读数 ⇒ 回放它对配对是必需的，而且无损），
+/// 这条还没跟上；名字的合法性本来就归**声明侧**，不归回放侧。
 fn history_items(view: &View) -> Result<Vec<serde_json::Value>, ProviderFailure> {
     let mut items = Vec::new();
     let mut pending: VecDeque<AwaitingReceipt> = VecDeque::new();
@@ -744,6 +765,11 @@ fn translate_response(response: WireResponse) -> Result<ModelOutput, ProviderFai
                     Err(_) => {
                         Action::malformed(ActionId::new(name.clone()), tool_name_reading(&name))
                     }
+                    // ⚠ **如实登记（待人工归属）**：这一支今天**不可达**——`tool_name` 把三件
+                    // 元工具名（`invoke` 自己也在内）一律当**保留名**拒，而前一条 `Err(_)` 先接住了
+                    // 它 ⇒ 在这条 wire 上，模型调 `invoke` 会拿到「`invoke` 是保留名，不能以动作名
+                    // 直调」那句读数（读数本身没错，但这一次它说的是**入口自己**）。错的是**判序**
+                    // （外层该先认出 `invoke`，名字规则只管直调那条路），**不是**判据本身。
                     Ok(_) if name == INVOKE_TOOL => match decode_invoke(&arguments) {
                         Ok((inner, params)) => Action::with_params(ActionId::new(inner), params),
                         Err(InvokeFailure::Fatal(failure)) => return Err(failure),
@@ -753,7 +779,8 @@ fn translate_response(response: WireResponse) -> Result<ModelOutput, ProviderFai
                         ),
                         // 内层**名字**不能用：同样是那一次调用的事（与 Chat wire 逐字同款）。
                         // 被拒的是**内层那个名字**（账里只存动作、不存信封），读数由 `tool_name_reading` 给。
-                        // 回放**一律原样引用**（2026-10-13 第二刀删掉了"只拒保留名"那道闸）。
+                        // ⚠ 回放那一半**没有**跟着改：这里拒绝了它，`history_items` 下一轮仍会把
+                        // 这个名字拿去过一遍合法性 ⇒ 拒绝回放不出来（见那个函数的文档）。
                         Err(InvokeFailure::Name { action }) => Action::malformed(
                             ActionId::new(action.clone()),
                             tool_name_reading(&action),

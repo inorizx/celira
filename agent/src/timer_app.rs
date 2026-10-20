@@ -13,7 +13,7 @@
 //! ## 它是 App，不是 OS 的动词
 //!
 //! 与 `pin_action` / `write_self_concept`（OS 自己的动词、常驻在场）不同，这一件是**普通 App**：
-//! 只有它被**展开**之后，三条动词才进场；没展开时动词根本不在场（那道门归 OS，本件不认识它、
+//! 只有它被**展开**之后，这一组动词才进场；没展开时动词根本不在场（那道门归 OS，本件不认识它、
 //! 也不重复它那套分类词的名字）。
 //! 拔掉它，全场照跑（没有 timer 的世界里，主体只是没法约时间）。
 //!
@@ -38,10 +38,14 @@
 //!   长备注（那是 notes 的活。标签写「看便签」是自己的桥，机制不替主体搭）；
 //! - **不替主体判断**：`when` 落在过去也照收（到点就响、如实显示**原定时刻**）——迟到是事实，
 //!   **不漏报**是铁律；
-//! - **不声明写效应**（[`TimerApp`] 不实现 `declared_effects`）：自持物写**不需要授权**
-//!   （既有先例：`pin_action` / `write_self_concept` 的文档与 `notes` 的准入注释，`os.rs` 里那句
-//!   「写自己的地盘」）。它与 notes 的 creation 授权族**无关**——那一族管的是**授权资料根**里的
-//!   写（`files_create`），Agent 的自持物不经过它。
+//! - **声明写效应，但不设门**（[`AppPort::declared_effects`]）：**自持物写也是写**——它改的是
+//!   进程之外的东西，因此照样要过"动它之前先看形状"那一关（§3.73：那一关问的正是"会不会改
+//!   外面的世界"），也就照样要说清**类别**与**复核**。两个写各声明**既有的** `repeatable-write`
+//!   ＋ 一个**同参复核**（[`CAPABILITY_VERIFY_PENDING`] / [`CAPABILITY_VERIFY_CANCELLED`]）——
+//!   **借现有的类别、不新增效果词**，`timer` 与 `notes` 从此**同待遇**。⚠ 而**"声明"不是权限**：
+//!   自持物写**不需要授权**（既有先例：`pin_action` / `write_self_concept` 的文档与 `notes` 的
+//!   准入注释，`os.rs` 里那句「写自己的地盘」）；它与 notes 的 creation 授权族**无关**——那一族
+//!   管的是**授权资料根**里的写（`files_create`），Agent 的自持物不经过它。
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -61,7 +65,7 @@ pub const TIMER_APP_ID: &str = "timer";
 /// 自持物的文件名：`<环境根>/timers`（一行一条 JSON 对象）。
 pub const TIMER_FILE: &str = "timers";
 
-/// 三条动词（app 命名空间：`<app>_<动词>`）。
+/// 这一组动词（app 命名空间：`<app>_<动词>`）——**写与它的只读复核成对**。
 pub const CAPABILITY_SET: &str = "timer_set";
 pub const CAPABILITY_LIST: &str = "timer_list";
 pub const CAPABILITY_CANCEL: &str = "timer_cancel";
@@ -97,8 +101,13 @@ pub const STATE_FIRED: &str = "fired";
 /// `tests/action_failure_wordlist.rs` 的封闭名单（**第九份**）。
 ///
 /// ⚠ **标记的字面量写在这里**（不挂在常量上）：那条守卫按**调用形状**读词表——它扫 `as_str` 的
-/// **字面量**，隔着常量一层就报"判据在空跑"（本刀当场被它拦下一次）。⇒ 权威收进枚举，原来那批
-/// `CLASS_*` 常量**同刀删掉**（同一件事只留一个名字）。
+/// **字面量**，隔着常量一层就报"判据在空跑"。⇒ 权威收进枚举，原来那批 `CLASS_*` 常量**同刀
+/// 删掉**（同一件事只留一个名字）。
+///
+/// ⚠ **它当场拦了两次，两次都是它对**：第一次就是上面那条（取值隔着常量一层 ⇒ 它拿不到字面量）；
+/// 第二次是改成**常量函数**之后——它按**普通方法的签名**抽函数体，`const` 写在前面让它抽不到。
+/// ⇒ 只剩一种写法：**字面量直接写在 `as_str` 里，签名与另外那几份动作失败词表同款**（普通方法
+/// ——不加 `const`、也不包一层常量）；换个花样就是让那条守卫空跑。
 ///
 /// `from_str` 认不出就返回 `None`（**fail-closed**，不静默降级成一个"别的失败"）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -612,7 +621,7 @@ fn entry_lines(entry: &Entry) -> String {
 pub const STATE_KEY: &str = "state";
 
 impl TimerApp {
-    /// 这三条动词的声明面。**它是静态的**（不依赖身份、也不依赖活动）——因此
+    /// 这一组动词的声明面。**它是静态的**（不依赖身份、也不依赖活动）——因此
     /// [`AppPort::declared_capabilities`] 与 [`ActionPort::capabilities`] 直接用同一份，
     /// **不需要为了走一条带 Run 作用域的接缝去伪造一个空的活动标识**。
     ///
@@ -765,6 +774,12 @@ impl AppPort for TimerApp {
     /// ⚠ **它还有一个机械后果**（§3.73 起）：那一关（"动它之前先看形状"）问的正是 `is_write()`
     /// ⇒ **不声明就是悄悄免了那一关**。于是同一个动作类（`timer_set` 与 `notes_create`）在那之前
     /// 行为不同，而那个不同**没有人打算过**——两条测试里都登记着它。
+    ///
+    /// ⇒ 这处不同**已裁并落地，不是遗留项**：两个写各借**既有的** `repeatable-write` ＋ 一个
+    /// **同参复核**，`timer` 与 `notes` 从此**同待遇**；本格就是那条记录的落点（§3.73 的登记
+    /// 指向这里）。⚠ 那句**弱在归因**写在主体读得到的能力说明里（[`TimerApp::own_capabilities`] 那两条
+    /// `with_details`），**不靠读者推断**：参数里没有身份，因此复核认的是"同参数的一条"，
+    /// 不是"那一次"。
     fn declared_effects(&self) -> Vec<crate::app_contract::EffectDeclaration> {
         use crate::app_contract::{EffectClass, EffectDeclaration};
         vec![

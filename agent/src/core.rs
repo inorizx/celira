@@ -2663,6 +2663,12 @@ where
             //
             // ⚠ **`SubjectEnding::Held` 这个值留在盘上的封闭表里照读不写**：旧账里那 7 段
             // （真机 2026-10-10）读得出来，而线缆上再也产不出它。
+            //
+            // ⚠ **"搁下"只有这一支入口**：Core 另外有过一个"搁下并收场"的入口
+            // （`hold_activity`），`RunSession` 上也有过一支同义的（`hold`）——两者随这一道判据
+            // **一并删除**。它们存在的理由正是"被搁下的一段永远没有收尾事实"，而那个理由随
+            // 在场一起消失了。**别加回来**：多一支"搁下"的入口，就多一个"谁来收场"的候选，
+            // 而收场只有一个来源。
             Decision::Finish(SubjectEnding::Held) => return Ok(DriveOutcome::Unsettled),
             Decision::Finish(ending) => return Ok(DriveOutcome::Ending(Outcome::Subject(*ending))),
             Decision::Act(actions) => actions.clone(),
