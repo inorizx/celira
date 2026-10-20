@@ -578,7 +578,7 @@ export function ChatPage() {
   }, [visibleMessages, unreadAnchorId])
 
   /**
-   * **我在这间房说的最后一条**（——「对方读到这儿」只挂在这一条上）。
+   * **我在这间房说的最后一条**（——「已读 / 未读」只挂在这一条上）。
    *
    * 为什么是"最后一条"而不是"每一条"：服务端那格是**房间级的一个布尔**
    * （`peer_read`，契约 `CORE_V1_READ_RECEIPT.md` §2），判据 = 对方的读位置
@@ -1011,7 +1011,7 @@ export function ChatPage() {
                                 resolveReplyTarget={resolveReplyTarget}
                                 onLoadReplyTarget={onLoadReplyTarget}
                                 highlighted={row.message.id === flashId}
-                                // 「对方读到这儿」只挂在**我最后一条**上（房间级投影，
+                                // 「已读 / 未读」只挂在**我最后一条**上（房间级投影，
                                 // 不是逐条回执）；其它行 `undefined` ⇒ 那一格不出现。
                                 peerRead={
                                   row.message.id === myLastMessageId

@@ -1750,13 +1750,13 @@ try {
     )
   }
 
-  // ---- 「对方读到这儿 / 还没读」那一格（2026-10-10；契约 `CORE_V1_READ_RECEIPT.md` §2）----
+  // ---- 「已读 / 未读」那一格（2026-10-10；契约 `CORE_V1_READ_RECEIPT.md` §2；文案 2026-10-20 改）----
   //
   // 这一格是**投影**：服务端在 `direct` 房那一行给 `peer_read`，客户端把它挂在
   // **我最后一条气泡下面**（2026-10-20 主人真机点名后从头部挪下来——头部那三行里
   // 「在线」说的是对方，「已读」说的是"我这条消息的结局"，主语混在一格里）。判据两条：
   //
-  // ① `direct` 房、**我在里面说过话** ⇒ 我最后那条气泡下出现「还没读 / 读到这儿」；
+  // ① `direct` 房、**我在里面说过话** ⇒ 我最后那条气泡下出现「未读 / 已读」；
   // ② **不出现**也是判据：群房里那两个词**一个都不许有**（"没有答案"与"答案是未读"
   //    必须分得开——缺省不当零）。
   //
@@ -1786,7 +1786,7 @@ try {
   const peerReadCell = page.locator('[data-peer-read]')
   if (!openedEntry || openedEntry.room.kind !== 'direct' || !myId) {
     check(
-      '★ 读到这儿/还没读那一格：这一轮没验（打开的不是 direct 房，或读不到我是谁）',
+      '★ 已读/未读那一格：这一轮没验（打开的不是 direct 房，或读不到我是谁）',
       null,
       `房=${openedRoomId || '(没进房间)'} kind=${openedEntry?.room?.kind ?? '读不到'}`,
     )
@@ -1839,7 +1839,7 @@ try {
     check(
       '★ direct 房里、我说过话 ⇒ **我最后那条气泡下**出现那一格（服务端给、客户端原样渲染；文案与取值一致）',
       cellCount === 1 && (cellValue === 'read' || cellValue === 'unread') &&
-        cellText === (cellValue === 'read' ? '读到这儿' : '还没读'),
+        cellText === (cellValue === 'read' ? '已读' : '未读'),
       `那一格=${cellCount} 取值=${cellValue ?? '无'} 文案=${JSON.stringify(cellText)} · ` +
         `服务端这一行给的 peer_read=${JSON.stringify(openedEntry.peer_read ?? null)} · ` +
         `发消息=${sendStatus ?? '（房里本来就有我说的话，没发）'} · 房里消息=${afterCount} 其中我的=${mineAfter} · ` +
@@ -1856,7 +1856,7 @@ try {
     //
     // 上面那半证明"服务端给了、客户端渲染了"；这一半证明**它跟着读位置动**：
     // 用那支 Agent 的 BackendAuth 凭据推进它的读游标（`PUT …/read-cursor`，切片 M1 的既有端点），
-    // 等这一页那支 5 秒定时器拉一次 ⇒ 那一格必须从 `unread` 变成 `read`、文案变「读到这儿」。
+    // 等这一页那支 5 秒定时器拉一次 ⇒ 那一格必须从 `unread` 变成 `read`、文案变「已读」。
     //
     // ⚠ **必须进夹具那间房**（`CELIRA_PROBE_DIRECT_ROOM_ID`）：凭据属于夹具那支 Agent，
     //    而"打开的第一行"可能是**别的房**（它的对端是另一支 Agent）⇒ 推进读游标会 404（实测踩过）。
@@ -1917,8 +1917,8 @@ try {
         afterCount2 > 0 ? await peerReadCell.first().getAttribute('data-peer-read') : null
       const afterText2 = afterCount2 > 0 ? await peerReadCell.first().innerText() : ''
       check(
-        '★ 对方真读了 ⇒ 那一格当场变「读到这儿」（那一格跟着读位置动，且定时拉取真的在拉）',
-        afterValue === 'read' && afterText2 === '读到这儿',
+        '★ 对方真读了 ⇒ 那一格当场变「已读」（那一格跟着读位置动，且定时拉取真的在拉）',
+        afterValue === 'read' && afterText2 === '已读',
         `推进读游标=${advanced}（推的是 ${lastMine ? lastMine.id : '无'}）· 推前=${beforeCell ?? '无'} · ` +
           `那一格=${afterCount2} 取值=${afterValue ?? '无'} 文案=${JSON.stringify(afterText2)}`,
       )
