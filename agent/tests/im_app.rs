@@ -1787,6 +1787,13 @@ fn the_app_declares_its_verbs_with_their_verifications() {
             // 正在写（2026-10-06 进能力面）：**第四档**——确实是写，但没有同参只读复核可配
             // （信号几秒自灭，读回来归因不了"这一次声明发生过没有"）⇒ 按定义豁免复核。
             (CAPABILITY_TYPING, "unverifiable-write", None),
+            // 翻记录（2026-10-20）：**隐式写**——读成功后顺带 PUT 一次读位置，与 `im_mark_read`
+            // 改的是同一个公共事实（同伴看到 `peer_read`）。同档同复核：复核 = 通讯录的 `read` 栏。
+            (
+                CAPABILITY_READ_HISTORY,
+                "repeatable-write",
+                Some(CAPABILITY_ROOMS),
+            ),
         ],
     );
     // 关系面四个写动词同属"同参数第二次成功、零新事实"那一档（发起申请回到既有段 /
@@ -1855,7 +1862,8 @@ fn the_app_declares_its_verbs_with_their_verifications() {
         strings(&EFFECTS_BEFORE_THE_SPLIT),
         "并集逐条等于拆包前那 11 条声明（同序；`im_typing` 不参与这条历史重建）"
     );
-    // 拆包之后加的那一条（本刀）：**第四档**，按定义豁免复核。
+    // 拆包之后加的那些：房治理四条（2026-10-13）与「正在写」；最后一条是**翻记录的隐式写**
+    // （2026-10-20 补声明——它从前被"未声明即只读"误读成读，而它读完之后会推进读位置）。
     assert_eq!(
         im_effects[5..],
         [
@@ -1864,8 +1872,9 @@ fn the_app_declares_its_verbs_with_their_verifications() {
             CAPABILITY_REMOVE_MEMBER.to_string(),
             CAPABILITY_TRANSFER_OWNER.to_string(),
             CAPABILITY_TYPING.to_string(),
+            CAPABILITY_READ_HISTORY.to_string(),
         ],
-        "拆包之后多了五条声明：房治理四条（2026-10-13）与「正在写」"
+        "拆包之后多了六条声明：房治理四条（2026-10-13）、「正在写」与翻记录的隐式写"
     );
 
     // 准入：每个包只放行**自己**那几条；别人的动词与契约里有、本层**故意没做**的那件事
@@ -4737,8 +4746,10 @@ fn only_the_writes_declare_effects() {
             CAPABILITY_REMOVE_MEMBER.to_string(),
             CAPABILITY_TRANSFER_OWNER.to_string(),
             CAPABILITY_TYPING.to_string(),
+            // 2026-10-20：翻记录是**隐式写**（读完推进读位置）——它不再被"未声明即只读"误读。
+            CAPABILITY_READ_HISTORY.to_string(),
         ],
-        "拆包之后多了五条声明：房治理四条（2026-10-13）与「正在写」"
+        "拆包之后多了六条声明：房治理四条（2026-10-13）、「正在写」与翻记录的隐式写"
     );
     assert!(!declared.contains(&CAPABILITY_READ_ATTACHMENT.to_string()));
     // 三个只读动词**不**声明写效应（关系账 / 拉黑名单 / 我自己的资料）。

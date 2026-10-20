@@ -2537,8 +2537,10 @@ impl crate::app_contract::AppPort for ImApp {
     ///   与 `terminal_run` 同档）。⚠ 它**不是**"不声明即只读"那一类：不声明会把一个 POST
     ///   说成只读，那是对世界撒谎。
     ///
-    /// 只读动词不需要声明（未声明即只读）：通讯录、翻记录、**成员清单**、房间进行态、
+    /// 只读动词不需要声明（未声明即只读）：通讯录、**成员清单**、房间进行态、
     /// **读附件**与各次复核。
+    /// ⚠ **翻记录不在这份清单里**：它读完那一页之后会 PUT 一次读位置（[`ImApp::advance_after_read`]），
+    /// 与 `im_mark_read` 改的是**同一个公共事实**（同伴看到 `peer_read`）——它是**隐式写**，不是读。
     /// ⚠ 社交 / 资料两组写动词的声明跟着动词搬进了各自的新包（`im-social` / `im-profile`）。
     fn declared_effects(&self) -> Vec<crate::app_contract::EffectDeclaration> {
         use crate::app_contract::{EffectClass, EffectDeclaration};
@@ -2618,6 +2620,15 @@ impl crate::app_contract::AppPort for ImApp {
                 ActionId::new(CAPABILITY_TYPING),
                 EffectClass::UnverifiableWrite,
                 None,
+            ),
+            // 翻记录（2026-10-20）：**隐式写**——读成功后顺带推进读位置
+            // （[`ImApp::advance_after_read`]），与 `im_mark_read` 改的是**同一个公共事实**。
+            // 同参数第二次是成功 no-op、零新事实（`advanced = false`）⇒ 与它同档
+            // `repeatable-write`；**复核 = 通讯录**（那间房的 `read` 栏就是世界记着的位置）。
+            EffectDeclaration::new(
+                ActionId::new(CAPABILITY_READ_HISTORY),
+                EffectClass::RepeatableWrite,
+                Some(ActionId::new(CAPABILITY_ROOMS)),
             ),
         ]
     }
