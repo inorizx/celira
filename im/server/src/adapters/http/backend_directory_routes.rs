@@ -80,6 +80,9 @@ fn directory_view(room: &crate::ports::room::BackendDirectoryRoom) -> BackendRoo
         read_state: read_state_view(&room.read_state),
         // 与 Human 侧**同一个投影函数**（人机同形，契约 CORE_V1_READ_RECEIPT.md §2）。
         peer_read: crate::adapters::http::room_routes::peer_read_view(room.peer_read),
+        // 提醒档：与 Human 侧房间列表**同一格、同一投影**
+        // （契约 `CORE_V1_IM_CONTRACT.md` §9.1 / 本文档 §3.2）。
+        attention: room.attention.as_str().to_owned(),
     }
 }
 

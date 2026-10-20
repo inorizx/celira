@@ -27,7 +27,7 @@
 use crate::domain::agent::IdempotencyKey;
 use crate::domain::message::MessageId;
 use crate::domain::participant::{DisplayName, ParticipantId, ParticipantKind, ParticipantStatus};
-use crate::domain::room::{Membership, MembershipId, ReadState, Room, RoomId};
+use crate::domain::room::{AttentionLevel, Membership, MembershipId, ReadState, Room, RoomId};
 use crate::domain::time::UtcMillis;
 use crate::ports::storage::StorageError;
 
@@ -96,6 +96,10 @@ pub struct RoomListItem {
     /// **只在问题成立时出现**——`None` ＝ 房不是 `direct`、对方当前不是这间房的
     /// active 成员、或我在这间房还没说过话。**投影，不是新事实**（零新写者）。
     pub peer_read: Option<crate::domain::room::PeerRead>,
+    /// 提醒档（契约 `CORE_V1_IM_CONTRACT.md` §9.1）：这间房的动静要不要
+    /// 提醒我。**缺行投影成 `All`**（不预建行）；两人房里没有这一档，
+    /// 因此恒为 `All`（守卫不让它落行）。**投影，不是新事实**。
+    pub attention: AttentionLevel,
 }
 
 /// 成员项：Membership 周期 + 对应 Participant 最小资料。
@@ -136,6 +140,9 @@ pub struct BackendDirectoryRoom {
     /// （房不是 `direct`、对端当前不是这间房的 active 成员、或该 agent 在这间房
     /// 还没说过话）。**投影，不是新事实**。
     pub peer_read: Option<crate::domain::room::PeerRead>,
+    /// 提醒档（契约 `CORE_V1_AGENT_DIRECTORY.md` §3.2）：**与 Human 侧同一
+    /// 投影**——缺行 = `All`；两人房恒为 `All`。
+    pub attention: AttentionLevel,
 }
 
 /// 创建结果：首次创建与幂等重放返回相同的数据，以 `idempotency_replayed`
@@ -213,7 +220,8 @@ pub enum AdvanceReadCursorOutcome {
 /// 存储层错误。
 #[derive(Debug)]
 pub enum RoomStoreError {
-    /// bad-id、unknown Room、非 group、调用者无 active owner 权限：对外
+    /// bad-id、unknown Room、非 group、调用者无 active owner 权限、调用者
+    /// 不是该 Room 的 active 成员（读游标 / 提醒档两条本人写路径）：对外
     /// 统一 404 room_not_found，不泄露 Room 是否存在。
     NotFound,
     /// 同 Human + 同 key 已被不同请求使用：409。
@@ -447,6 +455,27 @@ pub trait RoomStore: Send + Sync {
         room_id: &RoomId,
         message_id: &MessageId,
     ) -> Result<AdvanceReadCursorOutcome, RoomStoreError>;
+
+    /// 写**本人**在这间房的提醒档（契约 `CORE_V1_IM_CONTRACT.md` §9.1）：
+    /// 必须在 `BEGIN IMMEDIATE` 或等价单写事务中完成——
+    /// 1. 该主体必须存在该 Room 的 **active** Membership 周期；
+    /// 2. 该 Room 必须是 `group`（`direct` / `human_direct` 两人房里没有
+    ///    「群消息」这一档）；
+    ///
+    /// 两条任一不成立统一 `NotFound`（对外 404 room_not_found，与"非成员"
+    /// 同形，不泄露房间是否存在）。成立则原子写入（缺行则建行、有行则改
+    /// `level` 与时刻），返回写后的权威取值。
+    ///
+    /// **谁只能写自己那一行**：`participant_id` 由调用方的认证上下文给出，
+    /// 本端口**没有**"替别人写"的形状——与读游标同形（数据库守卫管形状，
+    /// 身份管在边界）。同值重写天然幂等（状态写，无幂等键、零事件、零唤醒：
+    /// 它只决定那条**易失**通知发不发，不产生任何公共事实）。
+    async fn set_room_attention(
+        &self,
+        participant_id: &ParticipantId,
+        room_id: &RoomId,
+        level: AttentionLevel,
+    ) -> Result<AttentionLevel, RoomStoreError>;
 
     /// Agent 通讯录纯读投影（切片 B1，CORE_V1_AGENT_DIRECTORY.md §4）：
     /// 该 agent 为 active member 的全部 Room 的机械目录行，按最近活动时间

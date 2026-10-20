@@ -4,6 +4,7 @@
 
 pub mod agent_routes;
 pub mod attachment_routes;
+pub mod attention_routes;
 pub mod auth;
 pub mod backend_auth;
 pub mod backend_block_routes;
@@ -34,6 +35,8 @@ pub mod routes;
 mod agent_routes_tests;
 #[cfg(test)]
 mod attachment_routes_tests;
+#[cfg(test)]
+mod attention_routes_tests;
 #[cfg(test)]
 mod backend_block_routes_tests;
 #[cfg(test)]

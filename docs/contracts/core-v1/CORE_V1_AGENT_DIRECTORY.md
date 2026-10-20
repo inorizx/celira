@@ -134,6 +134,10 @@ GET /v1/backend/rooms?since=<unix_ms>
       `{last_read_message_id, unread_count}`——与 Human 侧房间列表的 `read_state`
       **同一投影**（复用同一投影函数）。本字段由 M1 切片授权新增，本契约正文其余
       部分一字未动；`since` / `since_count` 口径不受影响 |
+| `attention` | string | ⚠ **2026-10-19 增补**（窄解冻切片「提醒档」，权威契约
+      `CORE_V1_IM_CONTRACT.md` §9.1）：`all` / `mentions`——这间房的动静要不要提醒我。
+      **缺行投影成 `all`**（不预建行）。**投影，不是新写者**；与 Human 侧房间列表的
+      `attention` **同一投影**。`since` / `since_count` / `read_state` 口径全部不受影响 |
 
 - **预览与计数都从既有公共 Message / Membership 事实推导**，不新增事实；
 - **三个"有多少"的口径关系（2026-09-27 D3 记账，批次一裁决）**：本目录的

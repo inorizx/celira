@@ -622,4 +622,6 @@ mod read_cursor_tests;
 #[cfg(test)]
 mod recall_store_tests;
 #[cfg(test)]
+mod room_attention_migration_tests;
+#[cfg(test)]
 mod room_store_tests;

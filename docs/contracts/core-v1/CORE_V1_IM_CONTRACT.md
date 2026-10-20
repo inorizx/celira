@@ -230,6 +230,19 @@ Agent 变为 revoked 时，同一事务内：撤销 Agent 与其全部 active Ow
 - **API**：`GET /v1/rooms` 与 `GET /v1/rooms/{id}` 返回 `read_state {last_read_message_id, unread_count}`；`PUT /v1/rooms/{room_id}/read-cursor`（请求体仅 `{message_id}`，deny_unknown_fields；不要求 Idempotency-Key——单调推进天然幂等）：目标必须是同 Room 且对当前 Human 历史可见的 Message（已撤回 Message 仍是合法目标）；推进成功 `advanced=true`，同/旧值 `advanced=false` 无副作用；并发收敛到最高合法位置；未知/他 Room/不可见 → 400 `invalid_read_cursor`；bad Room/非成员/离群 → 404 `room_not_found`；失败不改 cursor、不生成事实。
 - **Durable Event**：每次真实推进在 cursor 写事务内原子形成不可变 advancement 事实并生成 `read.cursor.advanced` Human Event——快照只含 room_id 与 last_read_message_id（不含正文、sequence boundary、Membership 历史、Session/设备/token、advancement id）；只投递推进者本人；no-op 不生成；真实推进的唯一写路径是 advancement INSERT（触发器链在同一语句内推进 cursor 并原子生成 fact/delivery），不存在第二条 cursor 写路径。
 
+## 9.1 提醒档（attention；2026-10-19 窄解冻切片）
+
+群房里「这间房要不要提醒我」是**个人事实**，只有**本人**能写、只有本人可见——与 §9 的读位置同一档（`kind` 不参与任何判据：人对它、agent 对它，规则一字不差）。
+
+- **事实**：每（Room × Participant）至多一行，`level ∈ {all, mentions}`；**缺行 = `all`**（不预建行；与 §9 的「缺行＝按 join boundary 兜底」同族）。
+- **范围**：只有 `group` 房有意义；`direct` / `human_direct` 不接受这一档（两人房里没有「群消息」这一档）。
+- **归属**：它**不改消息主链**——消息照常提交、未读照常计算、历史照常可读；它只决定**是否发出那条易失通知**（Agent 侧是 §8 的门铃；Human 侧仍是 WS 提示）。⇒ **任何一档都不丢消息**。
+- **写**：`PUT /v1/rooms/{room_id}/attention`（Human）与 `PUT /v1/backend/rooms/{room_id}/attention`（BackendAuth），请求体只有 `{level}`（deny_unknown_fields）。语义：本人是 active 成员且房是 `group`；否则 `404 room_not_found`（与非成员同形，不泄露）。同值重写天然幂等（状态写，不要求 Idempotency-Key，照 §9 读位置的先例）。
+- **读**：`GET /v1/rooms` 与 `GET /v1/backend/rooms` 的每一行带 `attention`（缺行投影成 `all`）——**投影，不是新写者**。
+- **通知条件（唯一语义变更）**：Room 里一条消息提交后，对每个 active agent 成员判一次——**被结构化 mention ⇒ 一定通知**（不论档）；否则 **档 = `all` ⇒ 通知**、**档 = `mentions` ⇒ 不通知**。通知本身仍是**零事实、可丢、可合并**的易失信号（§8 / §10），**不写任何表**。
+- **Agent Event 不变**：`message.created` 仍只在**结构化 mention** 时生成（`CORE_V1_AGENT_PROTOCOL.md` §3.1 一字不动）——本切片只扩「什么时候发那条易失通知」，不扩耐久事件。
+- **不做**：不做「@ 所有人」式的强制提醒（房主不能替成员打开它）、不做时段表、不做按人屏蔽、不做"已读才不提醒"。
+
 ## 10. Human Durable Event 与 WebSocket
 
 **原理**：正确性来自耐久 REST 事实，及时性才来自易失 WS 唤醒。先让「哪条已提交公共事实应被哪个 Human 看到」在同一 SQLite 事务内以两层规范化事实成立（shared fact 一份 + per-Human delivery 只存引用），再让 WS 只做「可能有新事件」的定向提示；唤醒可以全丢，REST 恢复不能丢，WS 永远不能伪装成投递完成。

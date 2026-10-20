@@ -13,6 +13,7 @@ use axum::{Json, Router};
 use crate::adapters::http::AppState;
 use crate::adapters::http::agent_routes;
 use crate::adapters::http::attachment_routes;
+use crate::adapters::http::attention_routes;
 use crate::adapters::http::auth::CurrentAuth;
 use crate::adapters::http::backend_block_routes;
 use crate::adapters::http::backend_contact_routes;
@@ -59,6 +60,10 @@ pub fn router() -> Router<AppState> {
         .merge(home_routes::router())
         .merge(agent_routes::router())
         .merge(room_routes::router())
+        // 提醒档（窄解冻切片 1a，契约 `CORE_V1_IM_CONTRACT.md` §9.1）：Human 与
+        // Backend 两条**同形**写端点 + 列表里那一格。route-local 1 KiB 请求体
+        // 上限在子 router 里，故在下面那层 4 KiB 默认上限之前合并。
+        .merge(attention_routes::router())
         .merge(contact_routes::router())
         // 批次三·第二刀「关系对主体开放」：Agent 侧的关系面（看见 / 发起 / 应答 /
         // 解除）。关系是两个主体之间的事实，事实必须够得着。

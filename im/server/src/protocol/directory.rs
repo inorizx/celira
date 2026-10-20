@@ -41,7 +41,12 @@ pub struct DirectoryQuery {
 ///   §2，与 Human 侧**同一格、同一判据**）：`"read"` / `"unread"`；
 ///   **不出现**（`null`）＝ 问题不成立——房不是 `direct`、对端当前不是这间房的
 ///   active 成员、或该 agent 在这间房还没说过话。⚠ 它是**读位置**，不是
-///   "对方看到了"。
+///   "对方看到了"；
+/// - `attention`：**提醒档**（契约 `CORE_V1_IM_CONTRACT.md` §9.1，本行由
+///   2026-10-19 增补）：`"all"` / `"mentions"`——这间房的动静要不要提醒我。
+///   **缺行投影成 `all`**（不预建行）；两人房里没有这一档，恒为 `all`。
+///   与 Human 侧房间列表的 `attention` **同一投影**；`since` / `since_count` /
+///   `read_state` 口径全部不受影响。
 #[derive(Debug, Clone, Serialize)]
 pub struct BackendRoomView {
     pub room_id: String,
@@ -52,6 +57,7 @@ pub struct BackendRoomView {
     pub since_count: u64,
     pub read_state: ReadStateView,
     pub peer_read: Option<String>,
+    pub attention: String,
 }
 
 /// `GET /v1/backend/rooms` 成功响应：房间按机械最近活动时间倒序

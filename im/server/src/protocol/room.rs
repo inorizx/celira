@@ -61,6 +61,28 @@ pub struct PutReadCursorRequest {
     pub message_id: String,
 }
 
+/// PUT /v1/rooms/{room_id}/attention 与
+/// PUT /v1/backend/rooms/{room_id}/attention 的请求体（Human 与 Agent
+/// **同一形状**，契约 `CORE_V1_IM_CONTRACT.md` §9.1）。**只有 `level`**：
+/// `deny_unknown_fields` 拒绝 participant_id、room_id、membership_id、
+/// updated_at 或任何其他字段——"写谁的"由认证上下文给出，请求体里没有主语。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PutAttentionRequest {
+    pub level: String,
+}
+
+/// 提醒档写响应（契约 §9.1）：只回写后的权威取值。
+///
+/// 没有 `idempotency_replayed`——这一档是**状态写**（无幂等键），同值重写与
+/// 改值都是同一个 200，响应形状不因"是不是重写"而变。
+#[derive(Debug, Clone, Serialize)]
+pub struct PutAttentionResponse {
+    /// `all` / `mentions`。
+    pub attention: String,
+    pub request_id: String,
+}
+
 /// 对外 read state 视图：只暴露 `last_read_message_id`（可 null）与
 /// `unread_count`；不返回内部初始 boundary / cursor sequence。
 #[derive(Debug, Clone, Serialize)]
@@ -125,7 +147,8 @@ pub struct CreateRoomResponse {
 /// 列表中的单项：Room + 当前 Human 的 Membership 周期 + 对端 Participant
 /// 最小资料（direct / human_direct 有对端，group 为 null）+ 当前 Human 的
 /// read state + 「**对方读没读我最后那条**」（`peer_read`，契约
-/// `CORE_V1_READ_RECEIPT.md` §2）。
+/// `CORE_V1_READ_RECEIPT.md` §2）+ **提醒档**（`attention`，契约
+/// `CORE_V1_IM_CONTRACT.md` §9.1）。
 #[derive(Debug, Clone, Serialize)]
 pub struct ListRoomItem {
     pub room: RoomView,
@@ -135,6 +158,9 @@ pub struct ListRoomItem {
     /// `"read"` / `"unread"`；**不出现**（`null`）＝ 问题不成立：房不是 `direct`、
     /// 对方当前不是这间房的 active 成员、或我在这间房还没说过话。
     pub peer_read: Option<String>,
+    /// `"all"` / `"mentions"`：这间房的动静要不要提醒我。**缺行投影成 `all`**；
+    /// 两人房里没有这一档，恒为 `all`。
+    pub attention: String,
 }
 
 /// GET /v1/rooms 响应。

@@ -1083,6 +1083,7 @@ fn list_item_view(item: &RoomListItem) -> ListRoomItem {
         peer: item.peer.as_ref().map(peer_view),
         read_state: read_state_view(&item.read_state),
         peer_read: peer_read_view(item.peer_read),
+        attention: item.attention.as_str().to_owned(),
     }
 }
 

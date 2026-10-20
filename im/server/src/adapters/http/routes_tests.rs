@@ -284,6 +284,14 @@ impl crate::ports::room::RoomStore for DenyRoom {
     ) -> Result<crate::ports::room::AdvanceReadCursorOutcome, RoomStoreError> {
         Err(RoomStoreError::Database(denied()))
     }
+    async fn set_room_attention(
+        &self,
+        _participant_id: &crate::domain::participant::ParticipantId,
+        _room_id: &crate::domain::room::RoomId,
+        _level: crate::domain::room::AttentionLevel,
+    ) -> Result<crate::domain::room::AttentionLevel, RoomStoreError> {
+        Err(RoomStoreError::Database(denied()))
+    }
     async fn list_backend_rooms(
         &self,
         _agent_id: &crate::domain::participant::ParticipantId,

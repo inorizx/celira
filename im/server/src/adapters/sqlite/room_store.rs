@@ -34,6 +34,13 @@
 //! 匹配 transition），转让不可拆成两笔事务。幂等表收敛为 (human_id, key)
 //! → transition_id，重放 JOIN 不可变 transition 读取 Room/目标/新 owner
 //! 周期。owner 邀请自己在 active lookup 前显式识别并返回 MemberNotFound。
+//!
+//! 提醒档（`room_attention`，契约 `CORE_V1_IM_CONTRACT.md` §9.1，2026-10-19
+//! 窄解冻切片 1a）：本模块持有那张表**唯一**的写路径
+//! （`set_room_attention`，`BEGIN IMMEDIATE`）与两处读投影（Human 房间列表 /
+//! Agent 通讯录，共用 `ATTENTION_SQL` 一段）。它是**状态写**——不产生任何
+//! 事件、不产生幂等记录、不碰消息主链；读面**缺行投影成 `all`**。
+//! ⚠ 本层只落事实与读面：「按档决定那条易失通知发不发」不在本层（1b）。
 
 #[cfg(test)]
 use std::sync::Arc;
@@ -48,8 +55,8 @@ use crate::domain::contact::canonical_pair;
 use crate::domain::message::MessageId;
 use crate::domain::participant::{DisplayName, ParticipantId, ParticipantKind, ParticipantStatus};
 use crate::domain::room::{
-    Membership, MembershipClosedBy, MembershipId, MembershipRole, MembershipStatus, PeerRead,
-    ReadState, Room, RoomId, RoomKind, RoomStatus,
+    AttentionLevel, Membership, MembershipClosedBy, MembershipId, MembershipRole, MembershipStatus,
+    PeerRead, ReadState, Room, RoomId, RoomKind, RoomStatus,
 };
 use crate::domain::time::UtcMillis;
 use crate::ports::room::{
@@ -170,6 +177,7 @@ struct ListItemRow {
     c_last_read_message_id: Option<String>,
     unread_count: i64,
     peer_read: Option<String>,
+    attention: String,
     p_id: Option<String>,
     p_kind: Option<String>,
     p_status: Option<String>,
@@ -209,6 +217,7 @@ struct BackendDirectoryRow {
     c_last_read_message_id: Option<String>,
     unread_count: i64,
     peer_read: Option<String>,
+    attention: String,
     r_created_at: i64,
 }
 
@@ -342,6 +351,15 @@ fn peer_read_from_column(column: Option<String>) -> Result<Option<PeerRead>, Roo
     }
 }
 
+/// 解析提醒档那一列（契约 `CORE_V1_IM_CONTRACT.md` §9.1）。
+///
+/// SQL 已经把「缺行」投影成 `'all'`（`ATTENTION_SQL`），所以这里恒有值；
+/// 认不出的取值**不猜**（内部不变量破坏 ⇒ corrupt）。
+fn attention_from_column(column: String) -> Result<AttentionLevel, RoomStoreError> {
+    AttentionLevel::parse(&column)
+        .ok_or_else(|| corrupt(format!("unknown room attention level {column:?}")))
+}
+
 fn list_item_from_row(row: ListItemRow) -> Result<RoomListItem, RoomStoreError> {
     let ListItemRow {
         r_id,
@@ -362,6 +380,7 @@ fn list_item_from_row(row: ListItemRow) -> Result<RoomListItem, RoomStoreError> 
         c_last_read_message_id,
         unread_count,
         peer_read,
+        attention,
         p_id,
         p_kind,
         p_status,
@@ -386,6 +405,7 @@ fn list_item_from_row(row: ListItemRow) -> Result<RoomListItem, RoomStoreError> 
             unread_count,
         },
         peer_read: peer_read_from_column(peer_read)?,
+        attention: attention_from_column(attention)?,
         peer: match (p_id, p_kind, p_status, p_display_name) {
             (Some(id), Some(kind), Some(status), Some(display_name)) => {
                 Some(profile_from_row((id, kind, status, display_name))?)
@@ -414,6 +434,7 @@ fn backend_directory_from_row(
         c_last_read_message_id,
         unread_count,
         peer_read,
+        attention,
         r_created_at,
     } = row;
     Ok(BackendDirectoryRoom {
@@ -431,6 +452,7 @@ fn backend_directory_from_row(
             unread_count,
         },
         peer_read: peer_read_from_column(peer_read)?,
+        attention: attention_from_column(attention)?,
     })
 }
 
@@ -472,6 +494,23 @@ CASE \
   ELSE 'unread' \
 END";
 
+/// **提醒档的投影表达式**（契约 `CORE_V1_IM_CONTRACT.md` §9.1）——**一处权威**：
+/// Human 侧房间列表（`fetch_list_items`）与 Agent 侧通讯录（`list_backend_rooms`）
+/// **共用这一段**，不各写一遍。
+///
+/// **缺行 = `'all'`**：这一档不预建行（与读游标的「缺行＝按 join boundary 兜底」
+/// 同族），所以投影必须把"没设过"读成**默认档**——不是 NULL、也不是"未知"。
+/// 两人房（`direct` / `human_direct`）里守卫根本不让落行，于是它们恒投影成
+/// `all`，**不需要按 kind 特判**。
+///
+/// ⚠ **无占位符**：JOIN 谓词用的是本次查询那个主体自己的 active 周期
+/// （`m.participant_id`），因此它不改变任何一条既有查询的绑定顺序。
+const ATTENTION_SQL: &str = "COALESCE(ra.level, 'all')";
+
+/// 提醒档的 JOIN 前缀（与 `ATTENTION_SQL` 是一对；两张表的主键就是身份）。
+const ATTENTION_JOIN: &str =
+    "LEFT JOIN room_attention ra ON ra.room_id = r.id AND ra.participant_id = m.participant_id";
+
 /// 当前 Human 可见的 Room 管理视图查询（list 与 get 共用同一裁决：
 /// 当前 Human 必须存在该 Room 的 **active** Membership 周期；对端是
 /// direct/human_direct 配对中的另一位 Participant，group 无对端）。
@@ -504,11 +543,13 @@ async fn fetch_list_items(
                                  AND (w.left_before_sequence IS NULL OR un.sequence <= w.left_before_sequence))) \
                  AS unread_count, \
                 {PEER_READ_SQL} AS peer_read, \
+                {ATTENTION_SQL} AS attention, \
                 p.id AS p_id, p.kind AS p_kind, p.status AS p_status, \
                 p.display_name AS p_display_name \
          FROM rooms r \
          JOIN room_memberships m ON m.room_id = r.id AND m.participant_id = ? AND m.active_marker = 1 \
          LEFT JOIN read_cursors c ON c.membership_id = m.membership_id \
+         {ATTENTION_JOIN} \
          LEFT JOIN direct_room_pairs dp ON dp.room_id = r.id \
          LEFT JOIN human_direct_pairs hp ON hp.room_id = r.id \
          LEFT JOIN participants p ON p.id = CASE \
@@ -1777,10 +1818,12 @@ impl crate::ports::room::RoomStore for SqliteRoomStore {
                                             OR un.sequence <= w.left_before_sequence))) \
                        AS unread_count, \
                     {PEER_READ_SQL} AS peer_read, \
+                    {ATTENTION_SQL} AS attention, \
                     r.created_at AS r_created_at \
              FROM rooms r \
              JOIN room_memberships m ON m.room_id = r.id AND m.participant_id = ? AND m.active_marker = 1 \
              LEFT JOIN read_cursors c ON c.membership_id = m.membership_id \
+             {ATTENTION_JOIN} \
              LEFT JOIN direct_room_pairs dp ON dp.room_id = r.id \
              LEFT JOIN human_direct_pairs hp ON hp.room_id = r.id \
              LEFT JOIN participants p ON p.id = CASE \
@@ -2055,6 +2098,73 @@ impl crate::ports::room::RoomStore for SqliteRoomStore {
                     .await
                     .map_err(RoomStoreError::Database)?;
                 Ok(noop)
+            }
+            Err(e) => {
+                let primary_kind = primary_storage_kind(&e);
+                Err(rollback_after_primary(tx, e, primary_kind, RoomStoreError::Database).await)
+            }
+        }
+    }
+
+    async fn set_room_attention(
+        &self,
+        participant_id: &ParticipantId,
+        room_id: &RoomId,
+        level: AttentionLevel,
+    ) -> Result<AttentionLevel, RoomStoreError> {
+        // 提醒档（契约 §9.1）：一条**状态写**，不是事实链。BEGIN IMMEDIATE
+        // 让"先判准入、再写"在同一事务里成立，并发两笔只会有最后一笔生效。
+        let mut conn = self.pool.acquire().await.map_err(db_error)?;
+        let mut tx = conn
+            .begin_with(SQL_BEGIN_IMMEDIATE)
+            .await
+            .map_err(db_error)?;
+
+        let outcome: Result<AttentionLevel, RoomStoreError> = async {
+            // 1. 准入一条判据、三个失败同形：本人必须是该 Room 的 active
+            //    成员，且该 Room 必须是 group。unknown / bad-id / 不是群 /
+            //    非成员 / 已离群 一律 NotFound（对外 404 room_not_found）——
+            //    与非成员同形，**不泄露房间是否存在**（这是"只有群房有这一档"
+            //    与"只有本人能写"两条裁决的共同出口）。
+            let allowed: Option<i64> = sqlx::query_scalar(
+                "SELECT 1 FROM rooms r \
+                 JOIN room_memberships m ON m.room_id = r.id AND m.participant_id = ? \
+                 WHERE r.id = ? AND r.kind = 'group' AND m.active_marker = 1 LIMIT 1",
+            )
+            .bind(participant_id.as_str())
+            .bind(room_id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            if allowed.is_none() {
+                return Err(RoomStoreError::NotFound);
+            }
+
+            // 2. 缺行则建行、有行则改值（同值重写是 no-op，天然幂等）。
+            //    ON CONFLICT 走的是 UPDATE 分支 ⇒ 守卫 2 生效（身份不可改写、
+            //    仍须 group + active 成员）；INSERT 分支由守卫 1 把关。
+            sqlx::query(
+                "INSERT INTO room_attention (room_id, participant_id, level, updated_at) \
+                 VALUES (?, ?, ?, ?) \
+                 ON CONFLICT(room_id, participant_id) DO UPDATE SET \
+                     level = excluded.level, updated_at = excluded.updated_at",
+            )
+            .bind(room_id.as_str())
+            .bind(participant_id.as_str())
+            .bind(level.as_str())
+            .bind(UtcMillis::now().millis())
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+
+            Ok(level)
+        }
+        .await;
+
+        match outcome {
+            Ok(level) => {
+                tx.commit().await.map_err(db_error)?;
+                Ok(level)
             }
             Err(e) => {
                 let primary_kind = primary_storage_kind(&e);

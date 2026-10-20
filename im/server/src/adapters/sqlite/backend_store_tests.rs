@@ -1345,6 +1345,7 @@ async fn schema_has_only_binding_and_credential_backend_objects() {
         "human_event_deliveries",
         "read_cursors",
         "read_cursor_advancements",
+        "room_attention",
         "message_recalls",
         "attachments",
         "message_attachments",

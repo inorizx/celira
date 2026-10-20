@@ -12,7 +12,7 @@ use crate::application::unexpected_store_error;
 use crate::domain::agent::IdempotencyKey;
 use crate::domain::message::MessageId;
 use crate::domain::participant::{Participant, ParticipantId};
-use crate::domain::room::{MembershipId, ReadState, RoomId};
+use crate::domain::room::{AttentionLevel, MembershipId, ReadState, RoomId};
 use crate::domain::time::UtcMillis;
 use crate::ports::room::{
     AdvanceReadCursorOutcome as StoreAdvanceOutcome, CreateDirectRoomOutcome as StoreCreateOutcome,
@@ -803,12 +803,75 @@ pub async fn advance_read_cursor(
     }
 }
 
+/// 提醒档写失败（契约 `CORE_V1_IM_CONTRACT.md` §9.1）。
+#[derive(Debug)]
+pub enum SetAttentionError {
+    /// bad-id / unknown Room / 非 group / 本人不是该 Room 的 active 成员：
+    /// 统一 404 room_not_found，与非成员同形，不泄露 Room 是否存在。
+    RoomNotFound,
+    /// `level` 不在闭集 `{all, mentions}`：400 invalid_request。
+    InvalidLevel,
+    /// 存储不可用。
+    Store(StorageError),
+}
+
+impl std::fmt::Display for SetAttentionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RoomNotFound => write!(f, "room not found"),
+            Self::InvalidLevel => write!(f, "level must be all or mentions"),
+            Self::Store(e) => write!(f, "room store failure: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SetAttentionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+fn map_attention_error(e: RoomStoreError) -> SetAttentionError {
+    match e {
+        RoomStoreError::NotFound => SetAttentionError::RoomNotFound,
+        RoomStoreError::Database(e) => SetAttentionError::Store(e),
+        other => SetAttentionError::Store(unexpected_store_error("room store error", other)),
+    }
+}
+
+/// 写**本人**在这间房的提醒档（契约 `CORE_V1_IM_CONTRACT.md` §9.1）。
+///
+/// 三条裁决都在**用例这一层定死**，两条认证面（Human / Backend）逐条同形：
+/// - `level` 必须落在闭集 `{all, mentions}`（否则 400 invalid_request）——
+///   闭集在写入口就判，不把"认不出的词"交给数据库 CHECK 变成一个 500；
+/// - `room_id` 必须是规范 UUID v4，且**本人是该房 active 成员 + 该房是
+///   `group`**（两者同一出口：404 room_not_found，与非成员同形，不泄露）；
+/// - **没有 `participant_id` 入参的来路**：身份只来自认证上下文 ⇒
+///   "只有本人能写"由调用形状保证，不由参数校验保证。
+///
+/// 状态写、无幂等键、零事件、零唤醒；同值重写天然幂等。
+pub async fn set_room_attention(
+    store: &dyn RoomStore,
+    participant_id: &ParticipantId,
+    room_id_raw: &str,
+    level_raw: &str,
+) -> Result<AttentionLevel, SetAttentionError> {
+    let level = AttentionLevel::parse(level_raw).ok_or(SetAttentionError::InvalidLevel)?;
+    let room_id = RoomId::parse_canonical(room_id_raw).ok_or(SetAttentionError::RoomNotFound)?;
+    store
+        .set_room_attention(participant_id, &room_id, level)
+        .await
+        .map_err(map_attention_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ports::storage::StorageFailureKind;
     use std::error::Error;
-
     /// 应用 source 链：`RoomStoreError::Database(StorageError)` 经应用映射后，
     /// 从应用错误沿 `Error::source()` 下钻到 `StorageError`，再到底层 cause；
     /// 应用错误 Display 只含稳定文案，不含 cause 文本。

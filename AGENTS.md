@@ -93,6 +93,7 @@ Core v1 公共契约已封板冻结（身份、房间、成员、权限、消息
 | Call P0 | 进程内有界、可过期、非持久；**Core 不接触媒体字节**；任意两个 active participant 可互呼 | `CORE_V1_CALL.md` |
 | 迁移与真家数据 | **schema-only 重建**、不搬行、无升级桥；**不改任何既有迁移**（sqlx checksum） | `CORE_V1_IM_CONTRACT.md` |
 | 人自己的资料可改写（名字 ＋ 头像） | `display_name` 是**既有 Participant 身份事实**（不在呈现版本链上）⇒ 改名是**状态写**（无版本号、无幂等键）；头像走版本链；**只有本人能写**（Human 没有 Owner 这一支）；头像字节读取**照旧只有房间成员那一条**（自己那张脸在客户端借"我所在的房间"读） | `CORE_V1_PARTICIPANT_PRESENTATION.md` §4、`CORE_V1_AVATAR_P0.md` |
+| 提醒档（attention，群房） | 「这间房要不要提醒我」是**个人事实**：每 Room×Participant 至多一行、只有本人能写、**缺行 = `all`**；它**不改消息主链**（任何一档都不丢消息），只决定那条**易失**通知发不发 | `CORE_V1_IM_CONTRACT.md` §9.1、`CORE_V1_AGENT_DIRECTORY.md` §3.2 |
 
 **生长规则**：新切片只在 `CORE_V1_ACCEPTANCE.md` §6.1 追加记录；本文件只在上表加/改一行、必要时补一句红线。migration 名、表名、错误码清单、主人原话、逐条"不做什么"——**不写进本文件**。
 

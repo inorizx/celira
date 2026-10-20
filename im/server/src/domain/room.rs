@@ -155,6 +155,44 @@ pub struct ReadState {
     pub unread_count: i64,
 }
 
+/// **提醒档**（契约 `CORE_V1_IM_CONTRACT.md` §9.1）：这间房的动静要不要提醒我。
+///
+/// 它是**个人事实**（每 Room × Participant 至多一行，只有本人能写、只有本人
+/// 看得见），与 §9 的读位置同一档。⚠ 它**不改消息主链**——消息照常提交、未读
+/// 照常计算、历史照常可读；它只决定那条**易失**通知发不发。⇒ **任何一档都不
+/// 丢消息**。
+///
+/// **两态**，而且**缺行就是 `all`**（默认档，不预建行）：两态里没有第三格
+/// "没设过"——那是 `Default`，不是一个可以出现在公开取值里的第三种词。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AttentionLevel {
+    /// 这间房的动静都提醒我（**默认**，也是缺行时投影出来的取值）。
+    #[default]
+    All,
+    /// 只有**结构化 mention 到我**才提醒。
+    Mentions,
+}
+
+impl AttentionLevel {
+    /// 对外稳定字符串（契约里的取值就是这两个词）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Mentions => "mentions",
+        }
+    }
+
+    /// 从公开取值还原；认不出的取值**不猜**（调用方按请求非法或内部不变量
+    /// 破坏处理——写面是 400，读面是 corrupt）。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "all" => Some(Self::All),
+            "mentions" => Some(Self::Mentions),
+            _ => None,
+        }
+    }
+}
+
 /// 「**对方读没读我最后那条**」（契约 `CORE_V1_READ_RECEIPT.md` §2）。
 ///
 /// **两态**，而且这一格**只在问题成立时出现**——`Option::None` 表示问题不成立，
