@@ -56,44 +56,46 @@
   --code-meta: #6e6983;
 }
 
-/* 夜间（2026-10-20 主人："夜主题不够优雅……会不会是线条什么的"）。
-   两条病都量到了：
-   ① **色系断裂**：中性层是蓝灰（hue≈227°），强调色却是紫（256°），而亮色主题的中性层是紫调
-      （≈250°）⇒ 夜主题不是"把灯关掉"，是换了一套冷色系，于是紫强调像贴上去的；
-   ② **靠线分层**：表面差只有 1.05–1.11（几乎看不见），线却有 1.69（比亮色的 1.35 硬）
-      ⇒ 读起来是"一整块平面 ＋ 一堆 1px 线"，像仪表盘。
-   改法：中性层回到紫族（251–256°）、表面差抬到 1.14–1.15、线降到 1.44 —— 结构由**表面**说，
-   线只做收边。（对比度不变：正文 15.0、次要 6.5、主按钮上的字 6.3。） */
+/* 夜间（2026-10-20 两轮：先说"不够优雅，是不是线条"，再说"对比太强，有点奇怪"）。
+   三件事，两件保留、一件收回：
+   ① **色系断裂（保留改法）**：中性层原来偏蓝灰（hue≈227°），强调色却是紫（256°），而亮色主题
+      的中性层是紫调（≈250°）⇒ 夜不是"把灯关掉"，是换了套冷色系。现在中性层回到 251°。
+   ② **靠线分层（保留改法）**：线从 1.69 收到 **1.30**（亮色主题是 1.35 —— 两个主题终于同一口径），
+      结构交给表面差与留白。
+   ③ **表面差（收回一半）**：上一版抬到 1.14 时主人读作"对比太强"，现在回到 **1.07**（原版是 1.09，
+      几乎持平）—— 暗色的大块面板一旦拉开，就像两块不同的东西拼在一起，反而更廉价。
+      正文也从 15.0 降到 **14.1**（#e4e2ec）：暗底上的纯白是眩光，不是高级。
+   判据：**暗色的层次靠"留白 ＋ 淡线"，不靠把面板调亮**。 */
 .dark {
-  --background: #15131c;
-  --foreground: #e9e7f0;
-  --card: #221f30;
-  --card-foreground: #e9e7f0;
-  --popover: #282438;
-  --popover-foreground: #e9e7f0;
+  --background: #171520;
+  --foreground: #e4e2ec;
+  --card: #1e1b28;
+  --card-foreground: #e4e2ec;
+  --popover: #231f2e;
+  --popover-foreground: #e4e2ec;
   --primary: #a284f4;
   --primary-foreground: #14131c;
-  --secondary: #292537;
-  --secondary-foreground: #d9d5e4;
-  --muted: #231f31;
-  --muted-foreground: #9c96ad;
-  --accent: #2f2a44;
+  --secondary: #221f2d;
+  --secondary-foreground: #d5d2de;
+  --muted: #1c1a24;
+  --muted-foreground: #98929f;
+  --accent: #272234;
   --accent-foreground: #c5b8f5;
   --destructive: #ef6b6b;
   --destructive-foreground: #14131c;
-  --border: #352f45;
-  --input: #524c66;
+  --border: #2f2a3b;
+  --input: #474257;
   --ring: #a284f4;
   --overlay: #00000080;
 
   --brand: #a284f4;
   --agent: #6ec6ff;
-  --agent-surface: #1f2c34;
+  --agent-surface: #1c2830;
   --bubble-self-from: #7f6fe0;
   --bubble-self-to: #9a86ec;
   --bubble-self-foreground: #14131c;
-  --bubble-peer: #282433;
-  --bubble-peer-foreground: #e9e7f0;
+  --bubble-peer: #211e2b;
+  --bubble-peer-foreground: #e4e2ec;
   --presence-online: #7bd88f;
   --presence-thinking: #6ec6ff;
   --presence-silent: #797390;
