@@ -1,4 +1,4 @@
-﻿/* celira-theme: 樱吹雪 */
+/* celira-theme: 樱吹雪 */
 
 /* ===== 主题预设：樱吹雪（sakura，二次元） =====
    圆润贴纸感：超大圆角 + 圆体字族 + 贴纸白边 + 波点纹理（见文末形态层）。
@@ -51,36 +51,43 @@
   --code-meta: #786770;
 }
 
+/* 夜间：**夜樱**（2026-10-20 主人："暗色主题看起来不像樱花了，反而是很害怕的样子"）。
+   病因两条，都是色相/彩度的事：
+   ① 底色原先是**梅子红紫**（`#251c26`，hue≈310 偏暖）—— 大面积暗色里读作"深血/黑莓"；
+   ② 主粉 `#f588b0` 彩度高，压在近黑底上就成**霓虹粉**（对比 7:1），两者一合 = 赛博/万圣节那挂。
+   ⇒ 夜樱该是"**深蓝紫的天** + 柔和樱粉"：底往冷里挪、粉降彩提亮，贴纸描边跟着变冷。
+   数值（全部过线）：正文 14.40、次要 7.66、主按钮上的字 8.43、自己气泡 7.96、
+   agent 7.11、边框/底 1.54、输入框/卡片 2.82、卡片/底 1.11。 */
 .dark[data-theme='sakura'] {
-  --background: #251c26;
-  --foreground: #f2e9ee;
-  --card: #2e232f;
-  --card-foreground: #f2e9ee;
-  --popover: #342835;
-  --popover-foreground: #f2e9ee;
-  --primary: #f588b0;
+  --background: #1d1a2b;
+  --foreground: #f0eaf4;
+  --card: #262238;
+  --card-foreground: #f0eaf4;
+  --popover: #2b2640;
+  --popover-foreground: #f0eaf4;
+  --primary: #f2a3c0;
   --primary-foreground: #331622;
-  --secondary: #3a2c3a;
-  --secondary-foreground: #efe2ea;
-  --muted: #322632;
-  --muted-foreground: #b8a5b3;
-  --accent: #473040;
-  --accent-foreground: #ffa8c4;
-  --destructive: #fe7692;
+  --secondary: #2a2540;
+  --secondary-foreground: #ece6f2;
+  --muted: #2a2540;
+  --muted-foreground: #b3aac4;
+  --accent: #3a3450;
+  --accent-foreground: #f5bcd2;
+  --destructive: #fe8aa2;
   --destructive-foreground: #331622;
-  --border: #4c3a47;
-  --input: #795e70;
-  --ring: #f588b0;
+  --border: #3e3856;
+  --input: #6c6588;
+  --ring: #f2a3c0;
   --overlay: #00000080;
 
-  --brand: #f588b0;
+  --brand: #f2a3c0;
   --agent: #a79bff;
   --agent-surface: #2c2540;
-  --bubble-self-from: #f588b0;
-  --bubble-self-to: #f8a5c2;
+  --bubble-self-from: #e8a0bb;
+  --bubble-self-to: #eeadc4;
   --bubble-self-foreground: #331622;
-  --bubble-peer: #342733;
-  --bubble-peer-foreground: #f2e9ee;
+  --bubble-peer: #2b2640;
+  --bubble-peer-foreground: #f0eaf4;
   --presence-online: #7bd6a5;
   --presence-thinking: #a79bff;
   --presence-silent: #937c89;
