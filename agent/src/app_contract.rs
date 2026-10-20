@@ -123,7 +123,8 @@ pub trait AppPort: ActionPort {
 ///
 /// - `class` **必须**是稳定标记——它进主体的回执、也可能落进盘上的行动结果，
 ///   因此**同一故障两次发生必须逐字节相同**。**动态文本一律不许揉进它**：
-///   揉进去既污染封闭词表，又让"同一故障两次不同"。
+///   揉进去既污染封闭词表，又让"同一故障两次不同"。⚠ 这条"必须"由**类型**保证：
+///   构造器只收 `&'static str`（与 [`crate::core::ActionOutcome::failure`] 同款）。
 /// - `detail` 是**别人的话的落脚处**（如对面握手被拒时那句原文）。它**不是**分类，
 ///   也**不参与任何判断**——只让记录不必丢掉对面说过的话。
 ///
@@ -151,15 +152,19 @@ pub trait AppPort: ActionPort {
 /// 渲染时**整格不出场**——不写空值、也不编一句话。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpansionRefusal {
-    class: String,
+    /// 稳定分类：**`&'static str`**（只收编译期常量，见 [`ExpansionRefusal::classified`]）。
+    class: &'static str,
     detail: Option<String>,
 }
 
 impl ExpansionRefusal {
     /// 只有我们的分类：对面没留下别的话。
-    pub fn classified(class: impl Into<String>) -> Self {
+    ///
+    /// ⚠ `class` 是 `&'static str`：它会被 OS 原样装进 [`crate::core::ActionOutcome::failure`]
+    /// （写路径只收编译期常量），因此这里不能让一个 owned `String` 混进来。
+    pub fn classified(class: &'static str) -> Self {
         Self {
-            class: class.into(),
+            class,
             detail: None,
         }
     }
@@ -169,10 +174,10 @@ impl ExpansionRefusal {
     /// ⚠ **空的／只有空白的"原文"等于没有原文**（在这里收口，不靠调用方自觉）：
     /// 那一格是**文本**，而"对面一个字都没说"与"我们没去读"必须分得开——
     /// 造一块空的诊断出来，就是让两件事看起来一样。
-    pub fn with_detail(class: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub fn with_detail(class: &'static str, detail: impl Into<String>) -> Self {
         let detail = detail.into();
         Self {
-            class: class.into(),
+            class,
             detail: (!detail.trim().is_empty()).then_some(detail),
         }
     }
@@ -181,7 +186,7 @@ impl ExpansionRefusal {
     ///
     /// 它是 [`ExpansionRefusal::classified`] 与 [`ExpansionRefusal::with_detail`] 的合流口：
     /// 调用方手上是一个 `Option<&str>` 时用它，**不必自己判空**（判空只有一处，见上）。
-    pub fn from_detail(class: impl Into<String>, detail: Option<&str>) -> Self {
+    pub fn from_detail(class: &'static str, detail: Option<&str>) -> Self {
         match detail {
             Some(detail) => Self::with_detail(class, detail),
             None => Self::classified(class),
@@ -189,8 +194,8 @@ impl ExpansionRefusal {
     }
 
     /// 稳定分类标记（进回执、可能落盘的那一半）。
-    pub fn class(&self) -> &str {
-        &self.class
+    pub fn class(&self) -> &'static str {
+        self.class
     }
 
     /// 对面自己那句话（没有就是没有）。

@@ -468,17 +468,23 @@ impl ActionAdmission {
     /// 拒绝，**不带**随单内容。
     ///
     /// 只给稳定分类：这种情况是"这次请求不该发出去"这件事本身已经说完了，旁边没有别的可给。
-    pub fn refused(class: impl Into<String>) -> Self {
+    ///
+    /// ⚠ `class` 是 `&'static str`：进程内新产生的分类**只能**来自某份词表的 `as_str()`（编译期
+    /// 常量）。"同一故障两次发生必须逐字节相同"因此由**类型**保证，而不是靠调用方自觉——
+    /// 由内容拼出来的分类（`format!`）从此**编译不过**。
+    pub fn refused(class: &'static str) -> Self {
         Self::Refused {
-            class: class.into(),
+            class: class.to_string(),
             content: Vec::new(),
         }
     }
 
     /// 拒绝，并随单带上那份事实（[`ActionAdmission::Refused`] 的 `content`）。
-    pub fn refused_with(class: impl Into<String>, content: Vec<ContentBlock>) -> Self {
+    ///
+    /// `class` 同样只收编译期常量（理由见 [`ActionAdmission::refused`]）。
+    pub fn refused_with(class: &'static str, content: Vec<ContentBlock>) -> Self {
         Self::Refused {
-            class: class.into(),
+            class: class.to_string(),
             content,
         }
     }
@@ -500,6 +506,8 @@ impl ActionAdmission {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionOutcome {
     state: ResultState,
+    /// 分类文本：**owned**，因为读路径（[`ActionOutcome::recorded`]）要把盘上那一行原样装回来。
+    /// 写路径只接受 `&'static str`（见 [`ActionOutcome::failure`]）。
     failure: Option<String>,
     content: Vec<ContentBlock>,
 }
@@ -515,10 +523,14 @@ impl ActionOutcome {
     }
 
     /// 明确失败，带一个稳定分类。
-    pub fn failure(class: impl Into<String>) -> Self {
+    ///
+    /// ⚠ `class` 是 `&'static str`（理由见 [`ActionAdmission::refused`]）：**写路径只收编译期
+    /// 常量**。盘上读回来的那一份 owned 文本走 [`ActionOutcome::recorded`]——那条路 `pub(crate)`、
+    /// 只有 `store::projection` 一个调用点，守卫在 `tests/minimal_agent.rs`。
+    pub fn failure(class: &'static str) -> Self {
         Self {
             state: ResultState::Failure,
-            failure: Some(class.into()),
+            failure: Some(class.to_string()),
             content: Vec::new(),
         }
     }
@@ -528,12 +540,48 @@ impl ActionOutcome {
     /// 与 [`ActionOutcome::failure`] 是同一件事的两种载荷：`class` 照旧是稳定分类标记（同一故障
     /// 两次发生逐字节相同），`content` 是**旁边的结构化读数**——"这次为什么不成、缺的是哪一项"
     /// 一类当场就能给出的事实。它**不揉进 `class`**：分类是词表，读数是内容。
-    pub fn failure_with_content(class: impl Into<String>, content: Vec<ContentBlock>) -> Self {
+    ///
+    /// `class` 同 [`ActionOutcome::failure`]：只收 `&'static str`。
+    pub fn failure_with_content(class: &'static str, content: Vec<ContentBlock>) -> Self {
         Self {
             state: ResultState::Failure,
-            failure: Some(class.into()),
+            failure: Some(class.to_string()),
             content,
         }
+    }
+
+    /// **读路径**：把盘上那行记录里**读回来的 owned 分类**重新装成一次结果。
+    ///
+    /// ## 为什么它与上面两个构造器分开
+    ///
+    /// 两条来路不同，就不能共用一个签名：
+    ///
+    /// - **写路径**（进程内新产生的结果）：分类来自某份词表的 `as_str()`，是编译期常量 ⇒
+    ///   [`ActionOutcome::failure`] / [`ActionOutcome::failure_with_content`] 只收 `&'static str`；
+    /// - **读路径**（盘上读回来的一条记录）：那一行是**别人写的**（旧构建 / 手改 / 另一个 App），
+    ///   只能读成 owned ⇒ 这一个构造器收 `String`。
+    ///
+    /// 不要为了让两个签名统一而给写路径加 `.to_string()` 回退：那正是"任意动态文本被当成稳定
+    /// 失败分类"今天唯一的开口。让读路径保留 owned、让写路径只收静态，这件事就在类型上构造不出来。
+    ///
+    /// ⚠ **它是唯一的开口**：只许 `store::projection` 在再水化时调用（`src/` 代码里恰好一处，
+    /// 守卫见 `tests/minimal_agent.rs::the_recorded_outcome_constructor_has_exactly_one_caller`）。
+    pub(crate) fn recorded(class: String, content: Vec<ContentBlock>) -> Self {
+        Self {
+            state: ResultState::Failure,
+            failure: Some(class),
+            content,
+        }
+    }
+
+    /// 在**已经有分类**的结果上换一份内容（状态与分类原样沿用）。
+    ///
+    /// 给"失败已带着分类、只是要在旁边补一块读数"的那条路用（`os.rs` 的参数形状读数）：
+    /// 它**不重新产生分类**——分类可能来自写路径（静态）、也可能来自读路径（owned），两条都原样
+    /// 沿用。因此这里既不分配新字符串，也不新开一个口子。
+    pub(crate) fn replacing_content(mut self, content: Vec<ContentBlock>) -> Self {
+        self.content = content;
+        self
     }
 
     /// 结果无法确认。执行端应当谨慎使用：普通错误不是未知。

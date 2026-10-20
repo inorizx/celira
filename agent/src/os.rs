@@ -1103,13 +1103,14 @@ impl RunScope<'_> {
         // ⚠ **App 交上来的 class 不进 [`ExpansionFailure`]**：那张表仍是 OS 自己那五个词，
         // 一个取值不加；它照原样进回执与行动结果，OS 不解释、也不解码它。
         if let Err(refusal) = self.os.apps[index].present() {
-            let class = refusal.class().to_string();
+            // `class()` 是 `&'static str`（`ExpansionRefusal` 只收编译期常量）⇒ 不必再分配一份
+            // owned 文本：写路径那两个构造器要的正是这个类型。
             return match refusal.detail() {
                 Some(detail) => ActionOutcome::failure_with_content(
-                    class,
+                    refusal.class(),
                     vec![ContentBlock::new(EXPANSION_DIAGNOSTIC_LABEL, detail)],
                 ),
-                None => ActionOutcome::failure(class),
+                None => ActionOutcome::failure(refusal.class()),
             };
         }
         // 交出来的清单**整批**并进两张索引（归属 + 效果声明），撞名就整台不上场、
@@ -1421,12 +1422,11 @@ impl RunScope<'_> {
         if outcome.state() != ResultState::Failure {
             return outcome;
         }
-        let Some(class) = outcome.failure_class() else {
+        if outcome.failure_class().is_none() {
             // 失败却没有分类：不可达（`ActionOutcome::failure*` 都要一个分类），
             // 真到了这里**也不编一个**——原样交回。
             return outcome;
-        };
-        let class = class.to_string();
+        }
         let available = self.available_capabilities();
         let Some(capability) = available.find(&ActionId::new(id.to_string())) else {
             return outcome;
@@ -1467,7 +1467,9 @@ impl RunScope<'_> {
         // "失败也带正文"的动词），丢掉它就是这一层替它删话。
         let mut blocks = outcome.content().to_vec();
         blocks.push(ContentBlock::new(PARAM_SHAPE_LABEL, shape.reading()));
-        ActionOutcome::failure_with_content(class, blocks)
+        // **分类原样沿用**，只在其旁边补一块读数：不重新产生分类（它可能来自写路径的静态常量，
+        // 也可能来自读路径的 owned 文本），因此既不分配、也不经过 `failure_with_content`。
+        outcome.replacing_content(blocks)
     }
 
     /// 此刻生效的 pin 集：**就是主体自己钉的那一份**（2026-10-10 起常驻只剩这一个来源），

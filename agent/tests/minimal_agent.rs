@@ -2648,6 +2648,76 @@ fn the_dynamic_class_scanner_reports_when_it_exists() {
     }
 }
 
+/// **读路径那一个开口只许有一处**（2026-10-20，T1）。
+///
+/// `ActionOutcome::recorded` 是唯一允许把「盘上读回来的 owned 分类」重新装成结果的构造器：
+/// 写路径那两个构造器只收 `&'static str`，于是"任意动态文本被当成稳定失败分类"在类型上构造
+/// 不出来；剩下的风险只有"谁在别处也调用了这个开口"。
+///
+/// 判据：`src/` 全部**代码行**里形如 `ActionOutcome::recorded(` 的调用**恰好一处**，且落在
+/// `store/projection.rs`（再水化那一步）。定义处写的是 `fn recorded(`，不匹配这个形状——
+/// 这条守的是**调用点**，不是构造器的存在。
+///
+/// 反例自检在末尾：两处 ⇒ 报出两处路径；注释里的点名不算。
+#[test]
+fn the_recorded_outcome_constructor_has_exactly_one_caller() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut paths: Vec<PathBuf> = Vec::new();
+    collect_rust_sources(&root, &mut paths);
+    assert!(!paths.is_empty(), "守卫形同虚设：一个源文件都没扫到");
+
+    let files: Vec<(String, String)> = paths
+        .iter()
+        .map(|path| {
+            let relative = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (relative, std::fs::read_to_string(path).expect("读源码"))
+        })
+        .collect();
+    let callers = recorded_callers(&files);
+    assert_eq!(
+        callers,
+        vec!["store/projection.rs".to_string()],
+        "`ActionOutcome::recorded(` 只许在投影层再水化时调用一次；现在是 {callers:?}"
+    );
+
+    // 反例自检：多一处必须报出那一处的路径；注释里的点名不算。
+    assert_eq!(
+        recorded_callers(&[
+            (
+                "store/projection.rs".to_string(),
+                "ActionOutcome::recorded(class, blocks)".to_string(),
+            ),
+            (
+                "os.rs".to_string(),
+                "let back = ActionOutcome::recorded(class, blocks);".to_string(),
+            ),
+        ]),
+        vec!["store/projection.rs".to_string(), "os.rs".to_string()],
+        "多一处必须报出路径"
+    );
+    assert_eq!(
+        recorded_callers(&[(
+            "os.rs".to_string(),
+            "// 别学 ActionOutcome::recorded(class, blocks) 这样".to_string(),
+        )]),
+        Vec::<String>::new(),
+        "注释里的点名不是调用"
+    );
+}
+
+/// 扫描一组 `(路径, 源码)`：哪些文件的**代码行**里出现了 `ActionOutcome::recorded(`。
+fn recorded_callers(files: &[(String, String)]) -> Vec<String> {
+    files
+        .iter()
+        .filter(|(_, source)| code_lines(source).contains("ActionOutcome::recorded("))
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
 /// 分层守卫：文件系统 API 只能在文件 App 与组合入口，供应商 API 只能在 Adapter。
 ///
 /// 这条是"边界 API 不串层"的机械版：Core 或 Foundation 一旦自己去开文件、读环境或引供应商

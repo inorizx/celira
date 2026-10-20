@@ -177,9 +177,9 @@ pub(super) fn outcome_of_observation(
     let content = blocks_of(blocks)?;
     match (state, failure) {
         (ResultState::Success, None) => Ok(ActionOutcome::success(content)),
-        (ResultState::Failure, Some(class)) => {
-            Ok(ActionOutcome::failure_with_content(class.clone(), content))
-        }
+        // **读路径唯一的开口**：盘上那根分类是 owned（别人写的），因此走 `recorded` 而不是
+        // 写路径那两个只收 `&'static str` 的构造器（见 `core::ActionOutcome::recorded` 的文档）。
+        (ResultState::Failure, Some(class)) => Ok(ActionOutcome::recorded(class.clone(), content)),
         (ResultState::Unknown, None) if content.is_empty() => Ok(ActionOutcome::unknown()),
         _ => Err(RehydrateError::OutcomeNotProducible),
     }
