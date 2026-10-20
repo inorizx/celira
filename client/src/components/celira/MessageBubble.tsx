@@ -238,7 +238,7 @@ export function MessageBubble({
                     compact ? 'rounded-xl' : 'rounded-2xl',
                     (audioFiles.length > 0 || plainFiles.length > 0) && 'min-w-56',
                     isSelf
-                      ? 'rounded-tr-sm bg-gradient-to-br from-bubble-self-from to-bubble-self-to text-bubble-self-foreground'
+                      ? 'rounded-tr-sm bg-bubble-self-from text-bubble-self-foreground'
                       : 'rounded-tl-sm bg-bubble-peer text-bubble-peer-foreground border border-border',
                   )}
                 >

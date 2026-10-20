@@ -39,7 +39,7 @@ export function ThemeScopePreview({
         <span className="ml-auto size-1.5 rounded-full bg-agent" />
       </div>
       <div className="mb-1 h-3 w-3/5 rounded-lg rounded-tl-sm border border-border bg-bubble-peer" />
-      <div className="ml-auto h-3 w-2/5 rounded-lg rounded-tr-sm bg-gradient-to-br from-bubble-self-from to-bubble-self-to" />
+      <div className="ml-auto h-3 w-2/5 rounded-lg rounded-tr-sm bg-bubble-self-from" />
     </div>
   )
 }

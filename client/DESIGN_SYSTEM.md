@@ -31,7 +31,7 @@
 - 品牌：`brand`（Logo 紫）、`primary`（主行动）
 - 表面：`background` / `card` / `popover` / `muted` / `accent` / `border` / `input` / `ring`
 - Agent 身份：`agent`（青色文字/描边）、`agent-surface`（Agent 头像与徽章底色）
-- 气泡：`bubble-self-from/to/foreground`（自己，紫渐变）、`bubble-peer/foreground`（对方）
+- 气泡：`bubble-self-from/foreground`（自己，**纯色**；2026-10-20 起正文字段不再用渐变）、`bubble-self-to`（只给头像与预设小样的渐变用）、`bubble-peer/foreground`（对方）
 - 状态（回复、沉默、超时、失败必须语义分离，禁止混用）：`presence-online` / `presence-thinking` / `presence-silent` / `presence-timeout` / `presence-failed`
 
 ## 其他硬规则
