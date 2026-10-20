@@ -162,6 +162,166 @@ pub fn stat_sandbox_file(root: &Path, relative: &str) -> Result<(String, u64), S
     Ok((name, metadata.len()))
 }
 
+/// **机器档**：一条**绝对路径**在这台机器上指向哪儿 —— 卷根 ＋ 卷根之下的名字段。
+///
+/// 它只服务一种装配：**主人把整台机器当文件面**给了这一支（`files` 的"全开"档）。
+/// 相对路径那一档（[`relative_names`]）一个字没动 —— 两档的形状**互不接受对方的写法**：
+/// 机器档拒绝相对路径（"相对于什么"在这里没有唯一答案），家档拒绝绝对路径（那就出根了）。
+///
+/// ⚠ **进度（2026-10-20）**：这一对是那一刀的**第一层** —— 判据与逐段检查在，**装配还没接**
+/// （`file_app` 的全开档、`--files` 旗标、`agent.conf` 那一行、页面上那一格都是下一步）。
+/// ⇒ 它今天**不是**一个已经生效的能力，别照着它去假设"主体已经能碰整台机器"。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachinePath {
+    root: PathBuf,
+    names: Vec<String>,
+}
+
+impl MachinePath {
+    /// 命中的卷根（`C:\`、`D:\`；Linux 上是 `/`）。
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// 卷根之下的名字段（已经过形状校验）。
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    /// 卷根本身（`files_list` 的合法目标）。
+    pub fn is_volume_root(&self) -> bool {
+        self.names.is_empty()
+    }
+}
+
+/// **机器档的第一遍**：一条绝对路径拆成"卷根 ＋ 名字段"（只看形状，不碰文件系统）。
+///
+/// 拒的东西比家档多一条，因为这里没有"根"把逃逸兜住：
+/// - UNC（`\\server\share`）、设备命名空间（`\\?\`、`\\.\`）、盘符相对（`C:foo`）；
+/// - 任何**第二个** `:`（Windows ADS `file.txt:stream`，也能写成别的盘符）；
+/// - `.`、`..`、空路径；
+/// - **Windows 上**：名字以点或空格结尾（Win32 会把它们悄悄剪掉 ⇒ 同一个文件两个写法，
+///   形状校验就白判了）、保留设备名（`CON` / `NUL` / `COM1`… 打开的是设备，不是文件）。
+///
+/// ⚠ 与家档同一条等级声明：这是"形状"判据，不是安全沙盒（见本文件头）。
+pub fn machine_path(absolute: &str) -> Result<MachinePath, SandboxError> {
+    let (root, names) = split_absolute(absolute)?;
+    Ok(MachinePath { root, names })
+}
+
+/// **机器档的第二遍**：逐段落实一条已经通过形状校验的绝对路径。
+///
+/// 与 [`resolve_within`] 同一套逐段检查（符号链接 / junction / reparse point 一律拒），
+/// 区别只有基准：那里是一个沙盒根，这里是**这条路径自己点名的那个卷根**——所以"在不在根里"
+/// 由卷本身兜住，不需要（也无法）拿一个更外层的根去比。
+///
+/// 卷不在（`Q:\`）⇒ `NotFound`；卷在而中途某段不在 ⇒ `NotFound`；最后按组件比一遍
+/// （`Path::starts_with`，不是字符串前缀）。
+pub fn resolve_machine(target: &MachinePath) -> Result<PathBuf, SandboxError> {
+    let metadata = fs::symlink_metadata(&target.root).map_err(|error| io_error_class(&error))?;
+    if !metadata.is_dir() {
+        return Err(SandboxError::WrongKind);
+    }
+    let mut current = target.root.clone();
+    for name in &target.names {
+        current.push(name);
+        let metadata = fs::symlink_metadata(&current).map_err(|error| io_error_class(&error))?;
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+            return Err(SandboxError::Link);
+        }
+    }
+    if !current.starts_with(&target.root) {
+        return Err(SandboxError::InvalidPath);
+    }
+    Ok(current)
+}
+
+/// 绝对路径 → `(卷根, 名字段)`。平台差异**只在这里**（家档那条"反斜杠不是 Linux 的分隔符"
+/// 的教训：形状判据不许把某一平台的写法当成跨平台判据，见本文件头）。
+#[cfg(windows)]
+fn split_absolute(absolute: &str) -> Result<(PathBuf, Vec<String>), SandboxError> {
+    let bytes = absolute.as_bytes();
+    // `X:\` 或 `X:/`：盘符 ＋ 冒号 ＋ 分隔符，缺一不可（`C:foo` 是"当前盘上的相对路径"）。
+    if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' {
+        return Err(SandboxError::InvalidPath);
+    }
+    if bytes[2] != b'\\' && bytes[2] != b'/' {
+        return Err(SandboxError::InvalidPath);
+    }
+    let root = PathBuf::from(format!("{}:\\", (bytes[0] as char).to_ascii_uppercase()));
+    // 第二个 `:` ⇒ ADS 或另一个盘符；UNC / `\\?\` / `\\.\` 在第一步就不成立（不是 `X:\` 形状）。
+    if absolute[2..].contains(':') {
+        return Err(SandboxError::InvalidPath);
+    }
+    let names = split_names(&absolute[3..])?;
+    Ok((root, names))
+}
+
+#[cfg(not(windows))]
+fn split_absolute(absolute: &str) -> Result<(PathBuf, Vec<String>), SandboxError> {
+    if !absolute.starts_with('/') {
+        return Err(SandboxError::InvalidPath);
+    }
+    Ok((PathBuf::from("/"), split_names(&absolute[1..])?))
+}
+
+/// 名字段：跳过连续分隔符；空段不产生名字；`.` / `..` 一律拒（机器档没有"上一层"这回事）。
+fn split_names(rest: &str) -> Result<Vec<String>, SandboxError> {
+    let mut names: Vec<String> = Vec::new();
+    for part in rest.split(['\\', '/']) {
+        if part.is_empty() {
+            continue;
+        }
+        if part == "." || part == ".." {
+            return Err(SandboxError::InvalidPath);
+        }
+        #[cfg(windows)]
+        {
+            if part.ends_with('.') || part.ends_with(' ') {
+                return Err(SandboxError::InvalidPath);
+            }
+            if is_reserved_device_name(part) {
+                return Err(SandboxError::InvalidPath);
+            }
+        }
+        names.push(part.to_string());
+    }
+    Ok(names)
+}
+
+/// Windows 保留设备名（`CON` / `NUL` / `COM1`…）：它们打开的是设备，不是文件。
+/// 带扩展名也算（`CON.txt` 仍是设备）。家档不判这一条（那里有根兜着，且不是本刀的范围）。
+#[cfg(windows)]
+fn is_reserved_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 /// 是否是符号链接 / junction / 其他 reparse point。
 ///
 /// Windows 上 junction 也是 reparse point；只看 `is_symlink()` 不足以覆盖全部情况，
