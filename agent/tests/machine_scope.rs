@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use celira_agent::sandbox::{SandboxError, machine_path, resolve_machine};
+use celira_agent::sandbox::{SandboxError, machine_path, resolve_machine, resolve_machine_parent};
 
 /// 自建临时根（只在系统临时目录下，用完删掉自己那一份）。
 struct Scratch {
@@ -182,6 +182,53 @@ fn resolution_walks_the_real_chain_and_refuses_missing_segments() {
     assert_eq!(
         resolve_machine(&machine_path(&ghost).expect("形状仍合法")).unwrap_err(),
         SandboxError::NotFound,
+    );
+}
+
+#[test]
+fn create_shape_resolves_only_the_parent_and_leaves_the_last_name_alone() {
+    let scratch = Scratch::new("parent");
+    scratch.write("sub/existing.txt", "hello");
+
+    // 父在、末段不在 ⇒ 这正是"新建"要的形状：交回（父目录, 名字），**不要求末段存在**。
+    let fresh = scratch.path().join("sub").join("brand-new.txt");
+    let fresh_text = fresh.display().to_string();
+    let (dir, name) = resolve_machine_parent(&machine_path(&fresh_text).expect("形状合法"))
+        .expect("父目录在，应当解析得出来");
+    assert_eq!(dir, scratch.path().join("sub"));
+    assert_eq!(name, "brand-new.txt");
+    assert!(!fresh.exists(), "这一步只解析，不创建任何东西");
+
+    // 父不在 ⇒ NotFound（父目录要先存在；这一层不替主体建目录）。
+    let orphan = scratch
+        .path()
+        .join("ghost")
+        .join("a.txt")
+        .display()
+        .to_string();
+    assert_eq!(
+        resolve_machine_parent(&machine_path(&orphan).expect("形状合法")).unwrap_err(),
+        SandboxError::NotFound,
+    );
+
+    // 父是一个**文件** ⇒ WrongKind（不是"新建失败"，是不该拿它当目录）。
+    let not_a_dir = scratch
+        .path()
+        .join("sub")
+        .join("existing.txt")
+        .join("a.txt")
+        .display()
+        .to_string();
+    assert_eq!(
+        resolve_machine_parent(&machine_path(&not_a_dir).expect("形状合法")).unwrap_err(),
+        SandboxError::WrongKind,
+    );
+
+    // 卷根本身不是可以新建文件的地方（没有末段）。
+    let volume = machine_path(if cfg!(windows) { "C:\\" } else { "/" }).expect("形状合法");
+    assert_eq!(
+        resolve_machine_parent(&volume).unwrap_err(),
+        SandboxError::InvalidPath,
     );
 }
 

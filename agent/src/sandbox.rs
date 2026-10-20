@@ -236,6 +236,41 @@ pub fn resolve_machine(target: &MachinePath) -> Result<PathBuf, SandboxError> {
     Ok(current)
 }
 
+/// **机器档的"新建"用**：父目录逐段落实（存在、是目录、链上无链接），末段只做形状。
+///
+/// 与 [`resolve_machine`] 的差别只有一处、也是唯一该有的一处：**末段不要求存在**。
+/// 新建要的是"父目录在、这个名字还不在盘上"，而"在不在"由调用方的独占创建
+/// （`create_new`）去判——这里先判一遍就会把"新建"读成"改已有文件"。
+///
+/// 卷根不是一个可以新建文件的地方（没有末段）⇒ `InvalidPath`。
+pub fn resolve_machine_parent(target: &MachinePath) -> Result<(PathBuf, String), SandboxError> {
+    let Some((name, parents)) = target.names.split_last() else {
+        return Err(SandboxError::InvalidPath);
+    };
+    let metadata = fs::symlink_metadata(&target.root).map_err(|error| io_error_class(&error))?;
+    if !metadata.is_dir() {
+        return Err(SandboxError::WrongKind);
+    }
+    let mut current = target.root.clone();
+    for each in parents {
+        current.push(each);
+        let metadata = fs::symlink_metadata(&current).map_err(|error| io_error_class(&error))?;
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+            return Err(SandboxError::Link);
+        }
+    }
+    // 父必须真的是一个目录：拿一个文件当父目录时，"新建"失败在**组装**这一层，
+    // 而不是留给 `create_new` 去打一句难懂的 I/O 错误。
+    let parent_metadata = fs::symlink_metadata(&current).map_err(|error| io_error_class(&error))?;
+    if !parent_metadata.is_dir() {
+        return Err(SandboxError::WrongKind);
+    }
+    if !current.starts_with(&target.root) {
+        return Err(SandboxError::InvalidPath);
+    }
+    Ok((current, name.clone()))
+}
+
 /// 绝对路径 → `(卷根, 名字段)`。平台差异**只在这里**（家档那条"反斜杠不是 Linux 的分隔符"
 /// 的教训：形状判据不许把某一平台的写法当成跨平台判据，见本文件头）。
 #[cfg(windows)]
