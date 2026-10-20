@@ -3668,6 +3668,78 @@ fn chain_layers(source: &str) -> Option<usize> {
     Some(body[..end].matches('<').count() + 1)
 }
 
+/// **动词预算**（T3，2026-10-20）：生产装配下动词总数有上限——加一个，先删一个。
+///
+/// 判据与处境链那 11 层同款：**「攒动词」从默认允许变成必须先删**。
+///
+/// 计数**只**来自生产装配那条路径（`RunSession` → `assemble_machine` →
+/// `assemble_preinstalled`），不手抄一份动词清单：清单会漂，装配不会。夹具拼的就是
+/// `bin/agent_host.rs` 的默认生产档（im 在场、web full、terminal full、零台 MCP）。
+///
+/// ⚠ 外部来源的 App（MCP）在装配期没有动词清单（要展开才有），因此它们的工具**不在**这个
+/// 预算里——那一面由每台 server 的工具上限管（见 [`celira_agent::composition::Roster`]）。
+#[test]
+fn the_production_assembly_has_a_verb_budget() {
+    use celira_agent::clock::ClockHandle;
+    use celira_agent::composition::{RunOrigin, RunSession, SessionDeclarations, SessionRequest};
+    use celira_agent::context_reading::ContextReading;
+    use celira_agent::core::RunInput;
+    use celira_agent::im_channel::ImAccess;
+    use celira_agent::store::Environment;
+    use celira_agent::terminal_app::{TerminalAccess, TerminalTier};
+
+    // **今天的实测值**（2026-10-20：apps=8 / verbs=59 / doors=4）。改这一行必须同时说清删了哪一条。
+    const VERB_BUDGET: usize = 59;
+
+    let root = std::env::temp_dir().join(format!("celira-roster-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let environment_root = root.join("env");
+    let materials = root.join("materials");
+    fs::create_dir_all(&materials).expect("建资料目录");
+    let agent_id = AgentId::new("agent-roster");
+    let mut environment = Environment::create(&environment_root, agent_id.clone()).expect("建环境");
+
+    let declarations = SessionDeclarations {
+        im: Some(
+            ImAccess::new(
+                "http://127.0.0.1:9".to_string(),
+                "fixture-credential".to_string(),
+            )
+            .expect("im 声明"),
+        ),
+        web: celira_agent::web_app::WebTier::Full,
+        terminal: Some(TerminalAccess::new(TerminalTier::Full, Vec::new())),
+        ..Default::default()
+    };
+    let request = SessionRequest {
+        declared_agent: &agent_id,
+        run: RunId::new("run-roster"),
+        limits: Limits::new(4),
+        input: RunInput::empty(),
+        clock: ClockHandle::fixed_at_unix_seconds(1_800_000_000),
+        context_window: 128_000,
+        reading: ContextReading::default(),
+        declarations,
+    };
+    let session =
+        RunSession::open_declared(&materials, &mut environment, RunOrigin::manual(), request)
+            .expect("生产装配必须装得起来");
+    let roster = session.roster();
+    drop(session);
+    drop(environment);
+    let _ = fs::remove_dir_all(&root);
+
+    assert!(
+        roster.verbs <= VERB_BUDGET,
+        "动词数 {} 超过预算 {}（apps={} doors={}）：要加一个动词，先删一个——\
+         预算的意义是让「攒动词」从默认允许变成必须先删（与处境链 11 层同一条纪律）",
+        roster.verbs,
+        VERB_BUDGET,
+        roster.apps,
+        roster.doors,
+    );
+}
+
 /// **人不许比系统知道得更少**（2026-10-08 主人确认，三类读者里的第 3 档）。
 ///
 /// 判据一句话：**同一族的两个不同类别，操作者不许读到同一句话。**

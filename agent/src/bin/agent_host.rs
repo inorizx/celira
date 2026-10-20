@@ -515,6 +515,27 @@ fn main() -> ExitCode {
         doorbell_policy.stable_after.as_millis(),
         doorbell_policy.max_age.as_millis()
     );
+    // **这一次装配的声明包**（宿主给出）：启动读数与每一段活动都从它派生。
+    let declarations = SessionDeclarations {
+        // 这一段由谁想、想多用力：**从将要发请求的那个对象取**（`ModelChoice`）——入口不另算
+        // 一份，否则"主体读到的那一行"与真正用的那一个迟早对不上。
+        model: Some(model.model().to_string()),
+        reasoning_effort: model.reasoning_effort().map(str::to_string),
+        usage: Some(usage),
+        // 门铃与主体的 im 动词用的是**同一份声明**（端点与凭据都只有这一份）。
+        im: Some(access),
+        // 身份行（TASK_70）：**宿主声明**的两个值（core 里那个 id 与此世界的名字）。
+        // 没给旗标 ⇒ `None` ⇒ 开场跳过那一刻那一行（不编、也不拿本机身份顶替）。
+        identity: identity_claim(&options),
+        web: web_tier,
+        search,
+        terminal,
+        mcp,
+        // 这一次装配用的模型收不收得到媒体材料（2026-10-17）：与上面 `model` 同一处口径
+        // ——从**模型来源**里取，入口不另算一份；进程侧来源没有这一格 ⇒ fail-closed。
+        vision: source.vision(),
+        ..Default::default()
+    };
     let mut host = Host::new(HostOptions {
         environment_root: Path::new(&options.root),
         declared_agent: &declared_agent,
@@ -525,28 +546,28 @@ fn main() -> ExitCode {
         write_qualification: WriteQualification::default(),
         clock: clock.clone(),
         reading,
-        declarations: SessionDeclarations {
-            // 这一段由谁想、想多用力：**从将要发请求的那个对象取**（`ModelChoice`）——入口不另算
-            // 一份，否则"主体读到的那一行"与真正用的那一个迟早对不上。
-            model: Some(model.model().to_string()),
-            reasoning_effort: model.reasoning_effort().map(str::to_string),
-            usage: Some(usage),
-            // 门铃与主体的 im 动词用的是**同一份声明**（端点与凭据都只有这一份）。
-            im: Some(access),
-            // 身份行（TASK_70）：**宿主声明**的两个值（core 里那个 id 与此世界的名字）。
-            // 没给旗标 ⇒ `None` ⇒ 开场跳过那一刻那一行（不编、也不拿本机身份顶替）。
-            identity: identity_claim(&options),
-            web: web_tier,
-            search,
-            terminal,
-            mcp,
-            // 这一次装配用的模型收不收得到媒体材料（2026-10-17）：与上面 `model` 同一处口径
-            // ——从**模型来源**里取，入口不另算一份；进程侧来源没有这一格 ⇒ fail-closed。
-            vision: source.vision(),
-            ..Default::default()
-        },
+        declarations: declarations.clone(),
         watch: watch.clone(),
     });
+
+    // **装配读数**（T3）：这台机器上装着什么——三个数，每进程一行（不是每段一行）。
+    //
+    // 读的是**生产装配那条路径**（`assemble_machine`），不是手抄的清单。
+    // ⚠ 它只算**宿主声明的**装配：主体自己的 `<环境根>/mcp.conf` 是每一段开段时才并入的，
+    // 不在这一行里（那一面由每台 server 的工具上限管）。
+    // ⚠ 它**不改变任何行为**：装配只构造 App、校验路径，不写东西；读不出来就如实说读不出来
+    // （不编一个 0）——真正的原因会在开段时由宿主自己报出来。
+    match celira_agent::composition::assembled_roster(
+        Path::new(&options.materials),
+        Path::new(&options.root),
+        &declarations,
+    ) {
+        Ok(roster) => println!(
+            "apps={} verbs={} doors={}",
+            roster.apps, roster.verbs, roster.doors
+        ),
+        Err(_) => println!("apps=unreadable verbs=unreadable doors=unreadable"),
+    }
 
     // **补响**（2026-10-13）：上一段收场时世界还有没摆到眼前的动静 ⇒ 循环顶上**不等下一声铃**。
     let mut rearm = false;

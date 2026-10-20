@@ -1295,6 +1295,41 @@ enum SessionPhase {
     Failed,
 }
 
+/// **一次装配的读数**（T3，2026-10-20）：这台机器上装着什么。
+///
+/// 首屏是主体真正看到的产品，而它一直是**无人认领的增长**：处境链有 11 层上限、目录与门牌各有
+/// 字节上限，唯独"装了几个 App、一共几条动词、几扇门还没打开"没有一处读数。这个投影只回答
+/// 这三个数，**不新增机制、不加配置项**。
+///
+/// - `apps`：装了几个 App（[`MinimalOs::desktop`] 的门数）；
+/// - `verbs`：这些 App **在装配期声明**的动词总数。⚠ 外部来源的 App（MCP）在装配期还没有
+///   动词清单（要展开才有）⇒ 它们的动词**不在这个数里**，那一面由每台 server 的工具上限管；
+/// - `doors`：其中**还没打开**的门（未预装常开）——主体要先展开，才看得见门后的动词。
+///
+/// ⚠ 计数只来自 [`MinimalOs::desktop`]（装配期事实），不手抄任何清单：加一个 App 或一条动词，
+/// 这个数自己会变，预算用例（`tests/minimal_agent.rs`）随之报红。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Roster {
+    pub apps: usize,
+    pub verbs: usize,
+    pub doors: usize,
+}
+
+impl Roster {
+    /// 从桌面那一层**派生**（唯一的计数来源：装配期事实，不看展开状态）。
+    fn of(desktop: &Desktop) -> Self {
+        Self {
+            apps: desktop.doors.len(),
+            verbs: desktop.doors.iter().map(|door| door.verbs.len()).sum(),
+            doors: desktop
+                .doors
+                .iter()
+                .filter(|door| !door.preinstalled)
+                .count(),
+        }
+    }
+}
+
 /// 一次同进程会话：**装配一次、驱动多次**。
 ///
 /// ## 所有权拓扑
@@ -1400,6 +1435,14 @@ pub struct RunSession<'a> {
 }
 
 impl<'a> RunSession<'a> {
+    /// **这一次装配的读数**（T3）：装了几个 App、一共几条动词、其中几扇门还没打开。
+    ///
+    /// 它是**装配期事实**（[`MinimalOs::desktop`]），不看展开状态：展开之后新出现的动词不算进
+    /// `verbs`（那是这一次活动的展开，不是装配）。
+    pub fn roster(&self) -> Roster {
+        Roster::of(&self.os.desktop())
+    }
+
     /// 打开一次会话：核对身份与准入、装配执行对象、登记活动——但**不**驱动。
     ///
     /// 顺序有意与一次性入口一致：身份核对与执行准入排在**建立任何执行对象之前**，资料根装配
@@ -1560,16 +1603,7 @@ impl<'a> RunSession<'a> {
             material_root,
             &environment_root,
             declarations.creation.as_ref(),
-            MachineDeclarations {
-                im: declarations.im.as_ref(),
-                web: WebDeclaration {
-                    search: declarations.search.as_ref(),
-                    tier: declarations.web,
-                },
-                terminal: declarations.terminal.as_ref(),
-                mcp: &declarations.mcp,
-                vision: declarations.vision,
-            },
+            machine_declarations(&declarations),
         )?;
         // 开场素材：**读法只有一份**（见 [`read_opening_materials`]）。三态 / 四态语义在那一处
         // 各自保持——读失败与"没有"分得开，这里一个都不压平。
@@ -1902,6 +1936,41 @@ struct MachineDeclarations<'a> {
     mcp: &'a [McpAccess],
     /// 这一次装配用的模型收不收得到媒体材料（见 [`SessionDeclarations::vision`]）。
     vision: bool,
+}
+
+/// 把会话的声明包映射成**机器声明**（两处装配共用这一份映射：会话入口与启动读数）。
+///
+/// 它只做字段搬运，不做任何决定——判据都在各字段自己的文档里。
+fn machine_declarations<'a>(declarations: &'a SessionDeclarations) -> MachineDeclarations<'a> {
+    MachineDeclarations {
+        im: declarations.im.as_ref(),
+        web: WebDeclaration {
+            search: declarations.search.as_ref(),
+            tier: declarations.web,
+        },
+        terminal: declarations.terminal.as_ref(),
+        mcp: &declarations.mcp,
+        vision: declarations.vision,
+    }
+}
+
+/// **装配读数**（T3）：按给定声明装配一次机器，报"这台机器上装着什么"。
+///
+/// 它是只读投影：装配只构造 App、校验路径，**不写任何东西**；读完即散。
+/// 生产消费点是 `bin/agent_host.rs` 启动时那一行（`[listening]` 之后，每进程一次）。
+/// 与 [`RunSession::roster`] 同源——两者都只经 [`assemble_machine`]，不手抄清单。
+pub fn assembled_roster(
+    material_root: &Path,
+    environment_root: &Path,
+    declarations: &SessionDeclarations,
+) -> Result<Roster, CompositionError> {
+    let os = assemble_machine(
+        material_root,
+        environment_root,
+        declarations.creation.as_ref(),
+        machine_declarations(declarations),
+    )?;
+    Ok(Roster::of(&os.desktop()))
 }
 
 fn assemble_machine(
