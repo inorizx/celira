@@ -73,6 +73,7 @@ export function MessageBubble({
   resolveAuthor,
   mentionMembers,
   highlighted = false,
+  peerRead,
 }: {
   message: Message
   selfId?: string
@@ -103,6 +104,12 @@ export function MessageBubble({
    * fixtures）。 */
   mentionMembers?: MentionMember[]
   highlighted?: boolean
+  /** 「**对方读到这儿**」（契约 `CORE_V1_READ_RECEIPT.md` §2）。只传给我**最后一条**
+   * 消息那一行——服务端只给"对方读没读我最后那条"这一个布尔（**房间级**），
+   * 不是逐条回执；调用方按 id 精确挂在最后一条自己发的气泡下（见 `ChatPage`
+   * 的 `myLastMessageId`）。缺席（`undefined`）＝ 这一格不成立：房不是 `direct`、
+   * 对方当前不是这间房的 active 成员、或我在这间房还没说过话。 */
+  peerRead?: 'read' | 'unread'
 }) {
   const navigate = useNavigate()
   // 作者投影：调用方注入的解析器优先（真实 me + room.participants，
@@ -297,6 +304,21 @@ export function MessageBubble({
         {isSelf && (
           <div className="mt-1">
             <DeliveryStatus state={message.delivery} onRetry={onRetry} />
+            {/* 「对方读到这儿」——**就在这条气泡下面**（不是对方的状态栏）：
+                它说的是"我这句话有没有被接住"，主语是我这条消息，判据是对方
+                的**读位置**过了它。
+                ⚠ 文案纪律：写"读到这儿"，**不写"看到"**——读到是位置，看到是判断
+                （契约 §2）。⚠ `data-peer-read` 是给真机门禁的稳定钩子
+                （`client/scripts/verify-ui.mjs`），判据钉在这一格自己身上。 */}
+            {peerRead && (
+              <div
+                data-peer-read={peerRead}
+                role="status"
+                className="mt-0.5 text-caption text-muted-foreground"
+              >
+                {peerRead === 'read' ? '读到这儿' : '还没读'}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -314,6 +336,9 @@ export const MemoizedMessageBubble = memo(MessageBubble, (prev, next) => {
     prev.onRecall === next.onRecall &&
     prev.resolveReplyTarget === next.resolveReplyTarget &&
     prev.onLoadReplyTarget === next.onLoadReplyTarget &&
-    prev.resolveAuthor === next.resolveAuthor
+    prev.resolveAuthor === next.resolveAuthor &&
+    // 「读到这儿」只挂在我最后一条上：那一条可能由 `unread` 变 `read`
+    // （拉取式读数），不比较它就会**停在旧值**上——那一格正好会撒谎。
+    prev.peerRead === next.peerRead
   )
 })

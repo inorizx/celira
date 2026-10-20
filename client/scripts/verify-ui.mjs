@@ -1670,12 +1670,13 @@ try {
     )
   }
 
-  // ---- 「对方已读 / 未读」那一格（2026-10-10；契约 `CORE_V1_READ_RECEIPT.md` §2）----
+  // ---- 「对方读到这儿 / 还没读」那一格（2026-10-10；契约 `CORE_V1_READ_RECEIPT.md` §2）----
   //
-  // 这一格是**投影**：服务端在 `direct` 房那一行给 `peer_read`，客户端原样搬到会话页
-  // 头部（「在不在 / 正在写」那一片）。判据两条：
+  // 这一格是**投影**：服务端在 `direct` 房那一行给 `peer_read`，客户端把它挂在
+  // **我最后一条气泡下面**（2026-10-20 主人真机点名后从头部挪下来——头部那三行里
+  // 「在线」说的是对方，「已读」说的是"我这条消息的结局"，主语混在一格里）。判据两条：
   //
-  // ① `direct` 房、**我在里面说过话** ⇒ 头部出现「对方未读 / 对方已读」；
+  // ① `direct` 房、**我在里面说过话** ⇒ 我最后那条气泡下出现「还没读 / 读到这儿」；
   // ② **不出现**也是判据：群房里那两个词**一个都不许有**（"没有答案"与"答案是未读"
   //    必须分得开——缺省不当零）。
   //
@@ -1700,12 +1701,12 @@ try {
     .catch(() => null)
   const myId = meProbe?.participant?.id ?? meProbe?.id ?? null
   // ⚠ 判据落在**那一格自己**上（`data-peer-read` 钩子），**不拿整页正文做正则**：
-  //    2026-10-10 实测踩到——探针自己发的那条消息正文里就含"对方已读/未读"两个词，
+  //    2026-10-10 实测踩到——探针自己发的那条消息正文里就含那一格当时的两个词，
   //    于是左栏预览把它带进了群房那一页，两条断言**同时**变成假绿/假红。
   const peerReadCell = page.locator('[data-peer-read]')
   if (!openedEntry || openedEntry.room.kind !== 'direct' || !myId) {
     check(
-      '★ 对方已读/未读那一格：这一轮没验（打开的不是 direct 房，或读不到我是谁）',
+      '★ 读到这儿/还没读那一格：这一轮没验（打开的不是 direct 房，或读不到我是谁）',
       null,
       `房=${openedRoomId || '(没进房间)'} kind=${openedEntry?.room?.kind ?? '读不到'}`,
     )
@@ -1756,9 +1757,9 @@ try {
       : []
     const peerActive = peerPeriods.some((m) => m.left_at === null || m.left_at === undefined)
     check(
-      '★ direct 房里、我说过话 ⇒ 头部出现那一格（服务端给、客户端原样渲染；文案与取值一致）',
+      '★ direct 房里、我说过话 ⇒ **我最后那条气泡下**出现那一格（服务端给、客户端原样渲染；文案与取值一致）',
       cellCount === 1 && (cellValue === 'read' || cellValue === 'unread') &&
-        cellText === (cellValue === 'read' ? '对方已读' : '对方未读'),
+        cellText === (cellValue === 'read' ? '读到这儿' : '还没读'),
       `那一格=${cellCount} 取值=${cellValue ?? '无'} 文案=${JSON.stringify(cellText)} · ` +
         `服务端这一行给的 peer_read=${JSON.stringify(openedEntry.peer_read ?? null)} · ` +
         `发消息=${sendStatus ?? '（房里本来就有我说的话，没发）'} · 房里消息=${afterCount} 其中我的=${mineAfter} · ` +
@@ -1775,7 +1776,7 @@ try {
     //
     // 上面那半证明"服务端给了、客户端渲染了"；这一半证明**它跟着读位置动**：
     // 用那支 Agent 的 BackendAuth 凭据推进它的读游标（`PUT …/read-cursor`，切片 M1 的既有端点），
-    // 等这一页那支 5 秒定时器拉一次 ⇒ 那一格必须从 `unread` 变成 `read`、文案变「对方已读」。
+    // 等这一页那支 5 秒定时器拉一次 ⇒ 那一格必须从 `unread` 变成 `read`、文案变「读到这儿」。
     //
     // ⚠ **必须进夹具那间房**（`CELIRA_PROBE_DIRECT_ROOM_ID`）：凭据属于夹具那支 Agent，
     //    而"打开的第一行"可能是**别的房**（它的对端是另一支 Agent）⇒ 推进读游标会 404（实测踩过）。
@@ -1836,8 +1837,8 @@ try {
         afterCount2 > 0 ? await peerReadCell.first().getAttribute('data-peer-read') : null
       const afterText2 = afterCount2 > 0 ? await peerReadCell.first().innerText() : ''
       check(
-        '★ 对方真读了 ⇒ 那一格当场变「已读」（那一格跟着读位置动，且定时拉取真的在拉）',
-        afterValue === 'read' && afterText2 === '对方已读',
+        '★ 对方真读了 ⇒ 那一格当场变「读到这儿」（那一格跟着读位置动，且定时拉取真的在拉）',
+        afterValue === 'read' && afterText2 === '读到这儿',
         `推进读游标=${advanced}（推的是 ${lastMine ? lastMine.id : '无'}）· 推前=${beforeCell ?? '无'} · ` +
           `那一格=${afterCount2} 取值=${afterValue ?? '无'} 文案=${JSON.stringify(afterText2)}`,
       )

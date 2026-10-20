@@ -107,25 +107,11 @@ export function ChatHeader({
             {typingNames.join('、')} 正在写…
           </div>
         )}
-        {/* 「对方读没读我最后那条」（契约 `CORE_V1_READ_RECEIPT.md` §2）。
-            **只在问题成立时出现**：房不是 `direct`、对方当前不是这间房的 active
-            成员、或我在这间房还没说过话 ⇒ 服务端不给这一格，这里也不渲染
-            （"没有答案"与"答案是未读"必须分得开）。
-            ⚠ 文案说的是**读位置**，不是"对方看到了"——读到是位置，看到是判断。
-            ⚠ 它是**拉取式**读数（与"在不在 / 正在写"同处、同节奏）：对方读这件事
-            不产生事件，所以那一格靠定时拉取更新，最多晚一个刷新周期。 */}
-        {room.peerRead && (
-          // `data-peer-read` 是**给真机门禁的稳定钩子**（`client/scripts/verify-ui.mjs`）：
-          // 判据要落在**这一格自己**上，不能拿整页正文去正则——那条路会被别处的
-          // 同名文字（左栏预览、聊天记录）污染成假绿（2026-10-10 实测踩到）。
-          <div
-            data-peer-read={room.peerRead}
-            className="truncate text-caption text-muted-foreground"
-            role="status"
-          >
-            {room.peerRead === 'read' ? '对方已读' : '对方未读'}
-          </div>
-        )}
+        {/* ⚠ 「对方读没读我最后那条」（`peer_read`，契约 `CORE_V1_READ_RECEIPT.md` §2）
+            **不在这一格**（2026-10-20 主人真机点名后挪走）：那一格说的是"我这条消息
+            有没有被接住"，主语是**我发的消息**，不是对方的状态 ⇒ 它挂在**我最后一条
+            气泡下面**（`MessageBubble` 的 `peerRead`，由 `ChatPage` 的
+            `myLastMessageId` 精确选中）。这里只留**对方的两件事**：在不在、正在写。 */}
       </button>
       <div className="ml-auto flex items-center gap-3">
         <div className="hidden -space-x-2 sm:flex">

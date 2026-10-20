@@ -578,6 +578,27 @@ export function ChatPage() {
   }, [visibleMessages, unreadAnchorId])
 
   /**
+   * **我在这间房说的最后一条**（——「对方读到这儿」只挂在这一条上）。
+   *
+   * 为什么是"最后一条"而不是"每一条"：服务端那格是**房间级的一个布尔**
+   * （`peer_read`，契约 `CORE_V1_READ_RECEIPT.md` §2），判据 = 对方的读位置
+   * 是否过了**我最后那条**。给每条气泡都带 ✓✓ 就是"逐条回执"——契约明文不做，
+   * 那是另一格事实，不是这里能派生的（我们只有位置，没有逐条确认）。
+   *
+   * ⚠ 即使后面还有对方的消息，这一格**仍然留在我最后那条上**（像 WhatsApp 的
+   * ✓✓：对方回了也不会消失）。
+   */
+  const myLastMessageId = useMemo(() => {
+    const selfId = me?.participant?.id
+    if (!selfId) return null
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const m = rows[i].message
+      if (!m.system && m.authorId === selfId) return m.id
+    }
+    return null
+  }, [rows, me?.participant?.id])
+
+  /**
    * ★ **滚到顶 ⇒ 自动读更早的**（主流形状：没有按钮，顶部一个转圈）。
    *
    * ⚠⚠ **2026-10-16 实测：这条曾经从未生效**（专测探针量到"滚到顶 0 次翻页请求、
@@ -990,6 +1011,13 @@ export function ChatPage() {
                                 resolveReplyTarget={resolveReplyTarget}
                                 onLoadReplyTarget={onLoadReplyTarget}
                                 highlighted={row.message.id === flashId}
+                                // 「对方读到这儿」只挂在**我最后一条**上（房间级投影，
+                                // 不是逐条回执）；其它行 `undefined` ⇒ 那一格不出现。
+                                peerRead={
+                                  row.message.id === myLastMessageId
+                                    ? activeRoom?.peerRead
+                                    : undefined
+                                }
                               />
                             )}
                           </div>
