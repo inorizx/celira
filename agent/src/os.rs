@@ -323,8 +323,24 @@ impl std::fmt::Debug for MinimalOs {
 /// 会分岔（首屏会说「还没打开」，而它其实是开着的）。展开之后新出现的动作仍由**展开回执**自带
 /// （既有行为，不另做机制）。
 ///
+/// ⚠ **"常开"与"零能力"可以同时成立**：装配期**允许**这种形状（"装配期拒绝常开零能力"
+/// 那条提案已撤回），所以上面那个分岔不是纸面上的——它真实可达，不能靠"装配期不许这么装"绕过去。
+///
+/// ⚠ 这一格**不是**第二个「在场」判据：它就是唯一那条（[`MinimalOs::is_preinstalled`]）在"还没有任何
+/// 展开"那一刻的取值，因此判据本身不动、展开状态也不动。
+///
 /// ⚠ 上面那个前提（**目录只在首轮渲染**）有一条守卫钉着：
-/// `tests/minimal_agent.rs::the_action_directory_is_rendered_only_on_the_opening_turn`。
+/// `tests/minimal_agent.rs::the_action_directory_is_rendered_only_on_the_opening_turn`——`action_directory_batch`
+/// 只许有**一处定义 ＋ 一处调用**，且那一处必须在 `is_opening_turn()` 为真的分支里
+/// （证伪过：在别的轮次再加一处调用 ⇒ 当场红，实得 3 处 vs 期望 2 处）。
+///
+/// 证明（**行为**，不只是源码形状）：
+/// `tests/status_bar.rs::the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on_the_board`
+/// ——预装的门列全它声明的动词、未展开的门门后只有一句提示。把 `preinstalled` 一律算成 `false`，
+/// 那一条当场红。
+///
+/// ⚠ **如实登记**：那条守卫是**形状判据**，它**量不到**"换了形状之后这句提示还算得对不对"——它红只
+/// 说明这个前提变了，要换的是判据（活的展开状态），不是断言。
 pub struct AppDoor {
     /// App 标识（`open_app` 的 target）。
     pub id: String,
@@ -408,6 +424,9 @@ impl MinimalOs {
     /// "我是预装的"（那是把装配决定写进被装配者）。
     /// 声明一个没装配的标识会被装配期拒绝（[`AssemblyFailure::UnknownPreinstalledApp`]）：
     /// 静默忽略等于"声明了一件不存在的事"。
+    ///
+    /// ⚠ 反向**不**检查：一个**常开却零能力**的 App 是**允许**的装配形状（"装配期拒绝它"那条提案
+    /// 已撤回）。所以门后那句「还没打开」的分岔是真实可达的，见 [`AppDoor`] 的文档。
     pub fn assemble_preinstalled(
         apps: Vec<Box<dyn AppPort>>,
         preinstalled: &[&str],

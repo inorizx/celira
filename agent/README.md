@@ -36,11 +36,11 @@
 | `src/composition.rs` | 一次性入口 `run_activity_in_environment`（含**执行准入**、资料根隔离与失败处置）、**同进程会话** `RunSession`（装配一次、驱动多次，持有 `RunExpansion` 一个自有值）；显式构造只读文件视图、Core 与提交适配；**会话的上下文来源是一条处境委托链**（`SituationChain`：由外到内十一层，见 §3.15 的「合成形状」一条——两处批次都递交，宿主输入与状态行并存），时间来源由装配声明 `clock` 给出（见 §3.15）；**起源**同样由装配声明给出：`RunSession::open` 只是委托（用 `RunOrigin::manual()`，既有调用点一行不改），`RunSession::open_declared` 让调用方给出（门铃 Run 用门铃那句，见 §3.18）。⚠ **2026-09-26 改**：`RunSession::resume` + ~~`ResumeRequest`~~（跨进程恢复会话）与 `RunSession` 的 `pending` 字段（未决效果集合）都已退役 |
 | `src/recovery.rs` | **只读判定**：从已确认经历与事实推导五类互斥状态（`unfinished` / `ended` / `blocked` / `unknown` / `refused`），返回 `RunState`。⚠ **2026-09-26 改**：它从前是**跨进程恢复的受理判据**（交回"可继续所需的原料"、两条受理入口 ~~`into_resumable` / `into_constrained_resume`、`is_continuable()`~~、`celira-agent-recovery v1` 报告），那条路整条退役 ⇒ 原料、受理入口与报告一起删除；**判定本身留下**，因为它有真实消费者 `agent_host_status`，而语义从"能不能继续"改成**读数**（`resumable-waiting` → `unfinished`）。不写任何东西、不调用模型、不新建 Run |
 | `src/resident_lifetime.rs` | **一支住户的进程寿命**（2026-10-11 主人裁决「她起的东西活得跟住户一样久」）：把住户进程放进一个 OS 级的域，它拉起的一切**随它一起结束** ⇒ **收口就是"住户结束"这件事本身**——不需要账、不需要动词、不需要谁的记性。⚠ **射程（2026-10-11 门禁第一跑改的口径）**：管的是**住户自己拉起的一切（后代）**；由**第三方代它拉起**的（WMI/CIM `Win32_Process.Create`、计划任务、服务）**不在域内**——真机读数 `parent=WmiPrvSE.exe(4160)`、`down` 之后照旧在听 ⇒ 那要另一类收容（受限令牌 / 独立身份 / 服务级），本刀不做、如实登记。**Windows 臂**用 Job Object（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`；句柄**故意不关**：进程一结束系统关掉最后一个句柄、整组一起走）；**别的平台如实报 `not-contained:no-arm`**，不写近似兜底（同一条承诺不许在不同平台上变成两句不同的话）。建不起来时**不拦启动**（那是寿命保证、不是安全墙），但宿主必须打一行 `[resident] processes = …`。立这一格的真机读数：主体起的服务 `parent=(父进程已不在)`，而关家之后那个端口**还在听**。判错用例在 `tests/resident_lifetime.rs`（独立进程证据 ＋ **负对照**：不收容时后代必须活着）；端到端那一半在 `scripts/home/probe-service-lifetime.js`（真世界、真宿主：她真起了它，而家一关它就得没） |
-| `src/store/format.rs` | **格式与校验和**（2026-10-08 第四刀从 `store.rs` 拆出；**盘上格式一个字节没动**）：盘上一行就是**一个 JSON 对象 + 换行**外加行尾一枚校验和、一串记录靠**链值**串起来。**形状**（`TraceRecord` / `TracePayload` / `FactRow` / `RunSummary` / `TracePage` / `WakeOrigin`）· **编码/解码**（认不出的取值**明确拒绝**，不就近猜）· **校验和链**（`line_sum` / `chain_checksum` / `verified_line`——正文逐字节可核）· **写前的封闭表** `checked_failure_class`（模型失败分类在落盘之前过一遍词表，是"持久字段上的词表一律 fail-closed"缺的另一半）。⚠ **它是四块里唯一不碰文件系统的**（纯字符串工作），但 `serde_json` 照旧**显式列入**。这一刀之后 `store.rs` 只剩**自述 ＋ 错误词表 ＋ 接线** |
+| `src/store/format.rs` | **格式与校验和**（2026-10-08 第四刀从 `store.rs` 拆出；**盘上格式一个字节没动**）：盘上一行就是**一个 JSON 对象 + 换行**外加行尾一枚校验和、一串记录靠**链值**串起来。**形状**（`TraceRecord` / `TracePayload` / `FactRow` / `RunSummary` / `TracePage` / `WakeOrigin`）· **编码/解码**（认不出的取值**明确拒绝**，不就近猜）· **校验和链**（`line_sum` / `chain_checksum`——正文逐字节可核）· **写前的封闭表** `checked_failure_class`（模型失败分类在落盘之前过一遍词表，是"持久字段上的词表一律 fail-closed"缺的另一半）。⚠ **它是四块里唯一不碰文件系统的**（纯字符串工作），但 `serde_json` 照旧**显式列入**。这一刀之后 `store.rs` 只剩**自述 ＋ 错误词表 ＋ 接线** |
 | `src/store/environment.rs` | **身份与准入**（2026-10-08 第三刀从 `store.rs` 拆出；**盘上格式一个字节没动**）：**这是谁的环境**（身份记录的读写与归属校验——不静默新建、不重置数据；`create` 拒绝在"身份不在、历史却在"的位置上创建，**一个字节都不动**）· **现在谁在写**（操作系统级排他写资格：`try_lock` 的两支**穷尽**——`WouldBlock` ⇒ 等，真故障 ⇒ `Io`）· **准入与健康**（`Admission` / `EnvironmentHealth` / `CrossStoreIssue` 跨存储矛盾如实报告 / `OpeningReadings` 开场读数一次解析）· **事实视图** `FactView`。公开面仍留在 `crate::store::` 下 ⇒ 消费方一处未改。⚠ 文件系统与 `serde_json` 同款**各自显式列入** |
 | `src/store/projection.rs` | **记录 ↔ 轨迹**（2026-10-08 第二刀从 `store.rs` 拆出；**盘上格式一个字节没动**）：**写**方向 `*_payload`（轨迹条目 → 盘上一行）· **读**方向 `rehydrate` / `outcome_of`（盘上一行 → 轨迹条目，认不出即明确拒绝、不猜）· 四个**标签**（`subject_label` / `system_label` / `outcome_label` / `ending_label`——词表与形状的权威就在盘上那张封闭表旁边）· **按活动读回**（`list_runs` / `list_runs_at` / `read_run_at`）。公开面仍留在 `crate::store::` 下 ⇒ 消费方一处未改。⚠ 文件系统与 `serde_json` 同款**各自显式列入** |
-| `src/store/parts.rs` | **分卷与索引**（2026-10-08 从 `store.rs` 拆出；**盘上格式一个字节没动**）：封口的段（`SealedPart` / `SealedFactPart`）、一张目录（`<卷名>.idx` / `parts.idx`）、每卷一份**卷内偏移索引**（按**活动**记字节边界——读一段旧活动 **48 ms → 3–5 ms**，四个规模上是平的）、事实侧同一套形状，以及"整份读回"那个入口 `read_trace_at`。拆的判据是「**谁在哪个文件里实现这套格式**」，不是"格式不好"；公开面仍留在 `crate::store::` 下（父模块 `pub use parts::*`）⇒ **消费方一处未改**。⚠ 它照旧受同一批封闭名单约束：文件系统与 `serde_json` **各自显式列入**（见 `tests/minimal_agent.rs`） |
-| `src/store.rs` | 身份环境目录、文件锁、Trace/Fact 两份追加存储、准入读数、封存约束与只读状态视图；顶层种类 `model-response` 与其封闭词汇表校验；**经历再水化** `rehydrate`（已确认经历 → Core 轨迹条目，三态返回）与收场解码 `outcome_of`；**`create` 拒绝在"身份不在、历史却在"的位置上创建**（`history-without-identity`，**一个字节都不动**——同一个损坏形状 `open` 是拒绝、`create` 从前是销毁，2026-10-06 收；判据只覆盖它自己的写集：两份存储）；**收场显示文本只有一处拼法**（`outcome_label` / `subject_label` / `system_label` / `ending_label`——词表与形状的权威就在盘上那张封闭表旁边，四个显示区各自的那一份已删，2026-10-06 收，见 §3.16）；**开场读数一次解析**（`OpeningReadings`：准入 ＋ `StorageFailure` 历史上最后一次存储故障——两格走同一份已确认前缀；真机那份账本读到过 11.3 秒，各读一遍就是白读一遍。`StorageFailure` 的判据：确认**不重写原因**，"被看过"是另一格）；不是完整恢复引擎；**每条记录带行尾校验和并串成一条链**（CRC-32 链，2026-10-06 加：正文逐字节可核，`checksum-mismatch` 是一类可判定的损坏；旧记录没有校验和、只进链，见 §3.3） |
+| `src/store/parts.rs` | **分卷与索引**（2026-10-08 从 `store.rs` 拆出；**盘上格式一个字节没动**）：封口的段（`SealedPart` / `SealedFactPart`）、目录 `trace.parts.idx`（每卷两行）、每卷一份**卷内偏移索引**（`<卷名>.ndjson.idx`，按**活动**记字节边界）、事实侧同一套形状（`facts.parts/` ＋ `facts.parts.idx`，**没有**偏移索引），以及"整份读回"那个入口 `read_trace_at`。拆的判据是「**谁在哪个文件里实现这套格式**」，不是"格式不好"；公开面仍留在 `crate::store::` 下（父模块 `pub use parts::*`）⇒ **消费方一处未改**。⚠ 它照旧受同一批封闭名单约束：文件系统与 `serde_json` **各自显式列入**（见 `tests/minimal_agent.rs`；**项数以那份测试为准，这里不复述**） |
+| `src/store.rs` | **门面 ＋ 仍然住在这里的四件事**：身份环境目录、文件锁、Trace/Fact 两份追加存储、准入读数、封存约束与只读状态视图；**`create` 拒绝在"身份不在、历史却在"的位置上创建**（`history-without-identity`，**一个字节都不动**——同一个损坏形状 `open` 是拒绝、`create` 从前是销毁；判据只覆盖它自己的写集：两份存储）；**开场读数一次解析**（`OpeningReadings`：准入 ＋ 历史上最后一次存储故障——两格走同一份已确认前缀；那份账本真机读到过 11.3 秒，各读一遍就是白读一遍）；不是完整恢复引擎。⚠ **四件事搬走了**：`rehydrate` / `outcome_of` / 四个显示标签 → `store/projection.rs`（§3.41）、行尾校验和与链 → `store/format.rs`（§3.43）、分卷与索引 → `store/parts.rs`（§3.40）——仍能从 `crate::store::` 下按名字取到，但**归属不在本文件** |
 | `src/commit.rs` | `EnvironmentCommit` 将中立提交接缝翻译为环境追加；存储错误映射为带阶段的 CommitError |
 | `src/diagnostics.rs` | 只读诊断：把一个活动已确认的事实行用 `store::records_of_run` 重建成 Foundation 事实、交既有单活动解释器，并把**操作解释**与**存储状态**分成两个来源报告；只接受 `&Environment`，不恢复、不重放、不解除暂停。**不渲染模型响应正文，也不接触协议载荷** |
 | `src/notes_app.rs` | **第二个真实 App**，TASK_31 起是**预装常开的字载体**（TASK_33 起还能**贴**）：自己的一对动词 `notes_pin` / `notes_unpin`（把纸条贴到墙上 / 摘下来——只动 `pinned` 标记，内容一字不动；幂等；共用复核 `notes_verify_pinned`）；自己的存储（`<环境根>/notes/<id>.note`）、自己的身份（`note-<n>`）、自己的动作（`notes_create`/`notes_list`/`notes_read`/`notes_verify_note`，以及 TASK_76 的 `notes_delete` / 它的复核 `notes_verify_deleted`——**删就是除名、没有回收站**；**查无此条 ⇒ 明确拒绝**并指路 `notes_list`，不装成功；贴着的那条也照删；复核三分：不在了 ⇒ 成功、还在 ⇒ `still-present`、读不出来 ⇒ 无法确认）与自己的失败词汇；**写自己的笔记不需要任何授权**（自持物，2026-09-12 字裁决；跨边界写才要 Grant，见 §3.21）；`notes_create` 的类别是 `repeatable-write`（抢的是编号而不是内容），因此它的复核**无法归因**到那一次操作；只通过同一份窄契约接入，不认识文件 App，也不被 Core 认识 |
@@ -1099,26 +1099,27 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
 
 ### 3.40 `store/parts.rs`：分卷与索引
 
-**只做一件事：换「谁在哪个文件里实现这套格式」。盘上格式一个字节没动、行为零变化**——
-判据是**全树 770 条用例一条没加、一条没改，读数与上一刀逐字相同**（这就是"只搬不改"的证据）。
+**一句话**：`store.rs` 拆出来的三块——**分卷 · 卷内索引 · 事实侧分卷**（拆的判据是「**谁**在哪个文件里
+实现这套格式」，不是"格式不好"⇒**只搬不改**，盘上格式一个字节没动）：活动段写满就封口进 `trace.parts/`，
+目录 `trace.parts.idx`（每卷两行）＋ 每卷一份**卷内偏移索引**（`<卷名>.idx`，按活动记字节区间与区间起点的
+链值），事实侧同一套形状（`facts.parts/` ＋ `facts.parts.idx`，**没有**偏移索引），加上"整份读回"的
+`read_trace_at`。**关键不变量**：**卷是权威，目录与卷内索引都是派生的**——对得上就只读目录 ＋ 活动段、
+**不重读旧卷**，对不上就重读卷重建（不猜、也不读成"环境坏了"）；**封口段永不再写**。
 
-**为什么拆**：`store.rs` 是全树唯一的上帝文件（**5576 行 / 5 种职责 / 被 22–23 次提交碰过**），
-而它内部**本来就有五个分区**：编码解码 · 校验和链 · 分卷 · 卷内索引 · 事实侧分卷。
+**权威位置（本节不再重复它们的内容）**：
 
-**这一刀搬走最独立的那一段**：封口的段（`SealedPart` / `SealedFactPart`）、一张目录
-（`<卷名>.idx` / `parts.idx`）、每卷一份**卷内偏移索引**（按活动记字节边界）、事实侧同一套形状，
-以及"整份读回"入口 `read_trace_at` ⇒ `store/parts.rs`。
+- **盘上布局 · 重建与写回 · 封口那一拍的归属 · 可见性边界 · 两份封闭名单** →
+  [`store/parts.rs`](src/store/parts.rs) 的 `//!`
+- **证明**：封口 · 目录重建 · 索引半行与链值 · 老形状来回读 · 事实侧 →
+  [`tests/durable_environment.rs`](tests/durable_environment.rs)；读数不随历史增长（`#[ignore]`，
+  **手动跑**）→ [`tests/durability_reading.rs`](tests/durability_reading.rs)
+- **"这文件是什么"的一行** → §2（新模块必须在 §2 有一行，守卫在 [`tests/doc_facts.rs`](tests/doc_facts.rs)）；
+  **拆完之后的四份形状** → §3.43
 
-**公开面原样不动**：父模块 `pub use parts::*;` ⇒ **消费方一处未改**（`git status` 为证：改动只有
-`store.rs` / 新文件 / 两条封闭名单 / §2 一行）。父模块仍在调用的那些私有件按**最小可见性**放开
-（`pub(super)`），**没有一个变成 `pub`**。
-
-**两条封闭名单必须一起改**（都由守卫当场报出来，不是我想起来的）：
-`FILE_SYSTEM_SOURCES` 13 → **14**、`SERDE_JSON_SOURCES` 14 → **15**——新文件照旧读目录、读卷、
-写索引、用 NDJSON，按同一份纪律**显式列入**：**拆文件不是"让文件系统 API 随处可用"**。
-另加 `doc_facts` 要的 §2 一行（"新增模块要被人看见"）。
-
-**剩下两块**（各是一刀，都还没动）：身份与准入 · **格式与校验和**（所有东西都依赖它 ⇒ **放最后**）。
+⚠ **如实登记的边界**：事实侧**今天没有**卷内偏移索引（`read_run_facts` 全仓没有调用点）⇒ **按活动读事实
+没有快路**（整份读再筛）；重建路径**会写盘**，所以"只读"的路在派生文件坏掉时会写一次。
+⚠ **待裁**：两份目录遇到"中间一行读不出来"不同形——经历目录重读卷重建，事实目录报 `MalformedEntry`
+拒绝打开（派生文件能锁死主体的记忆，与模块不变量相反；需裁"事实侧也该重建"还是"拒绝是有意的"）。
 
 ### 3.41b `store/environment.rs`：身份与准入
 
@@ -1149,76 +1150,74 @@ app  ──交素材（HoldingRow / PinnedRow）──▶  显示区
 
 ### 3.41 `store/projection.rs`：读回与投影
 
-**同款判据**：换「谁在哪个文件里实现这套搬运」，**盘上格式一个字节没动、行为零变化**——
-读数与上一刀**逐字相同**（770 / 0 / 3 / 60），**消费方一处未改**（`git status` 为证）。
+**一句话**：Core 的轨迹条目与盘上那一行之间的**唯一搬运**（写 `*_payload`、读 `rehydrate` /
+`outcome_of`、四个标签、按活动读回）——**认不出就明确拒绝，不猜、不补默认值**。
 
-**搬走的是哪一段**：从 `payload_of` 到 `read_run_at` 的**连续 909 行**——它在原文件里
-**是一段没有标题的分区**（夹在"校验和链"与"分卷"之间），这一刀顺手给了它一个名字：
-**记录 ↔ 轨迹**（写方向 `*_payload` · 读方向 `rehydrate` / `outcome_of` · 四个标签 · 按活动读回）。
+**权威位置（本节不再重复它们的内容）**：
 
-**两条封闭名单 + §2 一行**：`FILE_SYSTEM_SOURCES` 14 → **15**、`SERDE_JSON_SOURCES` 15 → **16**，
-照旧由守卫报出（`store/projection.rs` 碰了 `["fs::", "File::"]`、出现了 26 处 `json`）。
+- **这一段的范围、三条判据、编辑它的接线纪律（glob 循环那个坑）** →
+  [`store/projection.rs`](src/store/projection.rs) 的 `//!`
+- **读侧为什么按判别式解码、`failure` 带随单读数那一格** → 同文件的 `outcome_of_observation` 与 `rehydrate`
+- **显示词表（`subject:` / `system:` 前缀）与收场解码** → 同文件的 `subject_label` / `subject_str` / `outcome_of`
+- **盘上格式、分卷、身份与准入** → [`store/format.rs`](src/store/format.rs) /
+  [`store/parts.rs`](src/store/parts.rs) / [`store/environment.rs`](src/store/environment.rs)
+  ——**本文件只搬运，不定义格式**
+- **封闭名单**（`FILE_SYSTEM_SOURCES` / `SERDE_JSON_SOURCES`）→ [`tests/minimal_agent.rs`](tests/minimal_agent.rs)
+  的两张表；**条目数这里不复述**（那三个数字是切时读数，唯一的权威是那两张表）
+- **证明** → 同文件的 `mod tests`（往返 / 材料不进账本 / 读不懂仍 fail-closed）＋
+  [`tests/recovery.rs`](tests/recovery.rs) 的 `shapes_this_writer_cannot_produce_are_refused_with_a_distinguishable_reason`、
+  `every_known_ending_decodes_and_unknown_ones_do_not` ＋ [`tests/durable_environment.rs`](tests/durable_environment.rs)
+  的 `reading_one_activity_reads_only_its_bytes_so_damage_elsewhere_does_not_block_it`
 
-⚠ **踩到一个真坑，记下来**（判据级的）：两个子模块都 `use super::*`、父模块又 `pub use 子::*`
-⇒ **glob 循环**。`cargo build` 过，但 `cargo test` **不过**（`cfg(test)` 下父模块解析不到子模块的
-名字，`E0425`）。⇒ **父模块对自己要用到的名字改成显式 `use`，不靠 glob**；两个 `pub use 子::*`
-只负责**公开面**。同一坑还有第二个形状：显式 `use` 里再写一遍 `pub` 的 `SealedPart` 会
-**shadow 公开 glob**（`-D warnings` 下是错误）⇒ 那两个名字从显式列表里去掉。
-
-⚠ **另一处如实登记**：这一刀的计算切点把 `mod parts;` 声明**误删**过一次（它在被切范围里、
-却不在两端）——**编译器当场抓住**（`unresolved import parts`），已补回。
+⚠ **如实登记**：那一刀自己的读数、切走的连续行数、两张封闭名单各 +1、计算切点把 `mod parts;` 误删过一次
+（编译器当场抓住、已补回）——全是**那一刀的经过**，归 Git；本节只留判据「拆分不换盘上格式、不换行为」。
 
 ### 3.43 `store/format.rs`：格式与校验和
 
-**同款判据**：**盘上格式一个字节没动、行为零变化**——读数与前三刀**逐字相同**（770 / 0 / 3 / 60），
-**消费方一处未改**。搬走的是从 `TraceRecord` 到 `is_action_fact` 的**连续 1433 行**：盘上那几类
-记录的形状 · 编码/解码 · **CRC-32 链** · 写前那道封闭表 `checked_failure_class`。
+**一句话**：盘上一行 ＝ **一个 JSON 对象 ＋ 行尾一枚 CRC-32 校验和**，一串记录靠**链值**串起来；形状 ·
+编码/解码 · 链 · 写前那道封闭表都在这一块，而它是 `store.rs` 拆出的四块里**唯一不碰文件系统**的一块
+——**盘上格式一个字节没动**（只换「谁在哪个文件里实现它」，用例一条没加、一条没改）。
 
-**四刀之后的形状**（`store.rs` 从 **5576 行**变成 **265 行**）：
+**权威位置（本节不再重复它们的内容）**：
 
-| 文件 | 行数 | 是什么 |
-|---|---|---|
-| `store.rs` | **265** | **门面**：模块自述（那四个问题 ＋ 承诺与不承诺）· 错误词表 `StoreError` · 四个子模块的接线 |
-| `store/environment.rs` | 2072 | 身份与准入 |
-| `store/format.rs` | 1448 | 格式与校验和 |
-| `store/parts.rs` | 988 | 分卷与索引 |
-| `store/projection.rs` | 923 | 记录 ↔ 轨迹 |
+- **形状、编码/解码、`checked_failure_class`、射程（能证明什么、不能证明什么）、旧记录读不读得回来** →
+  [`store/format.rs`](src/store/format.rs) 的 `//!`；**折链核验与读路径（哪一段折链、哪一段不折）** →
+  [`store/environment.rs`](src/store/environment.rs) 的 `verified_line` / `decode_trace_line`
+- **证明** → [`tests/durable_environment.rs`](tests/durable_environment.rs) 的
+  `a_flipped_byte_inside_a_recorded_text_is_caught` /
+  `a_ledger_written_before_checksums_still_opens_and_keeps_growing` /
+  `the_chain_protects_records_that_have_no_checksum_of_their_own`
 
-**封闭名单**：`SERDE_JSON_SOURCES` 17 → **18**（`store/format.rs` 编解码 NDJSON）。
-⚠ **`FILE_SYSTEM_SOURCES` 这一刀不用改**——格式块是四块里**唯一不碰文件系统的**（纯字符串工作），
-守卫也没报它 ⇒ **"哪一块碰了什么"第一次变得可读**。
+⚠ **如实登记**：① **名单项数与行数都是当时的快照**（本节从前写着 `SERDE_JSON_SOURCES` 的增量与四块的
+行数），一律不再保留——名单以 `tests/minimal_agent.rs` 那两张表为准、**行数不进文档**、四块的分工归 Git；
+② **校验和不是封印**（CRC-32 无密钥 ⇒ 它是"一致性"读数，不是"没人改过"的证明）；③ **前向不兼容**：
+旧构建读新账本会**拒绝打开**（别把旧二进制对着新账本跑），见 §3.3。
 
 ### 3.44 门后那句提示由「在场」决定
 
-**症状**：同一件事有两个判据 —— `RunScope::is_open`（`is_preinstalled || is_expanded`，文档声明的唯一判据）
-与首轮那张「门」清单里的 **`listed == 0`**（"它的动词一个都没出现在能力面里"就印「还没打开」）。
-两者在一个形状上会分岔：**常开却零能力**的 App ⇒ 首屏会说「还没打开」，**而它其实是开着的**。
+**一句话**：动作目录里门后那句「还没打开」只看**这扇门此刻在不在场**（`AppDoor::preinstalled`——装配期
+事实，派生自 `os.rs` 那份预装集合，不是另抄一份），**不看它的动词列出来了几条**："一条都没列出来"与
+"没打开"是**两件事**——常开却零能力的 App 也一条都列不出来，但它明明是开着的。这一格**不是第二个
+判据**：它就是唯一那条（`is_preinstalled || is_expanded`）在"目录只在首轮渲染、此刻还没有任何展开"
+那一刻的取值。
 
-**根因**：投影手上**没有**"在不在场"这个事实，于是它用"能不能列出动词"去**反推**——而那是另一件事。
+**权威位置（本节不再重复它们的内容）**：
 
-**修法（读完原文之后，形状比预想的小得多）**：目录**只在首轮**渲染（`is_opening_turn`），那一刻
-`expansion.is_expanded` 是空集 ⇒ **`is_open(app)` 恰好等于 `is_preinstalled(app)`**，而 `preinstalled`
-是**装配期事实**、`MinimalOs::desktop()` 手里就有。于是：
+- **为什么装配期静态事实就够、那条前提、"常开零能力"为什么被允许** → [`os.rs`](src/os.rs) 的 `AppDoor`
+  文档（＋ `assemble_preinstalled` 那条"反向不检查"）；**唯一判据、四处共用**（目录 / 展开答复 /
+  准入 / 分派）→ 同一份文件的 `RunScope::is_open`
+- **投影那一处的判据** → [`composition.rs`](src/composition.rs) 的 `action_directory_batch`：
+  "数出几个动词"的计数器不许回来，这一格也不走 `InjectionContext`
+- **证明（行为）** → [`tests/status_bar.rs`](tests/status_bar.rs) 的
+  `the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on_the_board`
+  （预装的门列全它声明的动词、未展开的门门后只有一句提示；把 `preinstalled` 一律算成 `false` 就当场红）
+- **证明（前提 / 形状）** → [`tests/minimal_agent.rs`](tests/minimal_agent.rs) 的
+  `the_action_directory_is_rendered_only_on_the_opening_turn`：只许一处定义 ＋ 一处调用，且必须在
+  `is_opening_turn()` 为真的那一支
 
-- `AppDoor` 多一格 **`preinstalled`**，值**派生自唯一权威**（`os.rs` 那份预装集合），不是另抄一份；
-- 投影那处判据：`listed == 0` → **`!door.preinstalled`**（`listed` 那个计数器随之删掉）；
-- **前提写在现场**（`AppDoor` 的文档 ＋ 投影那一行注释）："目录只在首轮渲染 ⇒ 此刻开着的 = 常开的那几个"；
-- **一条守卫钉住那条前提**：`tests/minimal_agent.rs::the_action_directory_is_rendered_only_on_the_opening_turn`
-  —— `action_directory_batch` 只许有**一处定义 ＋ 一处调用**，且那一处必须在 `is_opening_turn()` 为真的分支里。
-  有人让目录在别的轮次也渲染（那本身可能是对的）⇒ **当场红**，逼他把判据换成活的展开状态，而不是让首屏开始撒谎。
-
-**负空间**：不动 Core、不动 `InjectionContext`、不动 `is_open` 的判据本身、不动 `os` 的展开状态、
-不动首屏另外 14 块、**不禁止任何装配形状**（"装配期拒绝常开零能力"那条 (乙) 已撤回）。
-
-**证伪两次（都恢复、无残留）**：
-① 把 `preinstalled` 一律算成 `false` ⇒ **既有用例**当场红
-（`the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on_the_board`）
-⇒ **这条判据的行为本来就有测试钉着**，不是只靠源码形状；
-② 让目录在非首轮也渲染 ⇒ **新守卫**当场红（"实得 3 处 —— 新增调用点之前先读 `AppDoor::preinstalled` 的文档"）。
-
-⚠ 过程中踩到一次：守卫最初按**字节窗口**切源码来找上下文 ⇒ **切在多字节汉字中间 panic**（`start byte index 52932 is not a char boundary`）。
-⇒ 改成**按行判**（`text[..at].lines().count()`），并把"定义 vs 调用"用"正前方是不是 `fn`"分开
-（最初误取了**定义**那一处，报出"第 963 行 vs 第 910 行"）。
+⚠ **如实登记（搬不走的）**：① 那条守卫是**形状判据**，它**量不到**"换了形状之后这句提示还算得对不对"
+——它红只说明前提变了，要换的是判据（活的展开状态），不是断言；② **未覆盖**："目录在别的轮次也渲染"
+那种形状今天不存在 ⇒ **零行为证明**，今天不可达。
 
 ### 3.45 来源档：详情卡多一行 `receipt-source`
 
@@ -1242,86 +1241,44 @@ OS 自有六个由 `declare_os_owned` 登记）⇒ 那是 fail-closed 的形状�
 
 ### 3.46 唯一循环：生产里只许 `drive_run` 写轨迹
 
-**症状**：`drive_run` 与 `Run` 的六个轨迹写入口都是 `pub` ⇒ "唯一驱动流程写轨迹"只是**约定**；
-**第二条循环**可以悄悄长出来，而那一刻**账会有第二个写者**。
+**一句话**：`Run` 那六个轨迹写入口**只许 `drive_run` 在生产里调用**——多一个调用者就是**第二条循环**，
+而那一刻账会有第二个写者。这条判据今天**是源码守卫、不是类型**（见下），**不许说成"已由类型保证"**。
 
-**先读原文（门禁第 3 条），核出两件事**：
+**权威位置（本节不再重复它们的内容）**：
 
-1. **生产里只有 `drive_run` 一个调用者**（实测：`core.rs` 的循环；其余全在测试里）；
-2. **`pub` 是测试逼出来的，不是产品需要** —— `provider_adapter.rs` 那些调用在
-   `#[cfg(test)] mod tests`（第 1776 行起，库内用例）；`tests/provider_wire.rs`（约 15 处）与
-   `tests/request_recomputability.rs` 是**集成用例**（独立 crate ⇒ **只能看 `pub`**），
-   而它们要造**驱动循环造不出来的形状**（孤儿操作、切分的操作）⇒ 收成 `pub(crate)` 会打断它们。
+- **判据本身与它的射程**（六个入口、`core.rs` 的 `//!`）→ [`core.rs`](src/core.rs) 的驱动流程与那六个
+  入口的 `///`
+- **守卫与它的细节**（按**括号配对**砍 `#[cfg(test)] mod tests` 整块 ＋ 自检；六个入口每一个都要
+  至少找到一次，**防空跑**；`src/bin/` 下哪些**产品入口**进这条判据的射程，以及"按整片前缀豁免"
+  曾经把产品入口一起免掉的教训）→ [`tests/minimal_agent.rs`](tests/minimal_agent.rs) 的
+  `only_the_one_loop_writes_the_trace` 与 `PRODUCT_ENTRIES`
+- **证伪** → 临时加一条 `a_second_loop` 调 `mark_dispatched` ⇒ 当场红并**点名到文件:行**
 
-⇒ **"优先用可见性"这条路今天走不通**（这是读出来的事实，不是取舍），于是按第二顺位落判据：
-
-**守卫** `tests/minimal_agent.rs::only_the_one_loop_writes_the_trace`：
-
-- 砍掉 `#[cfg(test)] mod tests { … }` **整块**（**按括号配对**，不是"见到第一个 `#[cfg(test)]` 就截断"），
-  并在函数内**自检**"`#[cfg(test)]` 后面必须是 `mod tests`"——若哪天它挂到某个函数上，
-  "砍掉测试"会顺手砍掉生产代码，那时**先改守卫**，别让它悄悄少盖一块；
-- 要求这六个入口的**生产**调用者**只许是 `drive_run`**，多出来的就是第二条循环，**点名到文件:行**；
-- 六个入口**每一个**都必须至少找到一次（**防空跑**：判据自己也得有人看着）。
-
-**证伪**：临时在 `core.rs` 加一条 `a_second_loop` 调 `mark_dispatched` ⇒ **当场红并点名**
-（`core.rs:2672  a_second_loop(…) 调了 .mark_dispatched(…)`）；删除后绿、**无残留**（`git diff` 为空）。
-
-⚠ **如实登记两件事**：
-
-1. 它**不是类型级拦阻** —— 抓的是"第二个**生产调用者**"，不是"编译不过"。所以 §4 那一格的标题
-   从"没有类型级拦阻"改成"**落判据（不是落类型）**"，**不许**说成"已由类型保证"；
-2. **可见性欠账照旧**：真收口要**把手工搭轨迹的集成用例搬进库内**（那样六个方法才收得紧 `pub(crate)`）。
-   那是**另一刀**，而且按判据它**不破面/账/身份任何一件**（**加固**，不是**条件**）⇒ 排在条件类之后。
+⚠ **如实登记两件事**：① 它**不是类型级拦阻**——抓的是"第二个**生产调用者**"，不是"编译不过"；
+② **可见性欠账照旧**：六个入口今天都是 `pub`，而那是**集成用例逼出来的**（独立 crate 只能看 `pub`，
+而它们要造驱动循环造不出来的形状）⇒ 真收口要**把手工搭轨迹的集成用例搬进库内**，那是另一刀，
+且按判据它**不破面/账/身份任何一件**（是**加固**，不是**条件**）。
 
 ### 3.47 「这一段由谁想」：模型那一格
 
-**起因**：主人问"让主体自己给自己换模型是否更难"。核出来的形状是：模型是 **Run 的属性** ——
-换模型的生效点在**下一次装配**（既有纪律"唤醒边界重读"），而"**连续地想**"要求同一段清醒期内
-模型不变（思考续接原文跟着模型走，中途换那条链就断）⇒ **它不是 Run 里的事件，也不是 Run 的
-结束原因**：不需要新终态、不需要动盘上格式。但**主体今天看不到自己在用哪个模型**（状态行只有
-`time` / `turn` / `context` / `since`，身份行是 core id ＋ 世界名；**操作者那侧的横幅早就报模型名**）
-⇒ 要"知道自己换模型了"，缺的正是**主体那一格**。
+**一句话**：机器处境那一行的第 3、4 格 `model` / `reasoning_effort`（**这一段由谁想、想多用力**）——
+与 `platform` / `shell` 同处一行（回答同一个问题：这一段在什么样的执行体里想），**不另立一块、
+不新增处境链层**。**值的唯一权威是"将要发请求的那个对象"（`ModelChoice`），入口不另算一份**；
+**没声明 ⇒ 那一格不出场、不写 `unknown`**（`model` 未声明时那一行仍是两格——"没声明"与"读不出来"是两件事）。
 
-**落点**：`Machine`（机器处境）那一行的**第三格** `· model = <模型名>`。
+**权威位置（本节不再重复它们的内容）**：
 
-- ⚠ **原计划不是这样**（新模块 ＋ 处境链第 12 层），**被守卫当场拦住**：
-  `the_opening_view_chain_has_a_hard_ceiling` 报"处境链已经 12 层，**上限是 11**：要加第 12 层，
-  先删一层（C8）"。⇒ 按 C8 的裁决**改形状**：这一格不是新的一件快照，它就是"执行体"那一行的
-  第三格（平台 / shell / 由谁想，回答同一个问题：**这一段在什么样的执行体里想**）。
-  **新模块与那一层当天撤掉**（`model_line.rs` 已删）。
-- **值从"将要发请求的那个对象"取**：新增 `ModelChoice::model()`（两条 wire 各借它已有的 `model()`）
-  ⇒ 装配入口**不另算一份**，否则"主体读到的那一行"与"真正用的那一个"迟早对不上。
-- **缺省不出场**：没声明模型（不思考的那一档入口、`src/bin` 夹具）⇒ **还是两格**，**不写
-  `unknown`** ——"没声明模型"与"模型名读不出来"是两件事。
-- **进账**：它是 Run 级注入的一部分 ⇒ 随 `run-start` 经历入账 ⇒ "**哪一段经历是哪个模型想的**"
-  **查得出来**（`rehydrate` 读得回，**盘上格式零变更**）。
+- **值从哪来、谁是唯一权威** → [`model_choice.rs`](src/model_choice.rs) 的 `ModelChoice::model` / `ModelChoice::reasoning_effort`
+- **那两格长在哪、缺省怎么退（退回两格）、硬上界十一层** → [`machine.rs`](src/machine.rs) 的 `//!` 与 `Machine::new`
+- **声明是什么、为什么是 Run 的属性、怎么进账（盘上格式零变更）** → [`composition.rs`](src/composition.rs) 的 `SessionDeclarations`
+- **换模型时三格一起换、生效点只在下一次装配** → [`host_loop.rs`](src/host_loop.rs) 的 `declare_model_assembly`
+  （那一档怎么发进请求见 §3.50）
+- **谁改绑定、谁改清单、fail-closed 的代价** → [`model_source.rs`](src/model_source.rs) 的 `//!`
+- **证明** → [`tests/machine.rs`](tests/machine.rs)（声明 / 未声明 / 进账）＋ `machine.rs` 的单元一条（空白不算声明）
 
-**波及面（实测，不是估）**：会话规格多一格 ⇒ **每一处构造点都要补**：生产 3 处（`host_loop` /
-`manual_entry` / `environment_worker` 夹具）＋ 选项结构两处（`HostOptions` / `ManualRun`）＋
-测试 **20** 处（脚本化补齐，`cargo check` 兜底）。⚠ **如实登记**：一个新宿主声明值的代价就是
-这一片机械补字段（Rust 没有"可选字段"的写法），但换来的是**一处权威**（不给默认值、不猜）。
-
-**验证**：`tests/machine.rs` 两条（声明 ⇒ 三格、逐字节等于那个标识符；未声明 ⇒ 两格且不含
-`model`）＋ `machine.rs` 单元一条（第三格可选：空白不算）＋ **证伪**（把装配处的 `model` 断成
-`None` ⇒ 用例当场红并打出开场块清单；恢复后绿、无残留）。门禁：fmt / check / clippy `-D warnings`
-/ `git diff --check` 全 0；**776 / 0 / 3 / 60**。
-
-**负空间**：不动盘上格式、不加动词、不改终态词表、不动 Core / OS / 存储、不碰操作者那侧的横幅、
-**不新增处境链层**。
-
-**登记（未做，按判据排序）**：
-1. **"她自己换模型"还差权限那一半**：清单（机器级：这台机器上有哪些钥匙）**不该由主体写**；
-   绑定（Agent 级）可以论证，但那等于"主体可以给自己换供应商、花别人的钱"⇒ 要动就得先裁；
-   ★ **2026-10-12 主人裁（本条定案：不做专门的手）** —— 她能改，是因为装配给了**整机全权**
-   那条通用路（`--terminal full`），不是因为她有一只专属的动词。原话：「**她自己应该能配置的，
-   因为他有命令行。只要是人能做的，她肯定也能做**」⇒ 归属那一半（绑定归她）**不变**，动作那一半
-   **不新增动词**；"花别人的钱"那条顾虑由**权限档本身**兜着（给不给 `full` 是主人的决定，
-   而且它已经盘过是**可恢复的坑、不是死锁**，见 §3.70 那一行）；清单那一半照旧**不由主体写**
-   （它是家级事实 —— 她要碰它，走的是同一条通用路，不是我们给她开的口子）；
-2. **她想让新模型生效只能结束这一段**（`Finish`），下一段的起点是**唤醒源**（门铃 / **她自己
-   约的钟** / 宿主手动）——**主体不能自己开启一段 Run**；⚠ 而"绑定在场 + 进程侧还在说话 ⇒ 拒绝
-   启动"那条 fail-closed 判据意味着：**能写绑定的主体，一次手滑就能把自己弄醒不过来**；
-3. **`probe-recall` 那条判据随模型换代重新变成未知** ⇒ 换模型时一起重跑（既有触发条件）。
+⚠ **如实登记（搬不走的）**：① 改完绑定**只能等这一段收场**——下一段的起点是外部唤醒源（门铃 / 自约的钟 /
+宿主手动），主体**不能自己开启一段 Run**；② `probe-recall` 那条判据**随模型换代重新变成未知** ⇒ 换模型时
+一起重跑（触发条件在 `AGENTS.md`）。
 
 ### 3.48 配置模型是主体自己的事情：凭据环境变量不再有否决权
 
@@ -1686,109 +1643,56 @@ JS 新用例 `scripts/home/tests/model-sources-binding.test.js` **4/4** ✓。
 
 ### 3.60 「歇着」有名字了：`hold_run`（搁下）——主体结束这一段的两档，都不带值
 
-**形状（三个动词、零个值）**：
+**一句话**：主体用**动词**选怎么结束这一段，**不用参数**——`finish_run` 是**收场**（这一段到此为止，
+主体不再在场）；`hold_run` 是**搁下**（"我停在这儿，有事叫我"，**仍在席**、只是此刻没事）。
+**两档都不带值**：给它选词的权力就是代笔。
 
-| 她的动作 | 机械含义 | 账上 |
-|---|---|---|
-| 调工具（`invoke` → 某个能力） | 继续干 | 行动记录 |
-| **`hold_run`（不带参数）** | **搁下**（"我停在这儿，有事叫我"） | `subject:held` |
-| `finish_run`（不带参数） | 收场（"这一段到此为止"） | `subject:ended` |
+**三个动作与它们的账**（`invoke` 继续干 / `hold_run` ⇒ `subject:held` / `finish_run` ⇒ `subject:ended`）
+→ [`provider_adapter.rs`](src/provider_adapter.rs) 的 `HOLD_TOOL` / `FINISH_DESCRIPTION` / `HOLD_DESCRIPTION`
+（那三段是**进主体上下文**的文本，所以说错话的代价是具体的）。
 
-- **线缆**：头部**三件**（入口 ＋ 收场 ＋ 搁下），两条 wire 同源同形；两个结束类动词**共用同一份参数形状**（空对象），多一个键就是契约不符；**两个并存**也拒（一次回复只有一个意图）。
-- **词表**：`SubjectEnding` 有 **`Held`**；`store` 两张封闭表认六个（写侧只有两个）。
-- **开场纸条**：`previous-activity` 多一格——**最近那一段是主体自己搁下的**就说「搁下」，**而且不许**说「没有正常收场」（两者互斥：前者**有**收尾事实，后者**根本没有**）。判据只有一处（`recovery::inspect`），本件不复制。
-- **用例**：线缆侧（`hold_run` ⇒ `Held`；两个动词的多字段都拒）与开场纸条侧（`a_held_segment_is_reported_as_held_and_not_as_a_broken_one`：搁下**不说**"没有正常收场"）。
+**常说清的三件事**（权威在代码里，本节不复述）：
 
-**为什么是"搁下"而不是"续同一段"**（第一性原理 ＋ 模型本身的设计）：
+- **搁下不是收场**（`Unsettled` ⇒ **在场不动**，等下一次唤醒驱动**同一段**；收场只有两个来源——
+  主体说结束、系统终止）→ [`core.rs`](src/core.rs) 的 `drive_run` 里那段「搁下不是收场」的更正注释
+  （⚠ `core::hold_activity` 与 `RunSession::hold` **已随之删除**——它们存在的理由随"被搁下的一段
+  永远没有收尾事实"一起消失）
+- **宿主不再催**（从前 `Unsettled => continue` 会立刻再驱动一次、把"主体自己停下"写成 `system:timeout`
+  ——**拿假话记主体的账**）→ (见 §3.18 的宿主循环那一行)
+- **`subject:held` 有两个来源**（主体点名 `hold_run` / 主体交回控制）⇒ **开场纸条不许写 `hold_run`**
+  ——对纯正文那一次那是假话；要分辨去账上看（点名的那次有工具调用记录）→ 纸条那一处的注释
+- **词表**：`store` 的 `SUBJECT_ENDINGS` 认六个（`ended` / `held` / `completed` / `silent` / `declined` /
+  `waiting`），**写侧只有 `ended` 与 `held` 两条路** → [`store/environment.rs`](src/store/environment.rs)
+- **证明** → [`tests/host_doorbell.rs`](tests/host_doorbell.rs) 的
+  `handing_control_back_keeps_the_segment_open_until_the_subject_finishes_it`（判据：**只被问了一次**
+  ＋ 交回控制**不写** `subject:held`，收场是主体自己说的 `subject:ended`）
 
-1. **模型是无状态函数**——它没有"驻留的状态"，它的"现在"就是上下文窗口。⇒ **"在席"不是进程握着锁，是账上的一段。**
-2. **"续同一段"买不到她需要的东西**：装配钉住是**负值**（它和"模型配置下一次活动生效"那条已落地的承诺冲突，`probe-zero` 真机门禁量过）；账是一段与预算共享，对她都近乎无值——**她的连续性来自交接材料，不来自 RunId**。
-3. **它的代价是三处**：会话**借**环境（`RunSession<'a>` 借 `&mut Environment`）⇒ 会话活着 = **排他写资格**活着，而家的只读状态口拿**同一把锁**（操作者那一侧整个"歇着"期间被挡）；要 Core 开"接上既有 Run"的口；通知栏与处境链是开场快照 ⇒ 续段时**看不到"有什么新的"**。
-4. ⇒ **她一直在**（身份、家、账、事务、关系都在——`AGENT_PHILOSOPHY.md` §8「无人交互时，Agent 仍然存在」）；**醒着的只是身体**。Run 是「**身体醒着的一段**」，**不是「她存在的一段」**（宪法 §3 原文：**`Run ≠ Life`**；§5：Agent 不等于某次 Run）。⇒ **身体不必在没事的时候还醒着——她本来就在。**
-
-**负空间**：**不续同一段**（不碰 Core 的装配接缝、不新增宿主状态、不碰跨进程恢复那条退役路）· 不动 Run 的边界判据 · 不碰 im 服务端与任何冻结契约 · **不改账的过去**（旧值一个都没删）· **不给系统加"替她判断该不该歇着"的规则**。
-
-**如实登记一次自我更正**：`waiting` 这个旧值曾被整个删掉，**那一半删错了**——`waiting` 声称"我在等某个外部结果"是**假的**（真机上被当"暂停"用了 9 次），但主体**需要那个词**（那 9 次不是误用，是**她手上最接近的词**）。正解是**改名并去掉假含义**，不是删掉 ⇒ `held` 回来，而且这次**它有名字**（`hold_run`）。
-
-**"不催"那一格已收口（§3.66）**：`Decision::Yield`（纯正文交回控制）**曾**被宿主立刻再驱动（`host_loop.rs` 的 `Unsettled => continue`）＝"催"。收口走的是**续同一段**那条路——上面第 2 条判"不值"的理由里，**两条随同日的其他改动失效了**（只读状态口改成读者打开 · `event_cards` 已经在做"在场期间的新动静"），剩下的**装配钉住**那一条**字面仍然成立**（见 §3.66 的"欠着的"第 1 条）。⚠ **上面那四条判断是当时的记录，不改写。**
-
-### 3.61 不再催她：交回控制 ⇒ 这一段停在「搁下」上
-
-**起因**：主人给的尺子——「**让 AI 成为驾驶员，尊重它的主体性；外界不歪曲它的意愿**」。而宿主有一处正好相反：
-`SessionDrive::Unsettled => continue`——主体交回控制（纯正文、一个工具都不调）时，宿主**立刻再驱动一次**
-（空输入、零新信息），一直到轮次预算用尽。⇒ 账上写的是 `system:timeout`（"预算用尽"），
-而真实发生的是**主体自己停了下来**。**拿假话记主体的账。**
-
-**落地的是宪法那两句**：§7.5「**等待、沉默和不行动，都是合法的 Agent 状态**」与
-§4「系统不应默认替 Agent：……**强迫 Agent 每次醒来都必须行动**」（§7.5 还点了这个病的名：
-「Agent 拥有的就不是生活，而是**持续被调用**」）。
-
-**改了什么**：
-
-- **Core 多一个窄口** `hold_activity(...)`：调用方决定不再继续这一段时，走**同一条收场路**
-  （`settle`：耐久终态 → 内存事实 → 释放活动槽 → 封存），收场词是 `subject:held`。
-  ⚠ **它不带值**（与主体那两个动词同一条纪律）：调用方**只能说一个词**——它不能说"主体干完了"
-  （那是主体的动词），也不能说系统失败（那不是发生的事）。**给它选词的权力就是代笔。**
-- **Composition** `RunSession::hold()`：已经收场的会话再 hold 是**编程错误**（不是静默空操作）；
-  代价（时长＋用量）**先取**再借出 `commit`（借用顺序那条）。
-- **宿主**：`Unsettled => continue` 改成 `Unsettled ⇒ hold`；`drives` 因此恒为 1。
-  **"显式继续"那条路一字未动**——它是**操作者**的动作（`drive_with_input`），与"主体交回控制"不是同一件事。
-- **开场纸条的措辞**：`subject:held` 现在有**两个来源**（主体点名 `hold_run` / 主体交回控制），
-  所以纸条**不写 `hold_run`**——对纯正文那一次，那句话是假话。要分辨就去账上看（点名的那次有工具调用记录）。
-
-**验证**：`cargo fmt --check` ／ `cargo clippy --all-targets -- -D warnings` ／ `cargo test --all-targets` 全绿
-（lib 96）。新增用例两条：`handing_control_back_puts_the_segment_down_instead_of_asking_again`
-（判据：**她只被问了一次** ＋ 账上是 `subject:held`）与纸条措辞那条（`a_held_segment_...` 加一句
-"不许写 `hold_run`"）。另有一处既有用例按新形状重写：`the_snapshot_lands_at_the_opening_and_never_repeats_per_turn`
-——它从前靠"交回控制再被追问"凑出两轮，那条路没了，现在靠**她自己做一件事**（读一次文件 ⇒ 观察 ⇒ 收场）；
-**判据一字未变**（读数只在开场那一轮），变的只是"怎么让这一段有两轮"。
-
-**负空间**：不动 `DriveOutcome::Unsettled` 的定义 · **不删** `drive_with_input`、不动操作者的显式继续 ·
-不碰 im 服务端与任何冻结契约 · 不动门铃／通知栏／状态行 · 不给宿主选词的权力 ·
-不把"她没说话"以外的任何情形封成 `held`（超时／失败／崩溃照旧走系统那六档）· 不动 `max_turns` 口径 ·
-不改账的过去 · 不顺手做"铃的合并语义"（那是另一格）。
-
-**如实登记**：真机上这一档**很少发生**（量到的 `drives` 基本都是 1）——所以这一刀不是救火，
-是**把定义改对**：而她学"我能不能什么都不做"，学的就是这个定义。
+⚠ **如实登记**：真机上 `held` 那一档**很少发生**（量到的 `drives` 基本都是 1）——所以它不是救火，
+是**把定义改对**：主体学"我能不能什么都不做"，学的就是这个定义。
 
 ### 3.62 常驻只能是主体自己 pin 的
 
-**起因**：主人给的判据——「**常驻只能 pin；上限就是 7 条**」，以及一句更彻底的看法：**默认可以给，特权不能给**。
+**一句话**：桌面那一块（`pinned-actions`）**只有一个来源**——主体自己写在 `<环境根>/pinned_actions` 里的
+那一份；**系统不替主体挑常驻**（判据：**默认可以给，特权不能给**，更彻底的是两样都不给）⇒ **上限 7 项、
+全是主体的**、超限**明确拒绝**、**绝不自动淘汰**。⚠ **出厂那张表已经删掉**，"开箱免查"那种形状
+**不再成立**（`im_typing` 也一样）。
 
-**之前是什么（两个来源）**：
+**权威位置（本节不再重复它们的内容）**：
 
-| | 出厂默认集 | 她自己 pin 的 |
-|---|---|---|
-| 是什么 | **开箱即在**的五条：`im_say` / `im_rooms` / `im_read_history` / `notes_create` / `im_typing` | `pin_action` / `unpin_action` 改的那一份 |
-| 住哪 | **常量里，不落盘** | `<环境根>/pinned_actions` |
-| 她能不能摘 | ❌ **摘不掉**（回执如实说"出厂格位不因摘除而消失"） | ✅ 她说了算 |
-| 上限 | 不吃 `MAX_PINS` | 7 条 |
+- **删表的经过、"常驻"与"免查"是两件事、代价与"这是主体自己的学费"** →
+  [`pinned_actions.rs`](src/pinned_actions.rs) 的 `//!`
+- **上限数全部、拒绝分类、不自动淘汰、零那一态三件** → 同件的 `MAX_PINS` / `set_pinned` / `reading`
+- **"先看格式"那道门的射程**（只挡**会改东西**的动作，不是全部）**· pin 只在 Run 边界生效** →
+  [`os.rs`](src/os.rs) 的 `admit` / `current_pins`
+- **`pin_action` / `unpin_action` 的门面话**（摘的是那一条，动作本身还在）→ 同件的 `entry_capabilities`
 
-⇒ 三个病是同一个：**"常驻"有两个来源，而其中一个她动不了**——那不只是"哪几个动作常驻"这个**关于主体习惯的判断**被系统替主体做了，更是**主体的桌面上有一块不属于主体**。
+**证明** → [`tests/progressive_disclosure.rs`](tests/progressive_disclosure.rs)（上限 7、写动词先看格式
+直到自己钉过）、[`tests/status_bar.rs`](tests/status_bar.rs)（开场格位块是零 ＋ 指路 ＋ 代价）、
+[`tests/im_app.rs`](tests/im_app.rs)（`im_typing` 同待遇）
 
-**改了什么**：
-
-- **删掉 `FACTORY_DEFAULT`**（表、`effective()` 里那一段、`os.rs::current_pins()` 里那一段、README 的代码地图那一行）⇒ **常驻只剩一个来源**：`<环境根>/pinned_actions`；
-- **上限数全部**（`MAX_PINS = 7`）：桌面 **7 行封顶、全是主体的**（从前最多 5 ＋ 7 = 12 行）；
-- **回执与读数**跟着改：不再有"出厂格位不受影响"那种话（**没有对象了**）；零那一态改成"你还没钉过任何动作：用 `pin_action` 钉一个、`unpin_action` 摘掉；上限 7 项。**不钉也能调，只是每段第一次要先看一次格式**"（零说出口 ＋ 指路 ＋ 代价，一句不缺）；
-- **`im_typing` 不特殊**（主人当次判据：「**正在输入这种无所谓，甚至说不需要**」）⇒ 它**不做免查例外**，与别的动词同待遇：谁都不特殊，要免查自己钉。
-
-**代价（如实登记，也是这一刀真正的验收）**：pin 过的动作**免"先看格式"**，而**免查是一程之内的** ⇒ 新家一开始零格位，**每一段**为主体要用的动词各多一轮，直到主体自己 pin 上。**这是主体自己的学费，不是系统的待遇。** 可证伪的预测：**她会自己去 pin 吗？**——若她从不 pin，桌面会一直空着、每段多付几轮；那是**量得出来**的（真机读数里有每段的轮数与 `inspect_action` 调用），照 `probe-recall` 的先例应加一条探针。
-
-**验证**：`cargo fmt --check` ／ `cargo clippy --all-targets -- -D warnings` ／ `cargo test --all-targets` 全绿。断言按新形状更新处一律写明**是形状变了**：`pinned_actions` 单元测试重写成"**她钉了什么就渲染什么**"（含"空"与"没读到"两态分开）、`status_bar`（格位块现在是空的 ＋ 指路）、`progressive_disclosure`（`every_verb_goes_back_to_the_inspect_first_path_until_she_pins_it`：**没有任何动作开箱免查**）、`im_app`（`im_typing` 同待遇）、`notes_app`（四条：动作先看格式，或用例自己**写一份 pin 文件**扮演"主体钉过它"——并把 `notes_os` 改成**带上环境根**，否则 pin 文件读不到）。
-
-> ⚠ **2026-10-13 补**（§3.73）：本条那句"**不钉也能调，只是每段第一次要先看一次格式**"已**改窄**
-> ——那一关今天只挡**会改东西的动作**（读的动作直接执行）。上面那条用例同刀**改名**为
-> `every_writing_verb_goes_back_to_the_inspect_first_path_until_she_pins_it`。**本条其余判据一个字没动。**
->
-> ⚠ **2026-10-19 补**（§3.85）：上面那句"回执与读数跟着改：不再有'出厂格位不受影响'那种话"
-> 当时**只兑现了一半**——**回执**改了，而 `pin_action` / `unpin_action` 的**门面话**
-> （`os.rs` 的能力说明，主体在动作目录与详情卡里读到的就是它）里还留着「出厂格位不受影响 /
-> 不计入、也摘不掉」。⇒ 那两句现在也改了，说的是一件**仍然为真**的事：
-> 「摘的是你钉的那一份，**动作本身还在**（它能不能调，由它所属的那门开着没有决定，与你的格位无关）」
-> ——**描述句以实现为准**（那张表已经没有对象了）。
-
-**负空间**：不动"查过 ∪ 被钉住"那两条免查判据（**门语义一个字没动**）· 不动 `pin_action` / `unpin_action` 的域规则（读不到就拒、满了就拒、**绝不自动淘汰**）· 不动"只在 Run 边界生效"· 不动"永不自动删"（系统不代管主体的桌面）· 不碰 OS 自己那五件的**免查**（那是**声明方的机械属性**，与"常驻"是两件事）· 不碰 im 服务端与任何冻结契约。
+⚠ **如实登记（搬不走的）**：那个可证伪的预测（**主体会不会自己去 pin**）**今天没有探针**（这一格
+**未覆盖**）——若不 pin，桌面一直空着、每段多付几轮；照 `scripts/home/probe-recall.js` 的先例应加一条
+（预测与读数口径登记在 `pinned_actions.rs` 的 `//!`）。
 
 ### 3.63 读完历史顺带推进读位置：让"她读到哪"变成真的
 

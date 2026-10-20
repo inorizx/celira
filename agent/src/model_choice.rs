@@ -34,7 +34,8 @@ impl ModelChoice {
     ///
     /// 它是**一处权威**：名字从"将要发请求的那个对象"里取，装配入口**不另算一份**——否则
     /// "主体读到的那一行"与"真正用的那一个"迟早对不上（配置门那一侧已经有四件套的解析，名字不该
-    /// 有第二个来源）。开场的 `model` 那一块读的就是它。
+    /// 有第二个来源）。开场 `machine` 那一行的 `model` 那一格读的就是它
+    /// （[`crate::machine::Machine::new`] 的第一个参数，见 `machine.rs`）。
     pub fn model(&self) -> &str {
         match self {
             ModelChoice::Chat(model) => model.model(),
