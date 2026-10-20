@@ -62,7 +62,8 @@ use crate::provider_adapter::{
 /// 本协议写进续接载荷的**协议名**，也是换家档 `--model-protocol` 的取值之一。
 ///
 /// 它与 chat 侧的那个名字不同，因此盘上旧载荷换协议后读不懂——那时明确失败（`protocol-payload`），
-/// **不**按"看起来差不多"猜。**公开**的理由与 chat 侧同款：入口拿它当唯一权威的名字。
+/// **不**按"看起来差不多"猜：**没有跨协议的迁移**，一段跑了一半的活动换协议续跑会被拒，不是
+/// 把手里的载荷翻译过去。**公开**的理由与 chat 侧同款：入口拿它当唯一权威的名字。
 pub const PROTOCOL: &str = "responses";
 /// 本模块当前写出的续接载荷版本。换成不兼容的载荷形状时必须递增。
 const PROTOCOL_VERSION: u32 = 1;
@@ -639,9 +640,13 @@ fn message_text(item: &serde_json::Value) -> Result<String, ProviderFailure> {
 
 /// 供应商响应 → Core 的中立响应。
 ///
-/// 形状规则全部是**明确失败**，没有一条"就近猜一个"的退路：缺 `output`、条目没有能认的
-/// `type`、`status` 出现但不是 `completed`、`function_call` 条目缺 `call_id`、一次回复里
-/// 结束与普通行动并存——都各自拒绝，理由与 chat 侧逐条对应。
+/// 只认**三种条目**（`reasoning` / `function_call` / `message`）：别的 `type` 说明这次响应
+/// **不是我们那份请求的答复**（我们只声明标准 function 工具）——与内容块同一条判据，
+/// 理由写在 [`message_text`] 上。
+///
+/// 形状规则全部是**明确失败**，没有一条"就近猜一个"的退路：缺 `output`、`status` 出现但
+/// 不是 `completed`、`function_call` 条目缺 `call_id`、一次回复里结束与普通行动并存——都
+/// 各自拒绝，理由与 chat 侧逐条对应。
 fn translate_response(response: WireResponse) -> Result<ModelOutput, ProviderFailure> {
     if let Some(status) = response.status.as_deref()
         && status != "completed"

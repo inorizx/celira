@@ -142,7 +142,11 @@ impl RehydrateError {
 /// 从前这里枚举"本写入者可能写出的形状"：`(success, 无分类, 任意)` / `(failure, 有分类, 零内容)` /
 /// `(unknown, 无分类, 零内容)`，其余一律 `OutcomeNotProducible`。那张表**漏了一格**——
 /// `failure` **带随单读数**（[`ActionOutcome::failure_with_content`]，2026-10-11 立的那条
-/// "一次调用的形状错误不报废这一段 ⇒ 一条**带读数的拒绝经历**"）。于是：
+/// "一次调用的形状错误不报废这一段 ⇒ 一条**带读数的拒绝经历**"）。
+///
+/// 而写侧 [`observed_payload`] 从来不查表：它照 `outcome.state()` / `failure_class()` / `content()`
+/// 三个读数**逐格**搬到盘上 ⇒ 写者能写出哪些形状，由 [`ActionOutcome`] 的构造入口决定。这份知识
+/// 当年在这里**又被抄了一遍**——两份知识不会同时更新，于是：
 /// **写者写得出来、读者读不回来** ⇒ 那一段之后的**每一段新活动**都在恢复那一步被拒
 /// （真机实测：`state=refused reason=rehydrate:outcome-not-producible`，账里 291 行只有那一行
 /// 不合法，而主体从此永远不再回话）。
@@ -159,6 +163,12 @@ impl RehydrateError {
 /// ⚠ 两侧会不会漂移，由**往返守卫**抓（`tests::every_shape_the_writer_can_write_reads_back_as_itself`
 /// 用 [`observed_payload`] 写、用本函数读，逐格比）。**新加一个构造入口就把守卫加一行**——
 /// 生产侧不再有一张会漂的表。
+///
+/// ## ⚠ 这一格改了什么、没改什么
+///
+/// **只动读侧**：盘上格式一个字节没改，[`observed_payload`] 与 [`ActionOutcome`] 的形状一字未动
+/// ⇒ 旧账照读。真机上那一条读不回来的记录，正是一次"参数名猜错"的拒绝**连它的读数**（分类与
+/// "缺哪一项"那块读数各自成格）——那本身就是 2026-10-11 起要的效果：让主体看得见参数名不必猜。
 pub(super) fn outcome_of_observation(
     state: ResultState,
     failure: Option<&String>,

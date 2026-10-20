@@ -208,6 +208,10 @@ const PARAM_SHAPE_HINT: &str =
 /// 它是 `invalid-parameters` 的**随单内容**（TASK_72）：分类词照旧只有一个、逐字节稳定；
 /// 差异是它旁边的结构化读数。名字按机械顺序枚举（多出来的按主体给的顺序，缺的、接受的都是
 /// 声明的顺序），因此同一份错误参数两次发生，这段文本逐字节相同。
+///
+/// ⚠ **它不给"例子"**：只回答名字（多了哪些、缺了哪些、这个动作接受哪些）——"这一项该填什么
+/// 值"不是 OS 手里的事实，编一个就是替 App 说话（本体裁为"不多说一个字"：读数只在真有机械
+/// 事实可说时出现）。
 struct ParamShape {
     missing: Vec<String>,
     unexpected: Vec<String>,
@@ -1036,7 +1040,8 @@ impl RunScope<'_> {
         let mut shape = ParamShape {
             missing: Vec::new(),
             unexpected: Vec::new(),
-            // OS 自有动作的允许名单就是它们自己那几个名字，回执里逐字给出（既有形状不变）。
+            // OS 自有动作**不进这一格**：它们的既有回执里没有这一行，填了就把形状改了。
+            // "接受哪些名字"只补在 App 拒绝的那一侧（见 `explain_shape_refusal`）。
             accepted: Vec::new(),
         };
         for (name, _) in params.entries() {
@@ -1168,6 +1173,20 @@ impl ActionPort for RunScope<'_> {
     /// 排在最后、排在交 App 之前。它与跨进程恢复一起退役了——门是指令，而世界只该给信息；
     /// 未决的写由"开场那块纸条 ＋ 账本 ＋ 它自己去核"接住。**它的读表件（效果声明表）同刀退役**：
     /// 门一没，那张表就没有读者了。
+    ///
+    /// **2026-10-13 补：只读动作免"先看形状"的税，拒绝改走指路。** 三件只在这里说清：
+    ///
+    /// - **这条规则必须写在不会消失的地方**：它从前只印在 `pinned_actions` 的**零态**块里
+    ///   ——主体一旦钉了 ≥1 项，那句提示就不再渲染。真机现场：主体正是靠那 125 次经验自己
+    ///   总结出"回 `needs-inspection` 就先 `inspect_action`、再重试"，写进自己的笔记
+    ///   （`note-12` 那一格的"固定处置"）。⇒ 那句话今天在 `INVOKE_DESCRIPTION`（`tools`
+    ///   数组：每一轮、每个 Run 都在），并跟着改窄成"只挡会改东西的动作"。
+    /// - **自持物写也是写**：写自己家里的一份文件照样改得动外面的世界 ⇒ 照样过这一关。
+    ///   `timer` 与 `notes` 今天**同待遇**（2026-10-13 补齐声明：借既有的 `repeatable-write`
+    ///   类别 ＋ 各配一个同参复核；历史与理由见 `timer_app.rs` 的 `declared_effects`）。
+    /// - ⚠ **免查那一格不是准入判据**：[`Capability::is_exempt_from_inspection`] 是**呈现面**
+    ///   的声明（目录行自带参数名——"免查必须同时免学"）。拿它当权限，就是在这一道之外造出
+    ///   **第二份准入判据**：同一个问题两个答案。
     fn admit(&self, agent: &AgentId, run: &RunId, action: &Action) -> ActionAdmission {
         if !self.matches(agent, run) {
             return ActionAdmission::refused(ExpansionFailure::IdentityMismatch.as_str());
@@ -1202,8 +1221,10 @@ impl ActionPort for RunScope<'_> {
         if !self.may_call(id) {
             // **只读的动作不收"先看形状"的税**（2026-10-13）：它一个字节都改不了外面的世界，
             // 那张卡的唯一作用就是让主体"先看一眼"——而看一眼的代价是**一轮模型调用**。
-            // 真机读数（小欣 22 段 Run）：125 次首调税里 **83 次（66%）落在只读动作上**
-            // （`im_contacts` 19 / `notes_list` 16 / `notes_read` 13 / `files_list` 9 / `files_read` 8 …）。
+            // 真机读数（小欣 22 段 Run / 414 次模型调用）：125 次首调税（≈30%）里
+            // **83 次（66%）落在只读动作上**
+            // （`im_contacts` 19 / `notes_list` 16 / `notes_read` 13 / `files_list` 9 / `files_read` 8 /
+            // `im_blocks` 7 …）——**读一个字节都改不了的东西，收了一轮模型调用**。
             // ⇒ 放行。**形状不随回执附**：它按需（`inspect_action`）、按钉住（格位那一行），
             // 或者在参数名出错时由 `explain_shape_refusal` 精确点名（见 `execute`）。
             //
