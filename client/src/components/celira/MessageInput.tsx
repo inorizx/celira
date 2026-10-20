@@ -744,7 +744,11 @@ export function MessageInput({
               className="min-h-9 w-full resize-none px-1.5 py-1.5 max-md:order-1 max-md:min-h-6 max-md:flex-1"
             />
           )}
-          {/* 工具条：桌面上是文字下面那一行；移动端 `contents` 把它拆回同一条平铺行。 */}
+          {/* 工具条：桌面上是文字下面那一行；移动端 `contents` 把它拆回同一条平铺行。
+              ⚠ **移动端那个末位是"互换槽"，不是两个位置**（2026-10-20 核过）：空格位放「附件 ⊕」、
+              有字时放「发送 ↗」，两者都 `max-md:order-3` 且同为 36px ⇒ 切换时文字区不位移
+              （微信/Telegram 都是这个做法：⊕ 与发送共用同一格）。要动这里，**两边宽度必须一起改**，
+              只改一边，输入区就会在打字的一瞬间被挤一下。 */}
           <div className="flex items-center gap-0.5 max-md:contents">
           {voiceSupported && attachmentMode !== 'unavailable' && (
             <Button
