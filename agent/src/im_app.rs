@@ -121,6 +121,9 @@ pub const CAPABILITY_LEAVE_ROOM: &str = "im_leave_room";
 ///
 /// ⚠ 这一格**不是新权利**：服务端与裁决早就有（原文：「**一支 Agent 也能建房、也能持有 owner**」），
 /// 当年那批切片写着「**不**动客户端与执行端」⇒ 缺的一直是**这一侧的动作**。
+///
+/// ⚠ **只能开群房**：`direct`（1:1）房不在这条动作面里——那种房仍由 Human 侧开（一间房 = 一段
+/// 关系，见契约 §5.1 与 §5.7 的路由表），本动词够不到它。判据与失败面见 [`ImApp::create_group`]。
 pub const CAPABILITY_CREATE_GROUP: &str = "im_create_group";
 
 /// **邀请一个主体进我持有的房**（owner 的邀请权；2026-09-27 主人裁决：与 Human owner 同规则）。
@@ -2023,10 +2026,25 @@ impl ImApp {
     /// **开一间群房**（`POST /v1/backend/groups`，带幂等键）：**我成为它的 owner**。
     ///
     /// 这是 2026-09-27「owner = 创建者」那批给 Agent 的四条治理端点之一——**权利早就有**
-    /// （裁决原文：「Agent owner 的邀请权完全给（与 Human owner 同规则）」），缺的是这一侧的动作。
+    /// （裁决原文：「Agent owner 的邀请权完全给（与 Human owner 同规则）」），缺的是这一侧的动作；
+    /// 四条一起存在，「Agent 也能当 owner」才是**可达且可退出**的状态。四条写端点**同一认证面**
+    /// （世界那侧的后端凭据）：本层只把被拒归进凭据那一格，不分解它。
+    ///
+    /// **谁能开什么房**：只有**群房**这一种。`direct`（1:1）房不在这条动作面里——那种房仍归
+    /// Human 侧开，本动词够不到它。
+    ///
+    /// **幂等键从哪来**：由**操作身份**（`OperationId`：活动标识 ＋ 轮 ＋ 这一轮里的序号）合成，
+    /// 机制只有一份（`im_channel` 的 `idempotency_key`），**不由群名或任何参数决定** ⇒ 同一次
+    /// 操作重放落回同一间房；而**同参数再调一次是另一次操作**（另一个键）⇒ 那是第二间房。
     ///
     /// **复核 = 通讯录**（与这一包其余写动词同一条规矩）：那间房在不在我的通讯录里就是答案；
-    /// ⚠ 同参第二次会**再开一间同名房**（幂等键不同 ⇒ 两间房）⇒ 复核**弱在归因**。
+    /// ⚠ 但那一步**弱在归因**：同名的第二间房也在通讯录里 ⇒ 它只说「有这样一间房」，不说
+    /// 「就是那一次开的那一间」。
+    ///
+    /// **失败面**：群名不合规 ⇒ `invalid-argument`——本层能判的**本地先判、一次请求都不发**，
+    /// 世界回的 400 落同一个词；凭据不被接受 ⇒ `credential-rejected`；同一个键配了另一个群名 ⇒
+    /// `idempotency-conflict`。**契约没给这条端点列出的码不猜**（落 `unknown`，不就近映射）；
+    /// 2xx 但体读不懂 ⇒ 仍是成功 ＋ 一句实话——房开了、标识没读出来就照实说（**不编一个标识出来**）。
     fn create_group(&self, operation: &OperationId, params: &ActionParams) -> ActionOutcome {
         let Some(name) = valid_name(params) else {
             return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());
@@ -2053,8 +2071,25 @@ impl ImApp {
 
     /// **邀请一个主体进我持有的房**（`POST /v1/backend/rooms/{room}/members`，带幂等键）。
     ///
-    /// **资格判据在世界那一侧**（"与邀请者有 accepted 关系，或被我以 active Agent Owner 拥有"）
-    /// ——本层不复制它，只把世界的答复如实分类（与这一包其余写动词同一条纪律）。
+    /// **谁能邀请谁**：执行者必须是这间房的 **owner**（Agent owner 与 Human owner 同一条规则）；
+    /// 目标要过世界那条**唯一**资格判据——与邀请者有 accepted 关系段、或被以 active Agent Owner
+    /// 拥有，**邀请者是不是 Human 不进这条判据**。本层不复制它，只把世界的答复如实分类
+    /// （与这一包其余写动词同一条纪律）。
+    ///
+    /// **幂等键从哪来**：与开房同一条机制——由**操作身份**合成，不由房号或目标决定 ⇒ 同键重放
+    /// 拿回同一条成员周期（200、零新事实）；**新键但目标已有活跃周期也是 200**（零新事实）⇒
+    /// 「同参第二次」成功、不多一段成员周期。⚠ 例外一小格：**邀请自己** ⇒ 404，且世界不写
+    /// 幂等记录。
+    ///
+    /// **失败面**：房标识 / 目标标识不合规 ⇒ `invalid-argument`——本层能判的**本地先判、一次
+    /// 请求都不发**，世界回的 400 落同一个词；凭据不被接受 ⇒ `credential-rejected`；房不在、
+    /// 目标不在、以及「我不是这间房的 owner」⇒ 一律 `unknown-room`（契约把这几类并进 404，
+    /// 本层也不分解）；同一个键配了另一个目标 ⇒ `idempotency-conflict`。**契约没给这条端点列出的
+    /// 码不猜**（落 `unknown`，不就近映射）。
+    ///
+    /// ⚠ **403 那一格今天到不了**：世界把「我不是 owner」并进上面那个 404 `room_not_found`
+    /// （本层因此落 `unknown-room`），403 ⇒ `not-a-member` 只是留着的对称格；门牌文案的更正属
+    /// 另一刀（`remove_member` 那一格同形，见它的文档注释）。
     fn invite(&self, operation: &OperationId, params: &ActionParams) -> ActionOutcome {
         let (Some(room), Some(participant)) = (valid_room(params), valid_participant(params))
         else {
@@ -2064,7 +2099,7 @@ impl ImApp {
         let path = format!("{ROOMS_PATH}/{room}{MEMBERS_SUFFIX}");
         let key = idempotency_key(operation);
         match self.exchange("POST", &path, Some(payload), Some(&key)) {
-            // 201（新成员）/ 200（同 key 重放）：这次邀请已被接受。
+            // 201（新成员）/ 200（同 key 重放，或目标已在这间房里）：这次邀请已被接受。
             Reply::Answered(value) => ActionOutcome::success(vec![ContentBlock::new(
                 CAPABILITY_INVITE,
                 render_invited(room, &value),
@@ -2078,9 +2113,11 @@ impl ImApp {
             )]),
             Reply::Refused(400) => ActionOutcome::failure(ImFailure::InvalidArgument.as_str()),
             Reply::Refused(401) => ActionOutcome::failure(ImFailure::CredentialRejected.as_str()),
-            // 403 = 我不是这间房的 owner（或不是它的 active 成员）。
+            // 403 = 我不是这间房的 owner（或不是它的 active 成员）。⚠ 今天世界不送这一格：
+            // 非 owner 并进下面那个 404，这一格留着只是对称（见本函数的文档注释）。
             Reply::Refused(403) => ActionOutcome::failure(ImFailure::NotAMember.as_str()),
-            // 404 = 房不在 / 目标不存在（契约把两种合成一个码，本层也不分解）。
+            // 404 = 房层面（未知 / 我不是 owner / 不是群房）或目标层面（目标不存在、资格不成立）：
+            // 契约是两个码（`room_not_found` / `member_not_found`），本层按状态码落一个词、不拆。
             Reply::Refused(404) => ActionOutcome::failure(ImFailure::UnknownRoom.as_str()),
             Reply::Refused(409) => ActionOutcome::failure(ImFailure::IdempotencyConflict.as_str()),
             Reply::Refused(_) | Reply::Broken => ActionOutcome::unknown(),

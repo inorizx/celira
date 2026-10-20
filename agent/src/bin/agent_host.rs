@@ -669,6 +669,11 @@ fn main() -> ExitCode {
         // 它要在主体的视野里占一块，而**开场视野链的上限是 11 层**（守卫
         // `the_opening_view_chain_has_a_hard_ceiling`：要加第 12 层，先删一层）——今天没有一层
         // 是白占的，因此**不硬塞**，等一个真实读数或等某一层腾出来。
+        //
+        // ⚠ **这一半真做过一次、又撤回了**（记录留在这里；它今天**没有代码**，不是"住在某个模块
+        // 里"）：第一版给主体也加了一块（**Turn 级增量块**，`ContextSource` 一层），守卫
+        // `the_opening_view_chain_has_a_hard_ceiling` 当场拦下——核过一遍**没有一层是白占的** ⇒
+        // **撤回**。⚠ 留下的中间态**是诚实的**：读数说了事实，没有假装主体也知道了。
         let mut boundary = |_: &mut ModelChoice| -> Result<(), HostFailure> {
             let already_file = matches!(&source, model_source::Source::File(_));
             let fresh = if already_file {
