@@ -109,7 +109,7 @@ fn windows_shape_refuses_everything_that_is_not_a_drive_absolute() {
         r"\\server\share\x",  // UNC
         r"\\?\C:\x",          // 逐字前缀
         r"\\.\COM1",          // 设备命名空间
-        r"C:\a\b.txt:stream", // ADS（第二个冒号）
+        r"C:\a\b.txt:alt",    // ADS（第二个冒号）
         r"C:\a\b.txt::$DATA", // 具名数据流
         r"C:\con\x",          // 保留设备名
         r"C:\NUL.txt",        // 带扩展名的保留名还是设备

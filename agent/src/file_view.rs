@@ -305,7 +305,11 @@ impl FileView {
                 .map_err(FileViewFailure::CreationTargetUnusable)?,
             None => FileApp::open(materials).map_err(FileViewFailure::Materials)?,
         };
-        let materials_root = materials_app.root().to_path_buf();
+        // 家档才有那一个根（机器档的根由每条绝对路径自己点名）⇒ 这一层装配只认家档；
+        // 拿到没有根的实例就是装配期错误，不猜、也不悄悄退化成"没有资料面"。
+        let Some(materials_root) = materials_app.home().map(Path::to_path_buf) else {
+            return Err(FileViewFailure::Materials(FailureClass::InvalidPath));
+        };
         // 规范化后比较：链接与路径别名指向同一目录时按**同一目录**处理。
         let environment_root = fs::canonicalize(environment_root)
             .map_err(|error| FileViewFailure::Materials(file_app::io_class(&error)))?;
@@ -436,10 +440,12 @@ impl FileView {
     fn available_capabilities(&self) -> Capabilities {
         let mut items = Self::capabilities().items().to_vec();
         if self.materials.is_writable() {
-            items.push(FileApp::creation_capability());
-            items.push(FileApp::verification_capability());
-            items.push(FileApp::edit_capability());
-            items.push(FileApp::edit_verification_capability());
+            // 视图这一层只装配**家档**（资料面 ＋ 作品面），所以说明里的地址是相对路径。
+            let mode = file_app::PathMode::Home;
+            items.push(FileApp::creation_capability(mode));
+            items.push(FileApp::verification_capability(mode));
+            items.push(FileApp::edit_capability(mode));
+            items.push(FileApp::edit_verification_capability(mode));
         }
         if self.works_present() {
             items.extend(Self::works_capabilities().items().iter().cloned());

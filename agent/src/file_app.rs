@@ -95,6 +95,7 @@ use crate::core::{
 };
 use crate::creation_grant::CreationGrant;
 use crate::foundation::{AgentId, OperationId, RunId};
+use crate::sandbox::{MachinePath, machine_path};
 
 /// 一次列目录最多返回的直接子项数。
 pub const MAX_ENTRIES: usize = 100;
@@ -285,15 +286,42 @@ impl From<crate::sandbox::SandboxError> for FailureClass {
 /// 一个目录条目：名称 + 种类（`dir` / `file` / `link` / `unknown`）。
 pub(crate) type DirectoryEntry = (String, &'static str);
 
-/// 一个文件 App：绑定调用者显式给出的沙盒根目录，外加**可选的一份额外授权**。
+/// 一个文件 App：绑定**一个面**（家 / 整台机器），外加**可选的一份写面**。
 ///
-/// 没有创建授权时它与从前完全一样：只有读侧两项能力。创建授权只增加"能往哪一个已存在子目录
-/// 新建文本"这一件事，不改变读写其他任何东西的规则。
+/// 两档的差别只有一条：**地址怎么解释** —— 家档是"相对于一个沙盒根的相对路径"，机器档是
+/// "绝对路径自己点名的那个卷"（判据仍在 [`crate::sandbox`] 里、只有一份）。名份、上限、
+/// 失败形状、复核规则**逐条相同**。
+///
+/// 家档没有写面时与从前完全一样：只有读侧三项能力。写面只增加"能往哪里写文本"这一件事。
 #[derive(Debug)]
 pub struct FileApp {
-    root: PathBuf,
+    scope: Scope,
     /// 这个实例的**写面**。`None` = 只读：写侧那两件能力连声明都不出现。
     writable: Option<WritableFace>,
+}
+
+/// 这个实例的**面**：家（一个沙盒根 ＋ 相对路径）还是整台机器（绝对路径）。
+///
+/// 机器档没有"根"——根由每一条路径自己点名的那个卷给出。因此它不复用家档那些
+/// `root.join(...)` / `starts_with(root)` 的判据，而是走 `sandbox::machine_path` /
+/// `resolve_machine` / `resolve_machine_parent` 那一套（**判据仍然只有一份**）。
+#[derive(Debug)]
+enum Scope {
+    Home(PathBuf),
+    Machine,
+}
+
+impl Scope {
+    fn home(&self) -> Option<&Path> {
+        match self {
+            Scope::Home(root) => Some(root),
+            Scope::Machine => None,
+        }
+    }
+
+    fn is_machine(&self) -> bool {
+        matches!(self, Scope::Machine)
+    }
 }
 
 /// 这份写面是**谁的**——它决定要不要绑身份与活动，也决定回执里那几句话怎么说。
@@ -315,6 +343,10 @@ enum WritableFace {
     Granted(GrantedCreation),
     /// 主体自己的作品目录：**根就是写面**。
     Own,
+    /// **机器档的写面**：整台机器。它不是 `Granted`——那一份绑"资料根里的某一个子目录"，
+    /// 而机器档没有那个根；它也不绑 `RunId`（这一档是**支级**的，主人给的是"这一支可以碰
+    /// 整台机器"，不是"这一次活动可以写那几个文件"）。
+    Machine,
 }
 
 /// 一份**已经校验过**的创建授权：绑定身份与活动，目标是规范化之后的绝对目录。
@@ -334,17 +366,32 @@ impl FileApp {
         Self::open_inner(root.into(), None)
     }
 
+    /// 打开**机器档（只读）**：整台机器都可能被读到，写侧那两件能力**不声明**。
+    ///
+    /// 这一档由**主人**在装配时决定（`--files full`）。它不是主体能申请的东西，
+    /// 也不是 [`CreationGrant`]——那份授权说的是"资料根里哪一个子目录可以写"。
+    pub fn open_machine() -> Self {
+        Self {
+            scope: Scope::Machine,
+            writable: None,
+        }
+    }
+
+    /// 打开**机器档（可写）**：读三件 ＋ 写两件，地址一律是**绝对路径**。
+    pub fn machine_with_writes() -> Self {
+        Self {
+            scope: Scope::Machine,
+            writable: Some(WritableFace::Machine),
+        }
+    }
+
     /// 打开**主体自己的作品面**：根就是写面，不需要任何授权。
     ///
     /// 与 [`FileApp::with_creation`] 的差别只有**归属**（见 [`WritableFace`]）：语义一字不差
     /// ——只新建（`create_new`）、只唯一替换、不改名/不删除/不追加、上限同一份。
     /// 根必须已存在（缺席时由装配方**缺席才建**，见 `file_view`）。
     pub fn with_own_works(root: impl Into<PathBuf>) -> Result<Self, FailureClass> {
-        let app = Self::open(root)?;
-        Ok(Self {
-            root: app.root,
-            writable: Some(WritableFace::Own),
-        })
+        Self::open_inner(root.into(), Some(WritableFace::Own))
     }
 
     /// 打开一个文件 App，并接受宿主给出的**文本创建授权**。
@@ -357,12 +404,15 @@ impl FileApp {
         grant: &CreationGrant,
     ) -> Result<Self, FailureClass> {
         let app = Self::open(root)?;
+        let Some(home) = app.home().map(Path::to_path_buf) else {
+            return Err(FailureClass::InvalidPath);
+        };
         let names = relative_names(grant.directory())?;
         // 授权目录是**一个目录名**，不是一个路径。
         if names.len() != 1 {
             return Err(FailureClass::InvalidPath);
         }
-        let candidate = app.root.join(&names[0]);
+        let candidate = home.join(&names[0]);
         let metadata = fs::symlink_metadata(&candidate).map_err(|error| io_class(&error))?;
         if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
             return Err(FailureClass::Link);
@@ -372,11 +422,11 @@ impl FileApp {
         }
         let canonical = fs::canonicalize(&candidate).map_err(|error| io_class(&error))?;
         // 必须**严格**在资料根之内：等于根本身意味着"整个资料根都可写"，那不是本版给的授权。
-        if canonical == app.root || !canonical.starts_with(&app.root) {
+        if canonical == home || !canonical.starts_with(&home) {
             return Err(FailureClass::InvalidPath);
         }
         Ok(Self {
-            root: app.root,
+            scope: Scope::Home(home),
             writable: Some(WritableFace::Granted(GrantedCreation {
                 agent: grant.agent().clone(),
                 run: grant.run().clone(),
@@ -399,7 +449,7 @@ impl FileApp {
             return Err(FailureClass::InvalidPath);
         }
         Ok(Self {
-            root: canonical,
+            scope: Scope::Home(canonical),
             writable,
         })
     }
@@ -409,38 +459,165 @@ impl FileApp {
         self.writable.is_some()
     }
 
-    /// 这次写落在哪个目录上：`Own` ⇒ 根；`Granted` ⇒ 授权目录（并复核身份与活动）。
+    /// 这次写落在哪儿：家档 ⇒ 一个基准目录（相对路径从它算起）；机器档 ⇒ 由路径自己点名。
     ///
-    /// 两种面的**门**在这里分开：授权面绑身份与活动（那是别人的东西，谁、哪一次都要对得上）；
-    /// 作品面是主体自己的东西，不绑这两样，也**没有**"没授权"这一档失败。
-    fn writable_base(&self, agent: &AgentId, run: &RunId) -> Result<PathBuf, &'static str> {
-        match &self.writable {
-            None => Err(REFUSAL_CREATION_NOT_GRANTED),
-            Some(WritableFace::Granted(grant)) => {
+    /// 三种面的**门**在这里分开：授权面绑身份与活动（那是别人的东西，谁、哪一次都要对得上）；
+    /// 作品面是主体自己的东西，不绑这两样；机器档是**支级**的整档授权，不绑这一次活动。
+    fn write_anchor(&self, agent: &AgentId, run: &RunId) -> Result<WriteAnchor, &'static str> {
+        match (&self.writable, &self.scope) {
+            (None, _) => Err(REFUSAL_CREATION_NOT_GRANTED),
+            (Some(WritableFace::Granted(grant)), Scope::Home(_)) => {
                 if grant.agent != *agent || grant.run != *run {
                     return Err(REFUSAL_CREATION_GRANT_MISMATCH);
                 }
-                Ok(grant.root.clone())
+                Ok(WriteAnchor::Dir(grant.root.clone()))
             }
-            Some(WritableFace::Own) => Ok(self.root.clone()),
+            (Some(WritableFace::Own), Scope::Home(root)) => Ok(WriteAnchor::Dir(root.clone())),
+            (Some(WritableFace::Machine), Scope::Machine) => Ok(WriteAnchor::Machine),
+            // 剩下的组合在构造期就被排除了（`Granted`/`Own` 只由家档构造，`Machine` 只由机器档
+            // 构造）。落到这里不是"允许"，是**没有这一档**——与"没有写面"同一句话。
+            _ => Err(REFUSAL_CREATION_NOT_GRANTED),
         }
     }
 
+    /// **新建**的落点（`files_create` 与它的复核共用）：家档 ⇒ 基准目录里的**单层名字**；
+    /// 机器档 ⇒ 绝对路径，父目录必须已经在，末段由独占创建去判在不在。
+    ///
+    /// 「末段不在」这件事**不能**在这里判：判了就等于把"新建"读成"改已有文件"。
+    fn create_target(anchor: WriteAnchor, name: &str) -> Result<(PathBuf, String), FailureClass> {
+        match anchor {
+            WriteAnchor::Dir(base) => {
+                let names = relative_names(name)?;
+                // 单层普通文件名：没有第二段，也就没有中间路径可以被替换；控制字符也不收——
+                // 它会破坏任何按行渲染这份名字的地方。
+                if names.len() != 1 || names[0].chars().any(char::is_control) {
+                    return Err(FailureClass::InvalidPath);
+                }
+                Ok((base, names[0].clone()))
+            }
+            WriteAnchor::Machine => {
+                let target = machine_path(name)?;
+                let (dir, last) = resolve_machine_parent(&target)?;
+                // 控制字符会破坏任何按行渲染这份名字的地方（家档同一条）。
+                if last.chars().any(char::is_control) {
+                    return Err(FailureClass::InvalidPath);
+                }
+                Ok((dir, last))
+            }
+        }
+    }
+
+    /// **改**的落点（`files_edit` 与它的复核共用）：家档 ⇒ 基准目录里的相对路径；
+    /// 机器档 ⇒ 绝对路径（末段必须存在、链上不许有链接）。
+    fn write_target(anchor: WriteAnchor, path: &str) -> Result<PathBuf, FailureClass> {
+        match anchor {
+            WriteAnchor::Dir(base) => resolve_in_base(&base, path),
+            WriteAnchor::Machine => {
+                let target = machine_path(path)?;
+                resolve_machine(&target)
+            }
+        }
+    }
+}
+
+/// 一次写请求的落点：家档是一个**基准目录**（相对路径从它算起），机器档由路径自己点名。
+enum WriteAnchor {
+    Dir(PathBuf),
+    Machine,
+}
+
+/// 能力说明里那句"地址是相对路径还是绝对路径"的档位。
+///
+/// 它是模型唯一能读到这件事的地方——**说错了，它就会按错的形状发请求**（家档发绝对路径
+/// ⇒ `invalid-path`；机器档发相对路径 ⇒ 同样 `invalid-path`）。所以这五句必须跟着档走。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PathMode {
+    Home,
+    Machine,
+}
+
+impl PathMode {
+    fn of_machine(machine: bool) -> Self {
+        if machine {
+            PathMode::Machine
+        } else {
+            PathMode::Home
+        }
+    }
+
+    /// `files_list` 的 `path`。
+    fn list_path(self) -> &'static str {
+        match self {
+            PathMode::Home => "授权资料根内的相对目录；留空表示资料根",
+            PathMode::Machine => "这台机器上的绝对目录（如 `D:\\work`）；必须带盘符，不收相对路径",
+        }
+    }
+
+    /// `files_read` 的 `path`。
+    fn read_path(self) -> &'static str {
+        match self {
+            PathMode::Home => "授权资料根内的相对文件路径",
+            PathMode::Machine => "这台机器上的绝对文件路径（如 `D:\\work\\a.txt`）",
+        }
+    }
+
+    /// `files_grep` 的 `path`。
+    fn grep_path(self) -> &'static str {
+        match self {
+            PathMode::Home => "授权资料根内的相对目录，只在它之内查；留空表示资料根",
+            PathMode::Machine => "这台机器上的绝对目录（如 `D:\\work`），只在它之内查；必须带盘符",
+        }
+    }
+
+    /// `files_create` / 复核的 `name`。
+    fn create_name(self) -> &'static str {
+        match self {
+            PathMode::Home => "授权目录内的单层普通文件名",
+            PathMode::Machine => {
+                "这台机器上的绝对文件路径（如 `D:\\work\\new.txt`）；父目录必须已经存在"
+            }
+        }
+    }
+
+    /// `files_edit` / 复核的 `path`。
+    fn edit_path(self) -> &'static str {
+        match self {
+            PathMode::Home => "授权目录内的相对文件路径",
+            PathMode::Machine => "这台机器上的绝对文件路径（如 `D:\\work\\a.txt`）",
+        }
+    }
+
+    /// 写面那一句"落在哪儿"（创建/改写各自的细节里再补一句，说明这一档是整台机器）。
+    fn write_scope_note(self) -> &'static str {
+        match self {
+            PathMode::Home => "",
+            PathMode::Machine => {
+                "⚠ 这一档是全开：地址一律写绝对路径，写落在路径自己点名的位置（整台机器）。"
+            }
+        }
+    }
+}
+
+impl FileApp {
     /// 创建能力的说明（只在有授权时才被声明）。
-    pub(crate) fn creation_capability() -> Capability {
+    pub(crate) fn creation_capability(mode: PathMode) -> Capability {
         Capability::new(
             ActionId::new(CAPABILITY_CREATE_TEXT),
             "在授权目录里新建一个 UTF-8 文本文件（同名的已经在了就明确失败）",
             vec![
-                ParamSpec::new(PARAM_NAME, true, "授权目录内的单层普通文件名"),
+                ParamSpec::new(PARAM_NAME, true, mode.create_name()),
                 ParamSpec::new(PARAM_TEXT, true, "要写入的 UTF-8 文本，允许为空串"),
             ],
         )
         .with_details(
-            "边界：只创建——不覆盖、不追加、不改名、不删除；`name` 是单层文件名\
-             （不含路径分隔符与控制字符）。上限：正文最多 64 KiB，超限整体拒绝（不留半份）。\
-             失败形状：同名已存在 ⇒ 明确失败（那次创建没有发生，也没有覆盖任何东西）；\
-             创建之后写入或同步失败 ⇒ 无法确认（不是「失败」，也不是「成功」）。",
+            [
+                "边界：只创建——不覆盖、不追加、不改名、不删除；`name` 是单层文件名\
+                 （不含路径分隔符与控制字符）。上限：正文最多 64 KiB，超限整体拒绝（不留半份）。\
+                 失败形状：同名已存在 ⇒ 明确失败（那次创建没有发生，也没有覆盖任何东西）；\
+                 创建之后写入或同步失败 ⇒ 无法确认（不是「失败」，也不是「成功」）。",
+                mode.write_scope_note(),
+            ]
+            .concat(),
         )
     }
 
@@ -448,12 +625,12 @@ impl FileApp {
     ///
     /// 参数与 [`FileApp::creation_capability`] **完全相同**：复核问的是"现在这份参数对应的状态
     /// 是什么"，因此不需要任何"操作句柄"这类新概念。它**只读**、不产生任何外部效果。
-    pub(crate) fn verification_capability() -> Capability {
+    pub(crate) fn verification_capability(mode: PathMode) -> Capability {
         Capability::new(
             ActionId::new(CAPABILITY_VERIFY_TEXT),
             "复核某项创建的当前状态：文件在且字节与参数完全一致 = 成功（只读）",
             vec![
-                ParamSpec::new(PARAM_NAME, true, "授权目录内的单层普通文件名"),
+                ParamSpec::new(PARAM_NAME, true, mode.create_name()),
                 ParamSpec::new(PARAM_TEXT, true, "当初要写入的那份 UTF-8 文本"),
             ],
         )
@@ -470,12 +647,12 @@ impl FileApp {
     /// 与创建**同挂**创建授权：它同样是写，同样落在宿主显式给过的那**一个目录**里。区别只在
     /// 形状——创建只给**单层**文件名，改给的是授权目录内的**相对路径**（可以在授权目录之下
     /// 任意深度，因为要改的材料常常不在最外层）。
-    pub(crate) fn edit_capability() -> Capability {
+    pub(crate) fn edit_capability(mode: PathMode) -> Capability {
         Capability::new(
             ActionId::new(CAPABILITY_EDIT),
             "把一份已存在文本文件里 `old_text` 的唯一一处换成 `new_text`（只改这一段）",
             vec![
-                ParamSpec::new(PARAM_PATH, true, "授权目录内的相对文件路径"),
+                ParamSpec::new(PARAM_PATH, true, mode.edit_path()),
                 ParamSpec::new(
                     PARAM_OLD_TEXT,
                     true,
@@ -485,11 +662,15 @@ impl FileApp {
             ],
         )
         .with_details(
-            "唯一定位：`old_text` 必须非空，且在文件里恰好出现一次——一次都没出现、\
-             或出现多次（不知道该换哪一处）都明确失败，而且一个字节都不动。`new_text` 可以是空串\
-             （等于删掉那一段）。`path` 是授权目录内的相对路径，可以任意深度（要改的材料常常不在\
-             最外层）。上限：替换后全文最多 64 KiB，超限整体拒绝、不截断。只替换文本：\
-             不改文件名、不删除文件、不追加内容；替换之后写入或同步失败 ⇒ 无法确认。",
+            [
+                "唯一定位：`old_text` 必须非空，且在文件里恰好出现一次——一次都没出现、\
+                 或出现多次（不知道该换哪一处）都明确失败，而且一个字节都不动。`new_text` 可以是空串\
+                 （等于删掉那一段）。`path` 是授权目录内的相对路径，可以任意深度（要改的材料常常不在\
+                 最外层）。上限：替换后全文最多 64 KiB，超限整体拒绝、不截断。只替换文本：\
+                 不改文件名、不删除文件、不追加内容；替换之后写入或同步失败 ⇒ 无法确认。",
+                mode.write_scope_note(),
+            ]
+            .concat(),
         )
     }
 
@@ -497,12 +678,12 @@ impl FileApp {
     ///
     /// 参数与 [`FileApp::edit_capability`] 完全相同：复核问的是"现在这份参数对应的状态是什么"，
     /// 因此不需要任何"操作句柄"这类新概念。它**只读**、不产生任何外部效果。
-    pub(crate) fn edit_verification_capability() -> Capability {
+    pub(crate) fn edit_verification_capability(mode: PathMode) -> Capability {
         Capability::new(
             ActionId::new(CAPABILITY_VERIFY_EDIT),
             "复核某项改写的当前状态：`old_text` 已不在且 `new_text` 在 = 成功（只读）",
             vec![
-                ParamSpec::new(PARAM_PATH, true, "授权目录内的相对文件路径"),
+                ParamSpec::new(PARAM_PATH, true, mode.edit_path()),
                 ParamSpec::new(PARAM_OLD_TEXT, true, "当初要被换掉的那段文本"),
                 ParamSpec::new(PARAM_NEW_TEXT, true, "当初替换成的文本"),
             ],
@@ -517,27 +698,33 @@ impl FileApp {
 
     /// 这个实例当前可用的能力：读侧三项，加上**有写面时**的那两项写能力与它们各自的复核能力。
     pub(crate) fn available_capabilities(&self) -> Capabilities {
-        let mut items = Self::capabilities().items().to_vec();
+        let mode = PathMode::of_machine(self.scope.is_machine());
+        let mut items = Self::capabilities_in(mode).items().to_vec();
         if self.is_writable() {
-            items.push(Self::creation_capability());
-            items.push(Self::verification_capability());
-            items.push(Self::edit_capability());
-            items.push(Self::edit_verification_capability());
+            items.push(Self::creation_capability(mode));
+            items.push(Self::verification_capability(mode));
+            items.push(Self::edit_capability(mode));
+            items.push(Self::edit_verification_capability(mode));
         }
         Capabilities::of(items)
     }
 
-    /// 这一次活动可以用的能力说明（三项只读，顺序固定）。
+    /// 这一次活动可以用的能力说明（三项只读，顺序固定；**家档**）。
     ///
     /// 它不是全局注册表：调用方在装配一次活动时显式把这份说明放进去，不注册、不安装、不发现。
     /// 说明里给的是**作用域、参数语义、上限与截断行为**，不写"你应该先找再读"这类编排建议。
     pub fn capabilities() -> Capabilities {
+        Self::capabilities_in(PathMode::Home)
+    }
+
+    /// 按档位给的那份说明（机器档的差别只有一处：地址是绝对路径）。
+    pub(crate) fn capabilities_in(mode: PathMode) -> Capabilities {
         Capabilities::of(vec![
             Capability::new(
                 ActionId::new(CAPABILITY_LIST),
                 "列出授权资料根里某个目录的子项（默认只看直接子项；给 `depth` 就往下递归，按名称排序）；接着列用 `after`",
                 vec![
-                    ParamSpec::new(PARAM_PATH, false, "授权资料根内的相对目录；留空表示资料根"),
+                    ParamSpec::new(PARAM_PATH, false, mode.list_path()),
                     ParamSpec::new(
                         PARAM_AFTER,
                         false,
@@ -560,7 +747,7 @@ impl FileApp {
                 ActionId::new(CAPABILITY_READ_TEXT),
                 "读一个 UTF-8 文本文件；整份读，或给 `offset`/`limit` 续读一段字节，或给 `from_line`/`lines` 按行读一段",
                 vec![
-                    ParamSpec::new(PARAM_PATH, true, "授权资料根内的相对文件路径"),
+                    ParamSpec::new(PARAM_PATH, true, mode.read_path()),
                     ParamSpec::new(PARAM_OFFSET, false, "本段的起始字节（默认 0）"),
                     ParamSpec::new(PARAM_LIMIT, false, "本段的字节数上限（默认 64 KiB）"),
                     ParamSpec::new(PARAM_FROM_LINE, false, "按行读的起点行号，从 1 起算"),
@@ -586,7 +773,7 @@ impl FileApp {
                     ParamSpec::new(
                         PARAM_PATH,
                         false,
-                        "授权资料根内的相对目录，只在它之内查；留空表示资料根",
+                        mode.grep_path(),
                     ),
                 ],
             )
@@ -600,9 +787,11 @@ impl FileApp {
         ])
     }
 
-    /// 沙盒根。只用于诊断与测试，**不进入任何 Model 可见内容**。
-    pub fn root(&self) -> &Path {
-        &self.root
+    /// 家档的沙盒根。只用于诊断与测试，**不进入任何 Model 可见内容**。
+    ///
+    /// 机器档没有单一根（根由每一条绝对路径自己点名的那个卷给出）⇒ `None`。
+    pub fn home(&self) -> Option<&Path> {
+        self.scope.home()
     }
 
     /// 列目录：直接子项（`depth` > 1 时递归；**不给就是 1，与从前逐字节相同**）、最多
@@ -1010,21 +1199,29 @@ impl FileApp {
         )])
     }
 
-    /// 把一个沙盒相对路径解析成绝对路径。
+    /// 把一个地址解析成绝对路径（**按档分派**：家档 = 相对路径；机器档 = 绝对路径）。
     ///
-    /// 规则是**拒绝优先**，而且**先校验形状、再碰文件系统**：[`relative_names`] 先只看形状
-    /// （每一段都必须是普通名字；`.`、`..`、根、盘符前缀一律拒绝），这一遍不动文件系统，
-    /// 所以 `sub/../../x` 会先被判非法，而不是先撞上"目录不存在"；之后才逐段确认存在性与
-    /// 符号链接 / junction / 其他 reparse point；最后用**组件级**前缀校验确认结果仍在沙盒内
-    /// （`Path::starts_with` 按组件比较，不是字符串前缀比较）。
+    /// 规则是**拒绝优先**，而且**先校验形状、再碰文件系统**：[`relative_names`] /
+    /// [`machine_path`] 先只看形状（`.`、`..`、根、盘符前缀、UNC、设备命名空间一律拒绝），
+    /// 这一遍不动文件系统，所以 `sub/../../x` 会先被判非法，而不是先撞上"目录不存在"；
+    /// 之后才逐段确认存在性与符号链接 / junction / 其他 reparse point。
     ///
     /// ⚠️ 本函数只做"检查"；真正的读发生在之后。检查与打开之间理论上存在替换窗口，
     /// 本版把沙盒限定为**受信目录**（测试自建、不允许不可信进程并发修改），因此
     /// **不构成 OS 级安全沙盒**。
-    fn resolve_existing(&self, relative: &str) -> Result<PathBuf, FailureClass> {
-        let names = relative_names(relative)?;
-        // 空路径 = 沙盒根本身（列目录要它），因此这里不额外判空。
-        resolve_within(&self.root, &names)
+    fn resolve_existing(&self, path: &str) -> Result<PathBuf, FailureClass> {
+        match &self.scope {
+            Scope::Home(root) => {
+                let names = relative_names(path)?;
+                // 空路径 = 沙盒根本身（列目录要它），因此这里不额外判空。
+                resolve_within(root, &names)
+            }
+            // 机器档：`machine_path` 会拒掉相对路径（"相对于什么"在这里没有唯一答案）。
+            Scope::Machine => {
+                let target = machine_path(path)?;
+                resolve_machine(&target)
+            }
+        }
     }
 
     /// 在授权目录里**新建**一个文本文件。
@@ -1044,11 +1241,6 @@ impl FileApp {
         operation: &OperationId,
         params: &ActionParams,
     ) -> ActionOutcome {
-        let base = match self.writable_base(agent, operation.run()) {
-            Ok(base) => base,
-            Err(class) => return ActionOutcome::failure(class),
-        };
-
         for (name, _) in params.entries() {
             if name != PARAM_NAME && name != PARAM_TEXT {
                 return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
@@ -1058,21 +1250,22 @@ impl FileApp {
             return ActionOutcome::failure(FailureClass::MissingParameter.as_str());
         };
 
-        let names = match relative_names(name) {
-            Ok(names) => names,
+        // 落点判据只有一处（`create_target`）：家档是"基准目录里的单层名字"，机器档是
+        // "绝对路径，父目录要在、末段不在"。这里**不再自己拼路径**。
+        let anchor = match self.write_anchor(agent, operation.run()) {
+            Ok(anchor) => anchor,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        let (dir, file_name) = match Self::create_target(anchor, name) {
+            Ok(target) => target,
             Err(class) => return ActionOutcome::failure(class.as_str()),
         };
-        // 单层普通文件名：没有第二段，也就没有中间路径可以被替换；控制字符也不收——
-        // 它会破坏任何按行渲染这份名字的地方。
-        if names.len() != 1 || names[0].chars().any(char::is_control) {
-            return ActionOutcome::failure(FailureClass::InvalidPath.as_str());
-        }
         // 上限：整体拒绝，不截断。空文本合法（0 字节文件是一个明确的效果）。
         if text.len() > MAX_CREATE_BYTES {
             return ActionOutcome::failure(FailureClass::TooLarge.as_str());
         }
 
-        let target = base.join(&names[0]);
+        let target = dir.join(&file_name);
         // **独占创建**：`create_new` 是真实的原子语义，不用"先 exists 再普通写入"冒充。
         let mut file = match OpenOptions::new()
             .write(true)
@@ -1095,7 +1288,7 @@ impl FileApp {
 
         ActionOutcome::success(vec![ContentBlock::new(
             "created",
-            format!("{} ({} bytes)", names[0], text.len()),
+            format!("{} ({} bytes)", file_name, text.len()),
         )])
     }
 
@@ -1119,11 +1312,6 @@ impl FileApp {
         operation: &OperationId,
         params: &ActionParams,
     ) -> ActionOutcome {
-        let base = match self.writable_base(agent, operation.run()) {
-            Ok(base) => base,
-            Err(class) => return ActionOutcome::failure(class),
-        };
-
         for (name, _) in params.entries() {
             if name != PARAM_NAME && name != PARAM_TEXT {
                 return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
@@ -1133,18 +1321,21 @@ impl FileApp {
             return ActionOutcome::failure(FailureClass::MissingParameter.as_str());
         };
 
-        let names = match relative_names(name) {
-            Ok(names) => names,
+        // 与 `create_text` **同一个落点判据**（`create_target`）：复核问的是"那份参数对应的
+        // 位置现在是什么样"，两边各拼一次路径就会在某一档上验错地方。
+        let anchor = match self.write_anchor(agent, operation.run()) {
+            Ok(anchor) => anchor,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        let (dir, file_name) = match Self::create_target(anchor, name) {
+            Ok(target) => target,
             Err(class) => return ActionOutcome::failure(class.as_str()),
         };
-        if names.len() != 1 || names[0].chars().any(char::is_control) {
-            return ActionOutcome::failure(FailureClass::InvalidPath.as_str());
-        }
         if text.len() > MAX_CREATE_BYTES {
             return ActionOutcome::failure(FailureClass::TooLarge.as_str());
         }
 
-        let target = base.join(&names[0]);
+        let target = dir.join(&file_name);
         let metadata = match fs::symlink_metadata(&target) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1167,7 +1358,7 @@ impl FileApp {
 
         ActionOutcome::success(vec![ContentBlock::new(
             "verified",
-            format!("{} ({} bytes match)", names[0], text.len()),
+            format!("{} ({} bytes match)", file_name, text.len()),
         )])
     }
 
@@ -1188,11 +1379,6 @@ impl FileApp {
         operation: &OperationId,
         params: &ActionParams,
     ) -> ActionOutcome {
-        let base = match self.writable_base(agent, operation.run()) {
-            Ok(base) => base,
-            Err(class) => return ActionOutcome::failure(class),
-        };
-
         for (name, _) in params.entries() {
             if name != PARAM_PATH && name != PARAM_OLD_TEXT && name != PARAM_NEW_TEXT {
                 return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
@@ -1211,7 +1397,12 @@ impl FileApp {
             return ActionOutcome::failure(FailureClass::InvalidArgument.as_str());
         }
 
-        let target = match resolve_in_base(&base, relative) {
+        // 落点判据只有一处（`write_target`）：家档相对基准目录，机器档是绝对路径。
+        let anchor = match self.write_anchor(agent, operation.run()) {
+            Ok(anchor) => anchor,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        let target = match Self::write_target(anchor, relative) {
             Ok(target) => target,
             Err(class) => return ActionOutcome::failure(class.as_str()),
         };
@@ -1283,11 +1474,6 @@ impl FileApp {
         operation: &OperationId,
         params: &ActionParams,
     ) -> ActionOutcome {
-        let base = match self.writable_base(agent, operation.run()) {
-            Ok(base) => base,
-            Err(class) => return ActionOutcome::failure(class),
-        };
-
         for (name, _) in params.entries() {
             if name != PARAM_PATH && name != PARAM_OLD_TEXT && name != PARAM_NEW_TEXT {
                 return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
@@ -1304,7 +1490,11 @@ impl FileApp {
             return ActionOutcome::failure(FailureClass::InvalidArgument.as_str());
         }
 
-        let target = match resolve_in_base(&base, relative) {
+        let anchor = match self.write_anchor(agent, operation.run()) {
+            Ok(anchor) => anchor,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        let target = match Self::write_target(anchor, relative) {
             Ok(target) => target,
             // 路径形状本身不合法：那是给这个动词的参数不对，属于**明确失败**，与读无关。
             Err(class @ FailureClass::InvalidPath) => {
@@ -1429,6 +1619,19 @@ pub(crate) fn resolve_in_base(base: &Path, relative: &str) -> Result<PathBuf, Fa
         return Err(FailureClass::InvalidPath);
     }
     resolve_within(base, &names)
+}
+
+/// **机器档的第二遍**：逐段落实一条绝对路径（末段也必须存在）。规则的家在 [`crate::sandbox`]。
+pub(crate) fn resolve_machine(target: &MachinePath) -> Result<PathBuf, FailureClass> {
+    crate::sandbox::resolve_machine(target).map_err(FailureClass::from)
+}
+
+/// **机器档的"新建"用**：父目录逐段落实（存在、是目录、链上无链接），末段原样交回。
+/// 规则的家同上；这里只把分类翻成本 App 的词表。
+pub(crate) fn resolve_machine_parent(
+    target: &MachinePath,
+) -> Result<(PathBuf, String), FailureClass> {
+    crate::sandbox::resolve_machine_parent(target).map_err(FailureClass::from)
 }
 
 /// 把一份**已经按名称排序的全量条目**取成一页并渲染（`files_list` 的唯一渲染形状）。
@@ -1708,6 +1911,8 @@ impl ActionPort for FileApp {
             | CAPABILITY_VERIFY_EDIT => match &self.writable {
                 None => ActionAdmission::refused(REFUSAL_CREATION_NOT_GRANTED),
                 Some(WritableFace::Own) => ActionAdmission::Admitted,
+                // 机器档是**支级**的整档授权（主人给的），不绑这一次活动。
+                Some(WritableFace::Machine) => ActionAdmission::Admitted,
                 Some(WritableFace::Granted(grant))
                     if grant.agent != *agent || grant.run != *run =>
                 {
