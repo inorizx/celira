@@ -94,7 +94,7 @@ const MAX_REDIRECTS: usize = 5;
 /// 只接受的两种页面协议（外部冻结的协议名：它们是标准里定下来的字面量，不是我们的词）。
 const ALLOWED_SCHEMES: [&str; 2] = ["http", "https"];
 
-/// 本件自己的失败词汇表（封闭九项）。
+/// 本件自己的失败词汇表（**封闭表**：全部取值与 [`WebFailure::as_str`] 逐条对称）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WebFailure {
     /// 连不上（域名解析不出来、连接被拒、半截响应）。
@@ -113,6 +113,10 @@ pub enum WebFailure {
     /// 与 `CredentialRejected` 的区别就是"**没有**"与"**被拒**"的区别——与
     /// `SelfConcept::Absent` / `SelfConcept::Unreadable` 同一条三态纪律。**动词照旧在场**：缺的是这一格，
     /// 不是这个能力。
+    ///
+    /// **两格指向两个不同的动作**：这一格 ⇒ 操作者该**配一个**（本机没声明，与对面无关）；被拒那一格 ⇒
+    /// 该去查那一份**还有没有效**（对面明说了不认）。两句话**不许互相顶替**——报错一格，操作者就会去查
+    /// 一件本来不存在的东西（旧注释把两件事写成一句，见 [`WebFailure::CredentialRejected`]）。
     CredentialAbsent,
     /// 参数不合法（空查询、超长、地址读不懂、协议不在允许的两种里）。
     ///
@@ -177,7 +181,8 @@ impl WebFailure {
 /// 凭据只被写进请求头；本类型**不派生 `Debug`**，因此它不可能被顺手打进日志或报告。
 ///
 /// 缺这一份声明不是"装不了"：`web_search` 照旧在 Agent 的能力面里，只是**执行时如实说没有凭据**
-/// （`credential-rejected`）；`web_fetch` 与厂商无关，照常可用。
+/// （`credential-absent`——**这台机器没配**，不是对面拒了，见 [`WebFailure`]）；`web_fetch` 与厂商无关，
+/// 照常可用。
 #[derive(Clone)]
 pub struct SearchAccess {
     endpoint: String,

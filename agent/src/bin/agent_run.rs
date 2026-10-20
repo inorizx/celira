@@ -975,8 +975,8 @@ const SEARCH_CREDENTIAL_ENV: &str = "TAVILY_API_KEY";
 /// 搜索厂商的声明：**凭据**来自环境变量、**端点**来自命令行（不给就用本仓认的那一个）。
 ///
 /// 与 `resolve_im` 有意不同：**缺凭据不是入口错误**。web 窗是出厂内置的（两条动词从第一轮起
-/// 就在场），没有凭据只意味着「查」这一条会如实失败 `credential-rejected`，而「取」不依赖厂商、
-/// 照常可用。这里报变量名、不报取值，也绝不拿一个空凭据去试。
+/// 就在场），没有凭据只意味着「查」这一条会如实失败 `credential-absent`（**没配**，是本地事实，
+/// 不是对面拒了），而「取」不依赖厂商、照常可用。这里报变量名、不报取值，也绝不拿一个空凭据去试。
 fn resolve_search(endpoint: &Option<String>) -> Option<SearchAccess> {
     let credential = std::env::var(SEARCH_CREDENTIAL_ENV).ok()?;
     if credential.trim().is_empty() {

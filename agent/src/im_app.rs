@@ -143,6 +143,17 @@ pub const CAPABILITY_TRANSFER_OWNER: &str = "im_transfer_owner";
 /// `GET /v1/backend/rooms/{room_id}/members` 早在 Agent 读面里（`CORE_V1_AGENT_READ_SURFACE.md`：
 /// "requester 必须对该 Room 存在 active Membership 周期……投影与 Human 侧逐字段相同"），
 /// 缺的一直是**这一侧的动作**。
+///
+/// ⚠ **这一格不需要解封**：端点早就在 Agent 读面里——服务端零改动，冻结契约也一个字没动。
+/// 补这类读面之前**先查那张路由表**——同一个方法与路径再声明一次，服务端启动时 axum 会当场报
+/// `Overlapping method route`（这条路上撞过一次，加了又撤，没有留下任何服务端改动）。
+///
+/// **一格一个主语**：成员资格（谁在这间房里）≠ 在场态（[`CAPABILITY_ROOM_LIVE`] 的"此刻谁在"）
+/// ≠ 关系账（`im_contacts*` 在 [`crate::im_social_app`]）——它只回答第一个。知道对方的标识
+/// 不等于跟它有过来往：要加好友仍走关系面那一条，本动词不替关系面回答。
+///
+/// **它是邀请的承重面**：`im_invite` 之所以能落在 `repeatable-write`（而不是"写完之后机械上
+/// 核不了"那一类），靠的正是这条只读面——判据与改档经过在 [`ImApp::declared_effects`] 那一格。
 pub const CAPABILITY_ROOM_MEMBERS: &str = "im_room_members";
 /// **读附件**动词（只读面）：把一条消息里某个附件的字节读进**这一轮**视野。
 pub const CAPABILITY_READ_ATTACHMENT: &str = "im_read_attachment";
@@ -2008,6 +2019,14 @@ impl ImApp {
     ///
     /// 它与 Human 侧那条**同一可见性裁决**（服务端复用同一个 `get_room_members`）：
     /// 我必须是这间房的 active 成员；未知 / bad-id / 不是成员统一 404。
+    ///
+    /// **只读的含义**：不写任何事实、不带幂等键 ⇒ 不在 [`ImApp::declared_effects`] 里登记
+    /// （那里**只登记写效应**，"未声明即只读"）。**行序也归端点**：本层照原样逐行渲染、不重排
+    /// ——"owner 在前、其余按加入时刻"是世界那份查询排的，不是这里排的。
+    ///
+    /// ⚠ **证据边界如实登记**：用例钉的是"路径对契约、逐行对形状、404 与参数不合规各一格、
+    /// 参数不合规时一次请求都不发"，**不钉行序**（行序来自世界）。回执读不懂时只照实说读不懂、
+    /// **不编成员**出来——那说明这一版世界的形状变了，交叉看走 `im_rooms` 与 `im_room_live`。
     fn room_members(&self, params: &ActionParams) -> ActionOutcome {
         let Some(room) = valid_room(params) else {
             return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());
@@ -2518,7 +2537,8 @@ impl crate::app_contract::AppPort for ImApp {
     ///   与 `terminal_run` 同档）。⚠ 它**不是**"不声明即只读"那一类：不声明会把一个 POST
     ///   说成只读，那是对世界撒谎。
     ///
-    /// 只读动词不需要声明（未声明即只读）：通讯录、翻记录、**读附件**与各次复核。
+    /// 只读动词不需要声明（未声明即只读）：通讯录、翻记录、**成员清单**、房间进行态、
+    /// **读附件**与各次复核。
     /// ⚠ 社交 / 资料两组写动词的声明跟着动词搬进了各自的新包（`im-social` / `im-profile`）。
     fn declared_effects(&self) -> Vec<crate::app_contract::EffectDeclaration> {
         use crate::app_contract::{EffectClass, EffectDeclaration};
