@@ -64,6 +64,7 @@ pub mod process_facts;
 pub mod registration;
 pub mod unread;
 pub mod update;
+pub mod update_apply;
 pub mod world_channel;
 
 use tauri::Manager;
@@ -389,7 +390,11 @@ pub fn run() {
             unread::set_unread_total,
             // **有没有新版本**（2026-10-21）：只读、不下载。GitHub 优先、失败退 Gitee；
             // 渠道地址来自包内 `VERSION` 的 repo/mirror（见 `update.rs` 文件头）。
-            update::update_check
+            update::update_check,
+            // **下载并换上去**（2026-10-21）：下载 → 校 sha256 → 解压 → 外部进程做两次 rename
+            // （旧目录留作回滚点）。见 `update_apply.rs` 文件头。
+            update_apply::update_download,
+            update_apply::update_apply
         ])
         .setup(|app| {
             // **主窗口从这里建**（`tauri.conf.json` 里那一格写着 `"create": false`）。

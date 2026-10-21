@@ -113,3 +113,71 @@ export async function checkAppUpdate(): Promise<AppUpdateReadout | null> {
     return null
   }
 }
+
+/** 解压好、验过版本的那一份（壳回的字段名与 `update_apply.rs` 的 camelCase 对齐）。 */
+export interface PreparedUpdate {
+  payloadDir: string
+  version: string
+  installDir: string
+}
+
+function asPrepared(value: unknown): PreparedUpdate | null {
+  if (typeof value !== 'object' || value === null) return null
+  const raw = value as Record<string, unknown>
+  const payloadDir = typeof raw.payloadDir === 'string' ? raw.payloadDir.trim() : ''
+  const version = typeof raw.version === 'string' ? raw.version.trim() : ''
+  if (payloadDir === '' || version === '') return null
+  return {
+    payloadDir,
+    version,
+    installDir: typeof raw.installDir === 'string' ? raw.installDir : '',
+  }
+}
+
+/**
+ * **纯函数**：现在能不能点「下载并更新」；不能就给出原因（`null` = 可以）。
+ *
+ * 三条拒绝的顺序就是判据：没有新版 ⇒ 不更新；没有包 ⇒ 不更新；**没有 sha256 ⇒ 不更新**
+ * （fail closed：下下来的字节无法证明，就不该换成它）。
+ */
+export function installBlocker(readout: AppUpdateReadout): string | null {
+  if (readout.state !== 'newer') return '没有新版本'
+  if (!readout.asset) return '渠道没有给出可下载的包'
+  if (!readout.asset.sha256) return '渠道没有给出 sha256 —— 不能自动更新'
+  return null
+}
+
+/**
+ * 下载 → 校 sha256 → 解压。**失败抛错**（调用方把原话显示出来，不吞）。
+ *
+ * 三道拒绝都在这儿说清：不在壳里、渠道没给包、渠道没给 sha256。
+ * 最后一条是 fail-closed：**没有哈希就不自动更新**（下下来的字节无法证明）。
+ */
+export async function downloadAppUpdate(readout: AppUpdateReadout): Promise<PreparedUpdate> {
+  if (!isTauriRuntime()) throw new Error('这个形态不能更新自己')
+  const blocker = installBlocker(readout)
+  if (blocker) throw new Error(blocker)
+  const asset = readout.asset
+  if (!asset) throw new Error('渠道没有给出可下载的包')
+  if (!asset.sha256) throw new Error('渠道没有给出 sha256 —— 不能自动更新')
+  const api = await import('@tauri-apps/api/core')
+  const raw = await api.invoke('update_download', {
+    version: readout.latest ?? readout.current,
+    url: asset.url,
+    sha256: asset.sha256,
+  })
+  const prepared = asPrepared(raw)
+  if (!prepared) throw new Error('壳回的下载结果读不懂')
+  return prepared
+}
+
+/**
+ * 交给壳：写替换脚本、起外部进程、然后壳退出。
+ *
+ * 这一句返回之后窗口会消失——不是崩溃，是让位给替换脚本（它等 2 秒，再 rename）。
+ */
+export async function applyAppUpdate(prepared: PreparedUpdate): Promise<void> {
+  if (!isTauriRuntime()) throw new Error('这个形态不能更新自己')
+  const api = await import('@tauri-apps/api/core')
+  await api.invoke('update_apply', { payloadDir: prepared.payloadDir })
+}
