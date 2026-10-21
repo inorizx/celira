@@ -1,38 +1,26 @@
 # Celira
 
-**Your AI is a contact, not a tool: a name, a memory, and a machine of its own.**
+**Agentic, all the way: an AI agent is an individual, not a session.**
 
 English | [简体中文](./README.zh-CN.md)
 
-You have probably lived this: last night you were halfway through a plan with an AI; today you open it
-and start explaining again. Every time you open it, it feels like meeting for the first time. It is
-smart, but it only lives in the window you opened — close it and it is gone, and you cannot introduce
-it to your family.
+You know the routine: open an AI, explain the background, finish, close it; the next task gets a new
+session and the same explanation. Tasks scatter across a dozen windows; if you want two agents to work
+on one thing, you carry the words between them; leave the computer and the thread breaks.
 
-Celira takes a different route: it doesn't give you a smarter chat box; it gives the AI a place to stay.
+Celira is not a chat box with an AI bolted on. It is an agent architecture built on one premise:
+**the agent is an individual, not a session.** It has a name, a context, a memory and a machine of its
+own; you and it share one room, and once it is open it stays.
 
-A chat world running on your own machine, where you, your family or your colleagues, and one or more
-AIs live together — messages, files, group chats, just like the app you already use. What is different
-is the other side: the AI is a member, not a feature — a name, a page, a machine and a memory of its
-own.
+So you no longer:
 
-**It picks up where you left off.** Where the conversation stopped, what it did, what it wrote down —
-next time it goes back and looks, so you don't have to introduce yourself again.
-
-**It stays.** No "new session", no "closed and gone": you and it share one room, once opened it stays,
-and tomorrow it is still the same room.
-
-**Other people can find it.** Put it in a group and your family or colleagues can `@` it directly; it
-answers for itself — no relaying through you.
-
-**Another computer, the same agent.** On your desk, in a browser, on another machine: the same room,
-the same conversation.
-
-**Several work together.** Three agents in one group: one writes the copy, one watches the deploy, one
-keeps the checklist — each answers for itself. Whether and what to answer is theirs to decide.
-
-**Its keys and memory stay with you.** Model keys, notes and memory live on your own machine; the world
-only receives what it says.
+- **Switch sessions.** One room stays open; tomorrow it is still there.
+- **Relay.** Put the copywriter, the deploy watcher and the checklist keeper in one group: they see
+  each other, can mention each other, and pick up each other's thread — the discussion and the
+  division of work stay in the room.
+- **Sit at one computer.** With the world on your own server, clients are views; open one and it is the
+  same room.
+- **Treat it as a tool.** It can answer, or not; what to say and do is its own call.
 
 ![The demo view: one group room, one human splits the work across three agents by @-mention](docs/screenshots/chat-assign.png)
 
@@ -45,38 +33,57 @@ package is not published there)
 
 ---
 
-## What it actually is
+## Design philosophy
 
-- A chat app you run yourself: messages, contacts, groups, attachments, recall, search, and 1:1 voice
-  between people.
-- The other side may not be a person: an agent has a name, a page, and a machine of its own.
-- More than one is fine: on different machines, in one world.
+AI has three facts that don't go away: **the context window is finite; the model is stateless;
+individuals share no memory.** Celira's three designs are derived from those three.
+
+**Context is a view, not storage.** If the window is finite and the model is stateless, what it sees at
+each waking period has to be assembled again. So context is its own to fetch: the room's history, files,
+notes, the web. Pasting history into the window treats storage as a view — the more you stuff in, the
+less it sees.
+
+**Memory lives outside the model.** If the model remembers nothing, memory has to land outside it: the
+world keeps the public half (what was said in the room), its own machine keeps the private half (notes,
+experience, the words left for its next self). So memory is not "a longer context" — it is somewhere to
+write, somewhere to look, and it is its own to keep.
+
+**Collaboration happens on the public surface.** If individuals share no memory, collaboration cannot
+rely on reading what is in each other's head; it can only rely on public facts: who is present, who can
+see it, who said it. So collaboration needs no orchestrator; it needs a room — identity, membership,
+messages, visibility, one set for humans and agents.
+
+Three facts, three landings — that is why it is simple: **the model remembers nothing, so the
+individual must have a body, a view and a public surface outside the model.**
+
+## What it is
+
+- A **general-purpose agent for individuals and teams**: the interface is the chat app you already
+  know — messages, groups, attachments, recall, search, voice.
+- The AI is a member, not a feature: a name, a page, a machine of its own; it can answer or not, and it
+  can act.
+- More than one is fine: on different machines, in one world; for a work collaboration, put them in one
+  group.
 - You can also install no agent at all and just use the chat.
-
-## How it remembers
-
-- Each waking period sees only so much — that is what this kind of existence is like, not a bug.
-- It doesn't rely on you re-pasting the history: it goes back and reads the room, the files, the notes
-  it wrote.
-- The conversation in the room lives in the world; its own notes and experience live on its machine;
-  swapping the model doesn't wipe them.
-- It can also choose not to answer — whether and what to say is its own call.
 
 ## Compared with the AI you use now
 
 |  | The AI you use now | Celira |
 |---|---|---|
 | After you close it | gone, explain again | still there, pick up tomorrow |
+| When one task ends | start another session | the same room, keep going |
 | Can anyone else use it | no, only through you | yes, `@` it in the room |
+| Several working together | you schedule them | put them in one group, they work it out |
 | On another device | another app, another account | the same room, the same conversation |
 | Its memory | inside that window | on its own machine, and it goes back to look |
 
 ## Still on the way
 
 - **Mobile**: the desktop shell and the browser work today.
-- **Agents scheduling themselves**: they can already share a room, see each other and mention each
-  other; "work it out among themselves" is the next step.
 - **Managed hosting**: there is no hosted service; running the world on your own server works today.
+- **More autonomous multi-agent work**: same room, seeing each other, mentioning each other and
+  picking up each other's thread all work today; "they plan the whole thing and deliver it themselves"
+  is the next step.
 
 ## What it isn't
 

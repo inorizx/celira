@@ -358,11 +358,46 @@ $zipPath = Join-Path $downloadDir $zipName
 if ($plan.url) {
     Write-Host ('[download] {0}' -f $plan.url)
     $ProgressPreference = 'SilentlyContinue'
-    try {
-        Invoke-WebRequest -Uri $plan.url -OutFile $zipPath -UseBasicParsing
-    } catch {
-        Write-Host ('[fail] download failed: {0}' -f $_.Exception.Message)
-        Write-Host '[fail] nothing was stopped, nothing was changed'
+    # Two routes, same reason as the channel reader: Windows PowerShell 5.1's Invoke-WebRequest goes
+    # through the SYSTEM proxy (WinINET) and, behind a proxy, fails with "Received an unexpected EOF
+    # or 0 bytes from the transport stream" on this machine (measured 2026-10-21). curl honours the
+    # HTTP(S)_PROXY env vars, streams big files, and printed 200 with the same URL. So: curl first
+    # when it exists, Invoke-WebRequest with an explicit proxy as the fallback (and TLS 1.2 forced --
+    # old .NET defaults negotiate something the proxy will not carry).
+    $proxyUrl = $null
+    foreach ($name in 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'HTTP_PROXY', 'http_proxy') {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value -and $value.Trim() -ne '') { $proxyUrl = $value.Trim(); break }
+    }
+    if ($proxyUrl) { Write-Host ('[download] proxy in the environment: {0}' -f $proxyUrl) }
+
+    $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue
+    if (-not $curl) { $curl = Get-Command 'curl' -ErrorAction SilentlyContinue }
+    if ($curl) {
+        Write-Host '[download] via curl'
+        & $curl.Source @('-sS', '-L', '--max-time', '900', '-A', 'celira-update/1', '-o', $zipPath, $plan.url) | Out-Host
+        $downloadCode = $LASTEXITCODE
+    } else {
+        Write-Host '[download] via Invoke-WebRequest (no curl on PATH)'
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        } catch {
+            /* older runtimes: leave the default alone */
+        }
+        try {
+            if ($proxyUrl) {
+                Invoke-WebRequest -Uri $plan.url -OutFile $zipPath -UseBasicParsing -Proxy $proxyUrl
+            } else {
+                Invoke-WebRequest -Uri $plan.url -OutFile $zipPath -UseBasicParsing
+            }
+            $downloadCode = 0
+        } catch {
+            Write-Host ('[download] Invoke-WebRequest: {0}' -f $_.Exception.Message)
+            $downloadCode = 1
+        }
+    }
+    if ($downloadCode -ne 0) {
+        Write-Host ('[fail] download failed (exit {0}) -- nothing was stopped, nothing was changed' -f $downloadCode)
         exit $EXIT.CHANNEL
     }
 } else {
