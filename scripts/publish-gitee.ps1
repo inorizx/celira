@@ -165,6 +165,12 @@ function Add-GiteeAsset {
     $stream = $null
     $form = $null
     try {
+        # Gitee's attach_files endpoint answered 401 when the token was ONLY a multipart form
+        # field (measured 2026-10-21, release id 1226742). The same token in an Authorization
+        # header is what it actually authenticates on; the form field stays because the public
+        # docs list it, and a server that reads either one accepts both.
+        $client.DefaultRequestHeaders.Authorization =
+            New-Object System.Net.Http.Headers.AuthenticationHeaderValue('token', $Token)
         $form = New-Object System.Net.Http.MultipartFormDataContent
         $form.Add((New-Object System.Net.Http.StringContent($Token)), 'access_token')
         $stream = [System.IO.File]::OpenRead($FilePath)
@@ -188,6 +194,30 @@ function Add-GiteeAsset {
 function Get-DigestLine {
     param([string]$Hash)
     return ('sha256: {0}' -f $Hash)
+}
+
+# Read the asset back and compare BOTH size and digest. Used wherever Gitee gives us no size:
+# a channel that answers only "there is a file with this name" has not proved which bytes it has.
+function Test-AssetBytes {
+    param([string]$Url, [string]$ExpectedHash, [long]$ExpectedSize)
+    $tmpFile = Join-Path ([System.IO.Path]::GetTempPath()) ('celira-gitee-verify-' + [guid]::NewGuid().ToString('N') + '.zip')
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $Url -OutFile $tmpFile -UseBasicParsing -TimeoutSec 300
+        $actualSize = (Get-Item -LiteralPath $tmpFile).Length
+        if ($actualSize -ne $ExpectedSize) {
+            return @{ ok = $false; why = ('size {0} != built {1}' -f $actualSize, $ExpectedSize) }
+        }
+        $actualHash = Get-Sha256 $tmpFile
+        if ($actualHash -ne $ExpectedHash) {
+            return @{ ok = $false; why = ('sha256 {0} != built {1}' -f $actualHash, $ExpectedHash) }
+        }
+        return @{ ok = $true; size = $actualSize; hash = $actualHash }
+    } catch {
+        return @{ ok = $false; why = $_.Exception.Message }
+    } finally {
+        Remove-Item -Force -LiteralPath $tmpFile -ErrorAction SilentlyContinue
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -229,9 +259,12 @@ if ($SelfTest) {
         Assert-That 'assets: absent answers empty (not a fake one)' (@(Get-Assets ([pscustomobject]@{})).Count -eq 0)
 
         Assert-That 'format: MiB is human' ((Format-MiB 1048576) -match '^1\.0 MiB$')
-    } finally {
-        Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    } catch {
+        throw
     }
+    # No cleanup on purpose: this machine's safe-delete hook terminates the whole script on a
+    # recursive delete inside %TEMP% (measured 2026-10-21, after all 11 assertions had passed).
+    # A leftover temp directory is cheaper than a self-test that reports failure after passing.
 
     Write-Host ('[selftest] ' + $passed + ' passed, ' + $failed + ' failed')
     if ($failed -gt 0) { exit $EXIT.USAGE }
@@ -344,7 +377,24 @@ if ($found.found) {
     $sameName = @(Get-Assets $existing | Where-Object { [string]$_.name -eq $zipName })
     if ($sameName.Count -gt 0) {
         $current = $sameName[0]
-        $currentSize = if ($current.PSObject.Properties.Name -contains 'size') { [long]$current.size } else { -1 }
+        $currentSize = if ($current.PSObject.Properties.Name -contains 'size' -and $null -ne $current.size) { [long]$current.size } else { -1 }
+        if ($currentSize -le 0) {
+            # Gitee does not report an asset size. "There is a file with this name" is not proof
+            # of which bytes it holds, so read it back and compare the digest (28 MiB, once).
+            $url = Get-AssetUrl $current
+            if (-not $url) {
+                Write-Host '[fail] the release lists the asset but gives no download address -- cannot prove the bytes'
+                exit $EXIT.VERIFY
+            }
+            Write-Host '[state]   this channel does not report an asset size -- proving the bytes by download'
+            $proof = Test-AssetBytes -Url $url -ExpectedHash $zipHash -ExpectedSize $zipSize
+            if (-not $proof.ok) {
+                Write-Host ('[fail] the attached asset does not match the build: {0}' -f $proof.why)
+                exit $EXIT.VERIFY
+            }
+            Write-Host ('[verify]  downloaded asset matches: {0}' -f $proof.hash)
+            exit $EXIT.OK
+        }
         if ($currentSize -eq $zipSize) {
             Write-Host ('[state]   {0} is already attached with the same size ({1}) -- nothing to upload' -f $zipName, (Format-MiB $zipSize))
             Write-Host '[state]   (byte identity is the digest printed above; -VerifyDownload proves it by reading it back)'
@@ -433,12 +483,21 @@ if ($assets.Count -eq 0) {
     exit $EXIT.VERIFY
 }
 $landed = $assets[0]
-$landedSize = if ($landed.PSObject.Properties.Name -contains 'size') { [long]$landed.size } else { -1 }
-if ($landedSize -ne $zipSize) {
+$landedSize = if ($landed.PSObject.Properties.Name -contains 'size' -and $null -ne $landed.size) { [long]$landed.size } else { -1 }
+if ($landedSize -gt 0 -and $landedSize -ne $zipSize) {
     Write-Host ('[fail] landed size {0} != built size {1}' -f $landedSize, $zipSize)
     exit $EXIT.VERIFY
 }
-Write-Host ('[verify]  attached: {0} ({1})' -f $zipName, (Format-MiB $landedSize))
+if ($landedSize -gt 0) {
+    Write-Host ('[verify]  attached: {0} ({1})' -f $zipName, (Format-MiB $landedSize))
+} else {
+    # Gitee's asset objects carry only a name and a URL -- no size (measured 2026-10-21: the
+    # assets array is [{browser_download_url, name}], nothing else). "No size reported" is not a
+    # pass: the only remaining proof is the bytes, so the download check is forced on instead of
+    # printing a size that this channel never gave us.
+    Write-Host '[verify]  this channel does not report an asset size -- proving the bytes by download'
+    $VerifyDownload = $true
+}
 
 if ($VerifyDownload) {
     $url = Get-AssetUrl $landed
