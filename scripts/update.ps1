@@ -346,6 +346,23 @@ if ($DryRun) {
 # ---------------------------------------------------------------------------
 # 5) download (and prove the bytes) before anything is stopped
 # ---------------------------------------------------------------------------
+# Node gate: the two steps that make this update SAFE (stop the home, back it up) are `home.js`,
+# which is Node. A packaged user who only ever double-clicks the exe has no Node -- the app itself
+# imports none (it starts bin\celira-im.exe and bin\agent_host.exe directly). Without Node this
+# script can download and unpack, but it cannot stop or back up, so it must stop HERE instead of
+# aborting halfway through the swap. Checked before the download: no point fetching 30 MB first.
+$nodeExe = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeExe) {
+    Write-Host '[fail] Node.js is not on PATH, and stopping / backing up this home needs it (home.js)'
+    Write-Host '       nothing was downloaded, stopped or unpacked'
+    Write-Host '       manual path, in this order:'
+    Write-Host '         1. tray icon -> Quit (closing the window only hides the app)'
+    Write-Host '         2. copy the home folder somewhere safe   (the way back; migrations only go up)'
+    Write-Host '         3. unpack the new zip into a NEW folder'
+    Write-Host '         4. double-click the new celira-app.exe   (the home is untouched)'
+    exit $EXIT.PREREQ
+}
+
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $downloadDir = Join-Path ([System.IO.Path]::GetTempPath()) ('celira-update-' + $stamp)
 New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
