@@ -100,6 +100,92 @@ test('渠道答不上时分开说：没有发行版＝不适用；缺产物地�
   assert.equal(notAList.notApplicable, false)
 })
 
+test('GitHub 形状：atom 里最新那一版（tag / 版本 / 时间）', () => {
+  const atom = [
+    '<?xml version="1.0"?><feed>',
+    '<entry><updated>2026-10-21T09:12:44Z</updated>',
+    '<link rel="alternate" type="text/html" href="https://github.com/o/r/releases/tag/v0.1.2"/></entry>',
+    '<entry><updated>2026-10-01T00:00:00Z</updated>',
+    '<link rel="alternate" type="text/html" href="https://github.com/o/r/releases/tag/v0.1.1"/></entry>',
+    '</feed>',
+  ].join('')
+  const head = probe.readGithubTag(atom)
+  assert.equal(head.ok, true, JSON.stringify(head))
+  assert.equal(head.tag, 'v0.1.2', '第一条就是最新（atom 自己按时间排好了）')
+  assert.equal(head.version, '0.1.2', 'v 前缀不算版本的一部分')
+  assert.equal(head.created, '2026-10-21T09:12:44Z')
+
+  const empty = probe.readGithubTag('<feed></feed>')
+  assert.equal(empty.ok, false)
+  assert.equal(empty.notApplicable, true, '一条 entry 都没有 ⇒ 还没发行版（不适用，不是失败）')
+})
+
+test('GitHub 形状：附件页里挑出默认下载，并读出页面上印的 sha256', () => {
+  const atom = '<feed><entry><updated>2026-10-21T09:12:44Z</updated>' +
+    '<link rel="alternate" href="https://github.com/o/r/releases/tag/v0.1.2"/></entry></feed>'
+  const hash = 'a'.repeat(64)
+  const assetsHtml = [
+    '<ul>',
+    '<li class="Box-row"><a href="/o/r/archive/refs/tags/v0.1.2.zip">Source code (zip)</a></li>',
+    `<li class="Box-row"><a href="/o/r/releases/download/v0.1.2/celira-0.1.2-win-x64.zip">zip</a>`,
+    `<span>sha256:${hash}</span></li>`,
+    '</ul>',
+  ].join('')
+  const answer = probe.readGithubRelease({ atom, assetsHtml, repo: 'o/r' })
+  assert.equal(answer.ok, true, JSON.stringify(answer))
+  assert.equal(answer.entry.version, '0.1.2')
+  assert.equal(answer.entry.asset.name, 'celira-0.1.2-win-x64.zip')
+  assert.equal(answer.entry.asset.url, 'https://github.com/o/r/releases/download/v0.1.2/celira-0.1.2-win-x64.zip')
+  assert.equal(answer.entry.hash, hash, '第三格是哈希：有了它"字节是不是那一版"才有得校')
+  assert.equal(answer.entry.repo, 'o/r')
+})
+
+test('GitHub 形状：这一版没挂产物 ⇒ 形状读不懂（源码压缩包不算发布产物）', () => {
+  const atom = '<feed><entry><updated>x</updated><link href="https://github.com/o/r/releases/tag/v0.1.2"/></entry></feed>'
+  const onlySource = '<ul><li><a href="/o/r/archive/refs/tags/v0.1.2.zip">Source code (zip)</a></li></ul>'
+  const answer = probe.readGithubRelease({ atom, assetsHtml: onlySource })
+  assert.equal(answer.ok, false)
+  assert.equal(answer.notApplicable, false, '答了但没有产物 ⇒ 形状读不懂，不是不适用')
+  assert.match(answer.why, /没有挂任何产物/)
+  assert.equal(answer.partial.version, '0.1.2', '它答上的那一格要留下')
+})
+
+test('端到端：GitHub 形状的离线夹具（目录里有 releases.atom）⇒ 三格答上、退出 0', () => {
+  const dir = tempTree('github-fixture')
+  const hash = 'b'.repeat(64)
+  fs.writeFileSync(
+    path.join(dir, 'releases.atom'),
+    '<feed><entry><updated>2026-10-21T09:12:44Z</updated>' +
+      '<link rel="alternate" href="https://github.com/o/r/releases/tag/v0.1.3"/></entry></feed>',
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(dir, 'expanded_assets.html'),
+    `<ul><li class="Box-row"><a href="/o/r/releases/download/v0.1.3/celira-0.1.3-win-x64.zip">z</a>` +
+      `<span>sha256:${hash}</span></li></ul>`,
+    'utf8',
+  )
+  const done = runProbe(['--current', '0.1.2', '--channel', dir])
+  assert.equal(done.code, 0, done.out)
+  assert.match(done.out, /最新发行版：0\.1\.3/)
+  assert.match(done.out, /有新版：0\.1\.2 → 0\.1\.3/)
+  assert.match(done.out, new RegExp(`sha256 ${hash}`), '哈希那一格要打出来（更新器靠它校字节）')
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('端到端：GitHub 形状但没有附件页 ⇒ 退出 3（答了，但产物那一格读不懂）', () => {
+  const dir = tempTree('github-no-assets')
+  fs.writeFileSync(
+    path.join(dir, 'releases.atom'),
+    '<feed><entry><updated>x</updated><link href="https://github.com/o/r/releases/tag/v0.1.3"/></entry></feed>',
+    'utf8',
+  )
+  const done = runProbe(['--current', '0.1.2', '--channel', dir])
+  assert.equal(done.code, 3, done.out)
+  assert.match(done.out, /没有挂任何产物/)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
 test('端到端：对着离线夹具跑，说有新版；把"你在跑哪一版"也算进去', () => {
   const dir = tempTree('fixture')
   const fixture = path.join(dir, 'releases.json')

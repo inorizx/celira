@@ -313,8 +313,11 @@ Copy-Item (Join-Path $root 'client\dist\*') (Join-Path $packageDir 'client-dist'
 # and simply skip their "manual copied" step, so the manual never reaches the home at all.
 # install.ps1 is the Windows installer; on other platforms it is NOT shipped (there is no
 # install.sh yet - registered in the split report, not papered over by shipping a wrong-OS script).
-$scriptFiles = @('serve_client.mjs', 'HOME_MANUAL.md')
-if ($Platform -eq 'win-x64') { $scriptFiles = @('install.ps1') + $scriptFiles }
+$scriptFiles = @('serve_client.mjs', 'HOME_MANUAL.md', 'probe-release-channel.mjs')
+# update.ps1 (2026-10-21) is the Windows side of "does a newer package exist, and how does it land":
+# its first step asks the channel reader, so the two ship together -- shipping the updater without the
+# reader would be shipping a script that always stops at step 1.
+if ($Platform -eq 'win-x64') { $scriptFiles = @('install.ps1', 'update.ps1') + $scriptFiles }
 foreach ($script in $scriptFiles) {
     Copy-Item (Join-Path $PSScriptRoot $script) (Join-Path $packageDir 'scripts')
 }
@@ -560,6 +563,10 @@ function Get-PartClaims {
     # home-only package still needs its own install path - registered in the split report, not
     # papered over here.
     if ($r -eq 'scripts/install.ps1') { return @('home') }
+    # The updater and the channel reader it calls: they act on a home's package, so they travel with
+    # the home part (the same reasoning as install.ps1). update.ps1 looks for the reader at
+    # <package>\scripts\probe-release-channel.mjs, which is exactly where both of them land.
+    if ($r -eq 'scripts/update.ps1' -or $r -eq 'scripts/probe-release-channel.mjs') { return @('home') }
     return @()
 }
 
