@@ -63,6 +63,7 @@ pub mod native_notify;
 pub mod process_facts;
 pub mod registration;
 pub mod unread;
+pub mod update;
 pub mod world_channel;
 
 use tauri::Manager;
@@ -385,7 +386,10 @@ pub fn run() {
             native_notify::notify_message,
             // **未读角标**（2026-10-08）：页面报一个总数，壳让它在窗口外看得见
             // （托盘悬停那句 ＋ 任务栏小红点／系统角标）。见 `unread.rs` 文件头。
-            unread::set_unread_total
+            unread::set_unread_total,
+            // **有没有新版本**（2026-10-21）：只读、不下载。GitHub 优先、失败退 Gitee；
+            // 渠道地址来自包内 `VERSION` 的 repo/mirror（见 `update.rs` 文件头）。
+            update::update_check
         ])
         .setup(|app| {
             // **主窗口从这里建**（`tauri.conf.json` 里那一格写着 `"create": false`）。
