@@ -785,6 +785,18 @@ if ($originHost -eq 'gitee') {
     exit 0
 }
 
+# `gh auth login` additionally demands read:org (it wants to read organizations), which a
+# repo-scoped token does not have. `GH_TOKEN` skips that login flow entirely and calls the API
+# with exactly the token given - measured 2026-10-21: GH_TOKEN=<repo token> gh release create
+# works, while `gh auth login --with-token` refuses with "missing required scope 'read:org'".
+# So a packaging machine can publish with GITHUB_TOKEN alone; no interactive login needed.
+if (-not $env:GH_TOKEN) {
+    foreach ($name in 'GITHUB_TOKEN', 'GH_TOKEN') {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value -and $value.Trim() -ne '') { $env:GH_TOKEN = $value.Trim(); break }
+    }
+}
+
 $gh = Get-Command gh -ErrorAction SilentlyContinue
 if (-not $gh) {
     Write-Host ''
