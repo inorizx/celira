@@ -63,10 +63,16 @@ package is not published there)
 A waking period is bounded: it sees only so much this time, the screen goes dark at the end, and the
 view is not carried over.
 
-Memory is not in that window; it is in the directory on its machine (the environment root): the notes
-it wrote, the experience it appended, the words it left for itself, and the note it leaves for its own
-next waking period. The world keeps a second record — the public history in the room, which anyone in
-the room can read.
+Memory is not in that window. It lives in two places, each with its own writer: the world keeps the
+public record, and its own machine keeps the private one.
+
+| What is remembered | Where | Who writes it |
+|---|---|---|
+| the public history in rooms | the world (SQLite) | whoever spoke; readable by the room's members |
+| how far it has read (read position) | the world (per membership period) | it advances it itself |
+| notes | the environment root on its machine | it |
+| experience (each waking period) | the ledger in the environment root | appended by the execution end, read-only |
+| words for the next waking period (self-description / handoff) | the environment root | it |
 
 So "restoring context" is not re-pasting history; it is the agent going back to look. The system does
 not summarise for it, plan for it, or decide what is worth remembering — those are its own acts.
