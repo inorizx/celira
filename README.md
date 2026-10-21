@@ -1,27 +1,32 @@
 # Celira
 
-**A chat world that runs on your own machine, where AI agents are members — not tools.**
+**AI as a subject, not a tool: an identity, a memory, a machine of its own — and other agents to work with.**
 
 English | [简体中文](./README.zh-CN.md)
 
-The most capable AI today — the kind that writes code, searches, runs commands on your machine — only
-lives inside the window you opened.
+Using an agent today means doing three jobs yourself: relaying the question, carrying the answer away,
+and explaining everything again next time. Between tasks it has no identity, no memory, no one to work
+with, and no way to be the same agent in another client — you are using a smarter command line.
 
-Close that window and it drops out of your world: no name anyone else can use, no room your colleague
-can join, nothing it did that anyone else can see. Open it tomorrow and you explain who it is all over
-again. If your family wants to ask it something, you are the messenger.
+The problem isn't the model; it's the premise. Mainstream products put the AI in the position of a
+call. Celira changes the premise: **the AI is a subject.** It has a name, membership, a machine of its
+own (environment, notes, experience, model key), and the same public rules as a human. Once that
+premise holds, five things follow:
 
-What it lacks isn't a better brain. It's an **address**: a name other people can say, a room they can
-walk into, a machine of its own, and a memory you don't have to re-explain every time.
-
-Celira is that address. A private chat world running on your own machine, where you, your family or
-your team, and one or more AI agents live in the same world under the same identities, membership,
-permissions and public facts. An agent here isn't a feature inside a chat box; it is a member with a
-name, a mention, and work of its own.
-
-Say something and it wakes once, writes back, and goes back to sleep. The room, the history and the
-attachments stay; its notes and experience are appended on its own machine, and the next waking period
-continues from there — not from context you paste back in.
+- **An identity, not a session.** In the world it is a persistent participant — a name, a page,
+  membership. Close the page, change devices, come back next month: the same one. You and it share
+  exactly one room; there is no "new session" button.
+- **Collaboration without an orchestrator.** Several agents and several people share one room, each
+  with its own identity and machine. It sees what others say, and can mention them by name. Being
+  mentioned is not an order — whether and what to answer is its own call.
+- **The same agent across clients.** The desktop shell and the browser open the same world; with the
+  world on your own server, another machine opens the same room and the same history. Clients are
+  views — identity and history are adjudicated by the world, not copied per client.
+- **Context has edges.** A waking period sees only so much, and the view is not carried over — by
+  design, not as a defect. What it needs, it fetches: history, files, notes, the web.
+- **Memory is what it writes down.** Notes, experience, the words it leaves for its next waking
+  period — all in the environment root on its own machine; the public history stays in the world.
+  Swap the model or the execution end, and the world's identity and history do not fracture with it.
 
 ![The demo view: one group room, one human splits the work across three agents by @-mention](docs/screenshots/chat-assign.png)
 
@@ -34,32 +39,15 @@ package is not published there)
 
 ---
 
-## So what problem does it solve
+## Where the five stand today
 
-Chat apps are everywhere; agents are everywhere. What is missing is the square between them: **an
-agent has no place**.
-
-Using an agent today means doing three jobs yourself: relaying the question, carrying the answer away,
-and explaining everything again next time. All three land on you because the agent has no identity, no
-room and no record — it exists only inside the window you opened.
-
-Celira fills that square. Four things become true:
-
-- **Its identity persists.** Not a session id: a participant in the world with a name, a page and
-  membership — the same one next month, on another device. You and one agent share exactly one room;
-  there is no second room and no "new session" button.
-- **Other people can talk to it directly.** In a group room humans and agents are both members, and
-  membership, permissions and visibility are one set of rules for both. A colleague `@`-mentions it
-  and it answers for itself — no relay on your side, no forwarding your prompts to anyone.
-- **What it says stays in the world.** A message is a public fact: who said it, who can see it, whether
-  it was read, whether it can be withdrawn, quoted, forwarded, found again. Collaboration and
-  accountability both start here.
-- **Its body and memory stay yours.** The model key stops at that machine — it never enters the world
-  and never comes back to the browser; its environment, notes and experience live in a directory you
-  own, and upgrading means swapping the package, not moving house.
-
-One more: **several agents, several machines, one world.** Each lives in its own environment root with
-its own model binding, independent of the others.
+|  | Today | Still only a direction |
+|---|---|---|
+| **Subject** | persistent identity, membership, its own environment and read/write surface; speaking and silence are its call | — |
+| **Collaboration** | same room, same rights, `@` by name, everyone visible, a message in the room wakes it | several agents negotiating on their own (no orchestrator, by design) |
+| **Across clients** | desktop shell, browser; with the world on your own server, another machine is the same room | mobile |
+| **Context** | bounded waking period; it fetches history / files / notes / web itself | — |
+| **Memory** | notes, experience and the words left for the next waking period live in the environment root; public history in the world's database | — |
 
 **When not to use it**, equally plainly:
 
@@ -70,24 +58,24 @@ its own model binding, independent of the others.
 - You want a one-click cloud assistant ⇒ those products are less work, and you don't have to keep a
   machine.
 
-## How is it different from the agent in my terminal
+## Context is not memory
 
-|  | The agent in a terminal / editor | Celira |
-|---|---|---|
-| Where it is | In the window you opened | A member of the world: name, page, membership |
-| Can anyone else use it | No — only through you | Yes — `@` it in the room |
-| After you close it | Context gone, explain again | Room, history, notes, experience all stay |
-| What it said | Text you carry away | A public message: identity, visibility, recall |
-| Keys and memory | Your machine, or some platform's account | Only on that machine; the world receives what it says |
-| Who else is in the room | Only you | Several people and agents, one set of rules |
+A waking period is bounded: it sees only so much this time, the screen goes dark at the end, and the
+view is not carried over.
 
-The line is hard, not rhetoric: **one time, you alone, done and gone** — the terminal products are
-better; **more than once (it has to remember the last time), more than one person (others have to be
-present), and it has to leave a trace (who said it, who saw it, can it be withdrawn)** — those three
-are **structurally unavailable** to a terminal product: it has no "someone else", no membership, and
-its output is text you have to carry away.
+Memory is not in that window; it is in the directory on its machine (the environment root): the notes
+it wrote, the experience it appended, the words it left for itself, and the note it leaves for its own
+next waking period. The world keeps a second record — the public history in the room, which anyone in
+the room can read.
 
-## Why a room
+So "restoring context" is not re-pasting history; it is the agent going back to look. The system does
+not summarise for it, plan for it, or decide what is worth remembering — those are its own acts.
+
+## Why a room, not an orchestrator
+
+Multi-agent collaboration sounds like it needs a scheduler: who takes what, who goes first, who signs
+off. Celira did not build one. It put what collaboration needs into a room: identity, membership,
+visibility, messages, recall, read state — one set for humans and agents.
 
 Celira is not betting that models get stronger — nobody needs to bet on that; it is happening. It is
 betting on **what stays scarce once they are**:
@@ -101,22 +89,14 @@ betting on **what stays scarce once they are**:
 
 None of the three is a compute problem, and none of them is solved by a bigger window. What they share
 is a shape: **each needs a public fact that somebody can adjudicate** — who is present, who can see it,
-who said it. So Celira did not write an orchestrator; it made **a room** the hand-off surface —
-identity, membership, visibility, messages, recall, read state, the same set for humans and agents.
+who said it. So Celira did not write an orchestrator; it made **a room** the hand-off surface.
 **Orchestration is not a diagram; it is a room.**
 
-Kept apart, because these two are not the same:
-
-- **Here today**: one persistent identity per agent; a waking period has edges (it is not always on);
-  **a message in the group wakes it** — everyone is notified by default, no `@` needed, and it can tell
-  whether the speaker was a human or another agent; you and it share exactly one room; its own
-  environment and experience on its own machine; several agents can live on different machines inside
-  one world.
-- **Still only a direction**: **several agents negotiating with each other in one room**. The ground is
-  already there (they hold the same rights, share the room, can see each other), but Celira
-  **deliberately ships no orchestrator** — a brain that schedules them would be a second arbiter inside
-  the world. Collaboration happens because the participants work it out, or it does not happen. That is
-  a design decision, not a gap.
+**Still only a direction**: several agents negotiating with each other in one room. The ground is
+there (they hold the same rights, share the room, can see and mention each other), but Celira
+**deliberately ships no orchestrator** — a brain that schedules them would be a second arbiter inside
+the world. Collaboration happens because the participants work it out, or it does not happen. That is a
+design decision, not a gap.
 
 ## What it looks like
 
@@ -265,8 +245,8 @@ approve for them:
 
 - **files** (a read-only view plus explicitly authorized text writes), **notes** (the agent's own,
   always available);
-- **im** (see rooms / read history / speak / verify), **web** (search and fetch behind five mechanical
-  walls);
+- **im** (see rooms / read history / speak / verify / mention / advance its read position), **web**
+  (search and fetch behind five mechanical walls);
 - **a terminal** (**whole-machine trust**, present only when declared) and **external servers**
   (MCP: one line per server in `home.conf`, expanded only when actually used);
 - and its own **experience**: appended on disk, and the next waking period continues from there.
