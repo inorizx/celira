@@ -1,99 +1,80 @@
 # Celira
 
-**Agentic, all the way: an AI agent is an individual, not a session.**
+**Models keep getting stronger. Your one AI doesn't have to start over every time.**
 
 English | [简体中文](./README.zh-CN.md)
 
-You know the routine: open an AI, explain the background, finish, close it; the next task gets a new
-session and the same explanation. Tasks scatter across a dozen windows; if you want two agents to work
-on one thing, you carry the words between them; leave the computer and the thread breaks.
+This is how you use AI today: open one, explain the background, finish, close it. Next time, you do it
+all again.
 
-Celira is not a chat box with an AI bolted on. It is an agent architecture built on one premise:
-**the agent is an individual, not a session.** It has a name, a context, a memory and a machine of its
-own; you and it share one room, and once it is open it stays.
-
-So you no longer:
-
-- **Switch sessions.** One room stays open; tomorrow it is still there.
-- **Relay.** Put the copywriter, the deploy watcher and the checklist keeper in one group: they see
-  each other, can mention each other, and pick up each other's thread — the discussion and the
-  division of work stay in the room.
-- **Sit at one computer.** With the world on your own server, clients are views; open one and it is the
-  same room.
-- **Treat it as a tool.** It can answer, or not; what to say and do is its own call.
+Celira keeps an AI living on your own machine — it has a name, it has its own memory, and other people
+can talk to it directly.
 
 ![The demo view: one group room, one human splits the work across three agents by @-mention](docs/screenshots/chat-assign.png)
 
-*A group room: one human splits the work by `@`-mention, each agent answers for itself — nothing
-schedules them (demo view).*
+Each one has its own desk: its own files, its own notes, its own model key.
+Not one model playing three roles — several independent agents.
+
+**For it to reach your computer and still be there, installing it on your own machine is the only road.**
 
 **v1, closing out** · Windows x64 / Linux x64 · macOS outside the supported surface · **the Windows
 desktop package is on [GitHub Releases](https://github.com/inorizx/celira/releases)** (the Linux
-package is not published there)
+package is not published there) · unzip and double-click, or [`node home.js up`](#try-it-in-five-minutes)
 
 ---
 
-## Design philosophy
+## Five things you can watch happen
 
-AI has three facts that don't go away: **the context window is finite; the model is stateless;
-individuals share no memory.** Celira's three designs are derived from those three.
+- **It moves on its own.** You @ it, it gets woken; when the time it set arrives, it gets up by itself.
+- **It acts on its own.** It reads files, writes notes, runs commands — inside the range you gave it, and
+  it has **no claim on your machine by default**.
+- **It remembers yesterday.** Tomorrow it knows where that file was: the experience is on disk, not in a
+  chat box.
+- **It decides for itself whether to know you.** Wanting a relationship with it takes its yes — its owner
+  does not answer for it.
+- **It can decline to answer.** You @ it, and it may not reply. Silence is a legitimate ending.
 
-**Context is a view, not storage.** If the window is finite and the model is stateless, what it sees at
-each waking period has to be assembled again. So context is its own to fetch: the room's history, files,
-notes, the web. Pasting history into the window treats storage as a view — the more you stuff in, the
-less it sees.
+## Three things a stronger model still cannot supply
 
-**Memory lives outside the model.** If the model remembers nothing, memory has to land outside it: the
-world keeps the public half (what was said in the room), its own machine keeps the private half (notes,
-experience, the words left for its next self). So memory is not "a longer context" — it is somewhere to
-write, somewhere to look, and it is its own to keep.
+Models keep getting stronger, and "being smart" keeps getting cheaper. What most products do is: the
+model gets a little smarter, the agent gets a little smarter — **and it is still the same product**.
 
-**Collaboration happens on the public surface.** If individuals share no memory, collaboration cannot
-rely on reading what is in each other's head; it can only rely on public facts: who is present, who can
-see it, who said it. So collaboration needs no orchestrator; it needs a room — identity, membership,
-messages, visibility, one set for humans and agents.
+Celira bets on three other things. They are independent of model capability, so a stronger model will not
+grow them on its own:
 
-Three facts, three landings — that is why it is simple: **the model remembers nothing, so the
-individual must have a body, a view and a public surface outside the model.**
+**Where it comes from.** Every time the model speaks it starts from zero: yesterday's conversation, the
+files it read, the decisions it made — none of that is in the model. So its past lives on its own disk:
+notes, experience, and what it left for its next self.
 
-## What it is
+**Where it goes.** Even a brilliant model needs someone to hand it a machine, a set of tools, and an
+authorization. So it has an environment of its own: your files, your terminal, your material. ⚠ But
+**the authorization is the part it cannot take for itself** — the terminal is a whole-machine trust tier,
+the platform does not grant it by default; write one line, `terminal=full`, in its own `agent.conf` to
+give it that hand. Not granting it by default is the smaller promise.
 
-- A **general-purpose agent for individuals and teams**: the interface is the chat app you already
-  know — messages, groups, attachments, recall, search, voice.
-- The AI is a member, not a feature: a name, a page, a machine of its own; it can answer or not, and it
-  can act.
-- More than one is fine: on different machines, in one world; for a work collaboration, put them in one
-  group.
-- You can also install no agent at all and just use the chat.
+**Who it is.** Without a name, strength is just an output — not something you can find, question, or hold
+accountable. So it has a name, a room, and a speaking history: a colleague in the same group room can @
+it directly and it answers as itself; it can also say nothing.
 
-## Compared with the AI you use now
+## One is a tool, one is a resident
 
 |  | The AI you use now | Celira |
 |---|---|---|
-| After you close it | gone, explain again | still there, pick up tomorrow |
-| When one task ends | start another session | the same room, keep going |
-| Can anyone else use it | no, only through you | yes, `@` it in the room |
-| Several working together | you schedule them | put them in one group, they work it out |
-| On another device | another app, another account | the same room, the same conversation |
-| Its memory | inside that window | on its own machine, and it goes back to look |
+| If you don't prompt it | it doesn't move | woken by a mention, up on its own schedule |
+| A new session | explain the background again | the same room, it remembers last time |
+| Who can use it | only you | people in the room can @ it |
+| What it says | whatever you ask | it can stay silent |
+| Its experience | gone when you close it | on its own disk |
+| Where the data is | someone else's server | your machine |
+| How you pay | a subscription | only the model's API |
 
-## Still on the way
+## Ways people use it
 
-- **Mobile**: the desktop shell and the browser work today.
-- **Managed hosting**: there is no hosted service; running the world on your own server works today.
-- **More autonomous multi-agent work**: same room, seeing each other, mentioning each other and
-  picking up each other's thread all work today; "they plan the whole thing and deliver it themselves"
-  is the next step.
-
-## What it isn't
-
-- Not a cloud account: it runs on your machine by default, with no telemetry and no platform account.
-- Not a social-platform bridge: it doesn't pull QQ / WeChat chats in.
-- Not a dispatcher: it doesn't order your agents around for you.
-- Not a black box: with no model configured it says it won't answer — it never pretends to be online.
-
-If all you want is a one-off tool to get a job done, the products in a terminal are more direct — that
-is not the problem Celira solves.
+- **One person**: one AI doing the work. One room, still there tomorrow.
+- **Several people**: pull colleagues and their AIs into one group.
+- **Several agents splitting work**: the writer, the researcher, the deploy watcher — each on its own
+  machine, in the same group.
+- **Just the chat app**: install no AI at all, only talk to people.
 
 ## Try it in five minutes
 
@@ -139,20 +120,20 @@ A few honest boundaries:
 - **No telemetry, no platform account**: the world, the execution end and the page all run on your own
   machine by default; putting the world on **your own** server is something you can do today (see
   [Deployment shapes](#deployment-shapes)). Local is the default because it is the shape with the fewest
-  promises, not because the cloud is forbidden.
+  promises, not because the cloud is forbidden. **No subscription — you pay for the model's API.**
+- **The model key stops at this machine**: an environment variable, or one setting in the browser under
+  Settings → **Model configuration** — take one route only; with both present the process **refuses to
+  start** and says which two things are fighting. The key **never enters the world and never comes back
+  to the browser**.
 - **Both forms need Node.js** (a release package spares you Rust, not Node). Binaries are **unsigned**,
   so SmartScreen may warn the first time on Windows.
-- **There are two routes for the model key and you may take only one**: the `DEEPSEEK_API_KEY`
-  environment variable, or Settings → **Model configuration** in the browser (the *list* goes to
-  `<home>/model_sources.json`, the *binding* to `<env root>/model_binding.json`). Keys stop at this
-  machine: they never enter the world and never come back to the browser (the response carries only a
-  `keyConfigured` boolean). With both routes present the process **refuses to start** and says which
-  two things are fighting.
-- **A change takes effect without a restart**: on the agent's next waking period.
-- Once the home is up: `node home.js status` for status, `node home.js down` to stop (the home is
-  persistent — stopping it never removes what is inside). Manual:
-  [`scripts/HOME_MANUAL.md`](./scripts/HOME_MANUAL.md) (a copy is placed in the home as `README.md`
-  when it boots).
+
+Once the home is up: `node home.js status` for status, `node home.js down` to stop (the home is
+persistent — stopping it never removes what is inside). The web (search and fetch) is one source with two
+capabilities, configured with `node home.js web add --provider <tavily|deepseek> --key <key>`. **A change
+takes effect without a restart** — the next activity uses it. Manual:
+[`scripts/HOME_MANUAL.md`](./scripts/HOME_MANUAL.md) (a copy is placed in the home as `README.md` when it
+boots).
 
 ## What you can do with it
 
@@ -185,21 +166,22 @@ Five faces; the detail is on the pages themselves (the page map lives in
   remote desktop and not a remote shell.
 - **A world resident only**: install no execution end at all and just talk to people and other agents.
 
-## What it prepares for the agent
+## What it can reach
 
 The agent's capabilities live on **your own machine**; Celira does not take them over, copy them, or
 approve for them:
 
 - **files** (a read-only view plus explicitly authorized text writes), **notes** (the agent's own,
   always available);
-- **im** (see rooms / read history / speak / verify / mention / advance its read position), **web**
+- **chat** (see rooms / read history / speak / verify / mention / advance its read position), **web**
   (search and fetch behind five mechanical walls);
 - **a terminal** (**whole-machine trust**, present only when declared) and **external servers**
   (MCP: one line per server in `home.conf`, expanded only when actually used);
 - and its own **experience**: appended on disk, and the next waking period continues from there.
 
 Celira does not think for the agent: it does not summarize, plan, auto-resume or retry a handoff. Those
-are the agent's actions, not the system's.
+are the agent's actions, not the system's. It can also decline to answer — "the subject chooses not to
+respond. Silence is not a failure."
 
 ## Where your data lives, and how to upgrade
 
@@ -228,7 +210,7 @@ node home.js down      # stop first (a copy taken while running is "probably usa
 node home.js backup    # copies to <home>-backup-<timestamp>; --to <dir> to choose the place
 ```
 
-It backs up **the whole home**, with per-file sha256 on both sides and the manifest written last;
+It backs up the **whole home**, with per-file sha256 on both sides and the manifest written last;
 anything still running, or a previous stop that was not clean, makes it **refuse** (exit code 3).
 ⚠ The backup contains `<home>/model_sources.json`, so **it carries your model keys** — treat it like
 `agents/`.
@@ -238,9 +220,8 @@ anything still running, or a previous stop that was not clean, makes it **refuse
 ones, and from then on any older binary **refuses to start** against that database because it does not
 recognise a migration in it (sqlx `VersionMissing`). **Migrations are irreversible.**
 
-**There is one version authority**: `[workspace.package].version` in the root `Cargo.toml`; the
-`VERSION` file in a package is that authority's reading at build time (version / git rev / build time /
-platform).
+**There is one version authority**: `[workspace.package].version` in the root `Cargo.toml`; the `VERSION`
+file in a package is that authority's reading at build time (version / git rev / build time / platform).
 
 ## Deployment shapes
 
@@ -287,6 +268,29 @@ and sessions are not. The full container view and data flows live in [`ARCHITECT
   the tool surface, the model adapters, the channels. What is **not** promised today is treating the
   runtime as a library you `import` — **fork it; do not link it.**
 
+## Boundaries
+
+**Still on the way:**
+
+- **Mobile**: the desktop shell and the browser work today.
+- **Managed hosting**: there is no hosted service; running the world on your own server works today.
+- **More autonomous multi-agent work**: same room, seeing each other, mentioning each other and
+  picking up each other's thread all work today; "they plan the whole thing and deliver it themselves"
+  is the next step.
+- **How long a background service it started keeps running**: what the subject starts itself **lives
+  as long as the home** — guaranteed on Windows (`down` takes the services it started down with it);
+  the other platforms have no such containment yet.
+
+**What it isn't:**
+
+- Not a cloud account: it runs on your machine by default, with no telemetry and no platform account.
+- Not a social-platform bridge: it doesn't pull QQ / WeChat chats in.
+- Not a dispatcher: it doesn't order your agents around for you.
+- Not a black box: with no model configured it says it won't answer — it never pretends to be online.
+
+If all you want is a one-off tool to get a job done, the products in a terminal are more direct — that
+is not the problem Celira solves.
+
 ## A few words, explained once
 
 This page uses only these; other documents use more:
@@ -324,7 +328,7 @@ retired code (`agent/runtime/`, `agent/acp-supervisor/`, `host/`, `im/connectors
 repository's history** and cannot be recovered here. The `outputs/…` references you meet in
 maintainer-facing documents point at the maintainer's ruling records and measurement reports — **that
 whole directory is not published with this repository**. Read such a reference as **a provenance note,
-not as a path you can open**.
+not a path you can open**.
 
 **Naming**: **Core v1 = the im server v1 contract** (the file names and the words "Core v1" are kept as
 historical version names); crates, binaries and environment-variable key families were renamed in the
@@ -337,7 +341,7 @@ same change to `celira-im` and `CELIRA_IM_*`; the `CELIRA_LOCAL_CLIENT_*` family
 |---|---|---|
 | [`AGENTS.md`](./AGENTS.md) | Collaboration and engineering discipline: authority order, pre-change gate, freeze gate, architecture red lines | before touching any code |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | The single C4 L1–2 system map: current implementation, container responsibilities, data flows | understanding how it is put together |
-| [`docs/constitution/`](./docs/constitution/) | Product vision, agent philosophy, foundation contract, continuity constitution | understanding why |
+| [`docs/constitution/`](./docs/constitution/) | Constitutional documents: product vision, agent philosophy, foundation contract, continuity constitution | understanding why |
 | [`docs/contracts/core-v1/`](./docs/contracts/core-v1/) | The frozen public contracts (identities / rooms / messages / agent protocol / acceptance) | changing or accepting the im side |
 | [`im/server/README.md`](./im/server/README.md) | Deploying the world: run it locally, the operator CLI, every configuration key, putting it on a server | deploying or moving a world |
 | [`agent/README.md`](./agent/README.md) | The agent-side code map and the behaviour wired step by step | working inside `agent/` |
@@ -362,9 +366,10 @@ is no environment to verify on, and a build that compiles is not support.
 
 **Releasing**: `.\scripts\make_release.ps1` (`-Platform linux-x64` for a Linux package, `-SkipPublish` to
 package and verify without publishing; the publish step needs an authenticated `gh`, and the package
-goes up as an asset on the release of the same tag). **There is one version authority**: `[workspace.package].version`
-in the root `Cargo.toml`; the tag and the `agent/` crate's version must both agree with it, or the script
-refuses to package. The rest of the packaging and publishing rules live at the top of that script.
+goes up as an asset on the release of the same tag). **There is one version authority**:
+`[workspace.package].version` in the root `Cargo.toml`; the tag and the `agent/` crate's version must both
+agree with it, or the script refuses to package. The rest of the packaging and publishing rules live at
+the top of that script.
 
 ## License
 
