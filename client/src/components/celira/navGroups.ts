@@ -1,4 +1,4 @@
-import { Bot, Compass, MessageSquare, Sparkles, Users, type LucideIcon } from 'lucide-react'
+import { Bot, Compass, MessageSquare, Server, Users, type LucideIcon } from 'lucide-react'
 // ⚠ 相对路径（不是 `@/api/...`）：本模块被 `node --test` 直接跑（类型剥离、无打包器），
 // 别名在那里解析不了 —— 与 `api/shellLocal.ts` 那条线的写法一致。
 import { ROUTES, reachableInRealWorld } from '../../api/routeRegistry.ts'
@@ -89,9 +89,20 @@ export const NAV_GROUPS: NavGroup[] = [
     //   出现一次（说清"这台机器上跑着 Agent 的执行端"）。
     id: 'agent',
     label: '机器',
+    // ★ **2026-10-21 图标对调**（判据：**图标画的名词必须与这一项的主语同轴**）：
+    // 「我的机器」=`Server`、「我的 Agent」=`Bot`，`Sparkles` 退出导航。
+    //   - 原先正好反着：机器人头挂在**机器**上。而这区的主语是机器（见上面 2026-09-25 那刀），
+    //     `Bot` 在所有产品里都读作「一个 AI」⇒ 屏幕把拆掉的那根轴又画了回来；
+    //   - `Sparkles` 在本仓已经指 Agent（`RuntimesPage` 那颗「我的 Agent（在那里建一支）」），
+    //     于是一个字形同时指两个入口 ⇒ **所指交叉**；而这一对恰是本产品最该被分开的一对
+    //     （基础设施 / 住户）；
+    //   - `Server` 本来就是本仓「机器」的形（机器页头、`AgentsListPanel` 的机器行用它指
+    //     「这台机器」）；`Bot` 与「联系人」的 `Users` 同层：都是**身份**。
+    // ⚠ 别因为"AI 感"换回去：常驻 chrome 最不该放万能贴纸（星星同时表示 新/AI/推荐/智能，
+    //   本身不携带信息），且它 20px 低对比下三颗星糊成一团。
     items: [
-      { id: 'runtimes', label: '我的机器', icon: Bot, to: '/app/runtimes' },
-      { id: 'agents', label: '我的 Agent', icon: Sparkles, to: '/app/agents' },
+      { id: 'runtimes', label: '我的机器', icon: Server, to: '/app/runtimes' },
+      { id: 'agents', label: '我的 Agent', icon: Bot, to: '/app/agents' },
     ],
   },
 ]

@@ -88,6 +88,14 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 export function SettingsLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  // ★ **2026-10-21：设置页记住来路**。`/settings` 与 `/app` 是并列的两个壳（见 `App.tsx`），
+  // 进来之后那条图标栏就没了 ⇒ 「返回」若写死一个地址，这里就是一扇**单向门**：
+  // 从某间房点设置，回来落在「我的」，房间要再点两下。
+  // ⇒ 来源由入口传（`state.from`，`AppShell` 的「设置」那颗），深链接/直接打开时缺省落「我的」。
+  // ⚠ 它必须在**设置区自己的子导航**里一路带着走（目录点条目、移动端「返回设置」），
+  //   否则点两个来回就丢；桌面端还有一条 `replace` 重定向（`SettingsIndex`）同样要转发。
+  const from = (location.state as { from?: string } | null)?.from
+  const originState = from ? { from } : undefined
   const groups = NAV_GROUPS
   const isIndex = location.pathname === '/settings'
   const current = groups.flatMap((g) => g.items).find((item) => location.pathname.startsWith(item.to))
@@ -104,7 +112,12 @@ export function SettingsLayout() {
         )}
       >
         <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-4 md:border-b-0">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/app/profile')} aria-label="返回">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate(from ?? '/app/profile')}
+            aria-label="返回"
+          >
             <ArrowLeft className="size-4" />
           </Button>
           <div className="text-title">设置</div>
@@ -128,15 +141,20 @@ export function SettingsLayout() {
                         <button
                           key={item.to}
                           type="button"
-                          onClick={() => navigate(item.to)}
+                          onClick={() => navigate(item.to, { state: originState })}
                           className={cn(
                             'flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors md:rounded-lg md:px-3 md:py-2.5',
                             active
-                              ? 'bg-muted text-foreground md:bg-muted'
+                              ? 'bg-accent font-medium text-accent-foreground'
                               : 'text-foreground hover:bg-muted/60 md:text-muted-foreground md:hover:text-foreground',
                           )}
                         >
-                          <item.icon className="size-4 shrink-0 text-muted-foreground" />
+                          <item.icon
+                            className={cn(
+                              'size-4 shrink-0',
+                              active ? 'text-accent-foreground' : 'text-muted-foreground',
+                            )}
+                          />
                           <span className="text-body">{item.label}</span>
                           <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground md:hidden" />
                         </button>
@@ -153,7 +171,12 @@ export function SettingsLayout() {
       {/* 内容栏：桌面常显；移动端仅在子页显示 */}
       <div className={cn('h-full min-w-0 flex-1 flex-col', isIndex ? 'hidden md:flex' : 'flex')}>
         <header className="flex items-center gap-2 border-b border-border bg-card px-4 py-4 md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/settings')} aria-label="返回设置">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate('/settings', { state: originState })}
+            aria-label="返回设置"
+          >
             <ArrowLeft className="size-4" />
           </Button>
           <div className="text-title">{current?.label ?? '设置'}</div>
@@ -171,6 +194,10 @@ export function SettingsLayout() {
 /** /settings 索引：桌面端默认落到「通用」；移动端列表首页由布局目录栏渲染，内容区为空。 */
 export function SettingsIndex() {
   const [isDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches)
-  if (isDesktop) return <Navigate to="/settings/general" replace />
+  // ⚠ **这条 `replace` 会把 `location.state` 一起吞掉**（`Navigate` 不带 state）。
+  // 桌面端每次从图标栏点「设置」都走这条路 ⇒ 不转发的话，`AppShell` 传的 `from`
+  // 正好在这里蒸发，「返回」永远退回「我的」（这正是它原先的表现）。
+  const location = useLocation()
+  if (isDesktop) return <Navigate to="/settings/general" replace state={location.state} />
   return null
 }

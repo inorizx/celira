@@ -1,11 +1,11 @@
 import { ThemePresetCard, ThemeVariantPicker } from '@/components/celira/ThemePresetCard'
 import { WallpaperPicker } from '@/components/celira/ChatWallpaper'
 import { UserThemeSection } from '@/components/celira/UserThemeSection'
+import { Segmented } from '@/components/celira/Segmented'
 import { useTheme } from '@/hooks/theme-context'
 import { useWallpaper } from '@/hooks/wallpaper-context'
 import { FONT_SIZES, getThemeVariants, THEME_PRESETS } from '@/lib/themes'
 import { OFFICIAL_WALLPAPERS } from '@/lib/wallpaper'
-import { cn } from '@/lib/utils'
 
 /** 外观设置：明暗模式、主题风格、配色、字号、聊天壁纸（全部本机呈现层偏好）。 */
 export function SettingsAppearancePage() {
@@ -35,29 +35,16 @@ export function SettingsAppearancePage() {
                 : '日间'}
           </span>
         </div>
-        <div className="flex gap-1 rounded-lg bg-muted p-1">
-          {(
-            [
-              { key: 'system', label: '跟随系统' },
-              { key: 'light', label: '日间' },
-              { key: 'dark', label: '夜间' },
-            ] as const
-          ).map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              onClick={() => setThemeMode(m.key)}
-              className={cn(
-                'flex-1 cursor-pointer rounded-md px-2 py-1.5 text-caption transition-colors',
-                themeMode === m.key
-                  ? 'bg-card text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="明暗模式"
+          value={themeMode}
+          onChange={setThemeMode}
+          options={[
+            { id: 'system', label: '跟随系统' },
+            { id: 'light', label: '日间' },
+            { id: 'dark', label: '夜间' },
+          ] as const}
+        />
       </div>
       <div className="space-y-3 rounded-xl border border-border bg-card p-5">
         <span className="text-body">主题风格</span>
@@ -99,23 +86,12 @@ export function SettingsAppearancePage() {
             {FONT_SIZES.find((s) => s.id === fontSize)?.name}
           </span>
         </div>
-        <div className="flex gap-1 rounded-lg bg-muted p-1">
-          {FONT_SIZES.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setFontSize(s.id)}
-              className={cn(
-                'flex-1 cursor-pointer rounded-md px-2 py-1.5 text-caption transition-colors',
-                fontSize === s.id
-                  ? 'bg-card text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {s.name}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="字号"
+          value={fontSize}
+          onChange={setFontSize}
+          options={FONT_SIZES.map((s) => ({ id: s.id, label: s.name }))}
+        />
         <p className="text-caption text-muted-foreground">
           只改变阅读文字大小，与主题、配色自由组合。
         </p>

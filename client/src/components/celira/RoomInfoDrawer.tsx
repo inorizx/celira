@@ -11,6 +11,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
+import { Segmented } from '@/components/celira/Segmented'
 import { tryGetParticipant } from '@/api/participantDirectory'
 import { toParticipant } from '@/api/participantProjection'
 import { roomMemberViews } from '@/api/roomMembers'
@@ -28,7 +29,6 @@ import { FileRow } from './FileRow'
 import { AttachmentImage } from './AttachmentImage'
 import { InviteMemberSheet } from './InviteMemberSheet'
 import { AgentPresentationEditSheet } from './AgentPresentationEditSheet'
-import { cn } from '@/lib/utils'
 
 type DrawerTab = 'members' | 'images' | 'files'
 
@@ -198,21 +198,13 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
           <SheetDescription className="text-caption">
             {headline}
           </SheetDescription>
-          <div className="mt-2 flex gap-1 rounded-lg bg-muted p-1">
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setTab(t.key)}
-                className={cn(
-                  'flex-1 cursor-pointer rounded-md px-2 py-1 text-caption transition-colors',
-                  tab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="房间信息"
+            value={tab}
+            onChange={setTab}
+            options={tabs.map((t) => ({ id: t.key, label: t.label }))}
+            className="mt-2"
+          />
         </SheetHeader>
 
         <button

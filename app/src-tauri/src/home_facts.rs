@@ -106,6 +106,14 @@ pub struct HomeConf {
     /// 只是默认；**两处都没写 ⇒ 不给手**。判据的权威是 `scripts/home/residents.js` 的
     /// `residentHands` ＋ `resolveTerminal` —— 这里只如实交出文件里写了什么。
     pub terminal: Option<String>,
+    /// **外部工具的授权面**：`mcp_<名>=<transport>:<命令>` 那些行，按**文件里的顺序**交出
+    /// **剥掉 `mcp_` 前缀**之后的声明（`<名>=<transport>:<命令>`），与 `conf.js` 的
+    /// `mcpDeclarations` 逐条同形。
+    ///
+    /// ⚠ **不在这里解析、也不校验**：等号右边原样交给宿主，解析只有一处权威（宿主入口）。
+    /// 裸的 `mcp_`（前缀后面什么都没有）那一行跳过；`mcp_=` 这类畸形行照旧交出 `=`，
+    /// 由宿主入口去报——本层不许"顺手修好"，那会让配置的值与运行的值悄悄不一致。
+    pub mcp: Vec<String>,
 }
 
 /// 解析 `home.conf` 的正文（与 `conf.js` 同三条纪律：去行尾 CR、只认行首 `键=`、
@@ -126,6 +134,13 @@ pub fn parse_conf(text: &str) -> HomeConf {
             "status_port" => conf.status_port = Some(value),
             "config_port" => conf.config_port = Some(value),
             "terminal" => conf.terminal = Some(value),
+            key if key.starts_with("mcp_") => {
+                let name = &key["mcp_".len()..];
+                // 裸的 `mcp_` 走掉；名字与值都非空才算一条声明（值与 `conf.js` 同形）。
+                if !name.is_empty() {
+                    conf.mcp.push(format!("{name}={value}"));
+                }
+            }
             _ => {}
         }
     };
@@ -608,6 +623,21 @@ pub fn agent_env_root(home_dir: &Path, agent_id: &str) -> PathBuf {
     home_dir.join("agents").join(agent_id.trim())
 }
 
+/// 资料根：`<家>/materials/`（宿主 `--materials` 给的就是它；与 `up.js` 的 `materialsRoot` 同一格）。
+pub fn materials_root(home_dir: &Path) -> PathBuf {
+    home_dir.join("materials")
+}
+
+/// 技能区：`<家>/materials/skills/`（**建家时连空目录一起建**）。
+///
+/// 判据与 CLI 那边同一条（`scripts/home/paths.js` 的 `skillsRoot`）：Agent 侧
+/// `skills_desktop` 把 `None`（没有技能区 ⇒ 整块不出场）与 `Some(0)`（有、但空 ⇒
+/// `skills: 0 项（技能区为空）`）当成两件事。不建它，"这具身体没有技能区"与"技能区空着"
+/// 在主体眼里合成一片空白——真机上主体据此答成"没有可安装的技能包"。
+pub fn skills_dir(home_dir: &Path) -> PathBuf {
+    materials_root(home_dir).join("skills")
+}
+
 // ---------------------------------------------------------------------------
 // 模型那一半的两条路径（`model-sources.js` 的读口径，直译）
 // ---------------------------------------------------------------------------
@@ -615,6 +645,13 @@ pub fn agent_env_root(home_dir: &Path, agent_id: &str) -> PathBuf {
 /// 模型**清单**（机器级那份）的路径（`model-sources.js` 的 `listPath`）。
 pub fn model_sources_list_path(home_dir: &Path) -> PathBuf {
     home_dir.join("model_sources.json")
+}
+
+/// **搜索源清单**（机器级那份）的路径（`web-sources.js` 的 `listPath`，2026-10-20）。
+///
+/// 与模型那一份同级同款：宿主只拿到**清单**的路径，"这一支用哪一条"由宿主自己去环境根读绑定。
+pub fn web_sources_list_path(home_dir: &Path) -> PathBuf {
+    home_dir.join("web_sources.json")
 }
 
 /// `<环境根>/model_binding.json` 的三态（`model-sources.js` 的 `readBinding` 直译）。
@@ -737,6 +774,27 @@ mod tests {
         assert_eq!(conf.agent_id.as_deref(), Some("a-1"));
         // 空值按「没写」处理（两边都读不出东西的坏形状）。
         assert_eq!(conf.room_id, None);
+        // 外部工具的声明：剥掉 `mcp_` 前缀、等号右边原样（与 `conf.js` 同形）。
+        assert_eq!(conf.mcp, vec!["x=stdio:cmd --flag=1".to_string()]);
+    }
+
+    /// **`mcp_` 那些行**：按文件顺序交出、只剥前缀不解析；裸的 `mcp_` 跳过。
+    #[test]
+    fn mcp_declarations_keep_file_order_and_skip_the_bare_prefix() {
+        let text = "mcp_browser=stdio:npx @playwright/mcp\n\
+                    mcp_=oops\n\
+                    mcp_db=stdio:node db.js,read-only,timeout=30\n\
+                    terminal=full\n";
+        let conf = parse_conf(text);
+        assert_eq!(
+            conf.mcp,
+            [
+                "browser=stdio:npx @playwright/mcp".to_string(),
+                "db=stdio:node db.js,read-only,timeout=30".to_string(),
+            ],
+            "顺序是文件顺序；裸 `mcp_` 不进；值一个字不动"
+        );
+        assert_eq!(conf.terminal.as_deref(), Some("full"), "别的键照旧");
     }
 
     #[test]

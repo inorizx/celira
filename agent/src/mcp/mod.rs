@@ -146,11 +146,17 @@
 
 use crate::app_contract::EffectClass;
 use crate::core::ActionOutcome;
+use std::path::Path;
 
 pub mod app;
+pub mod remote;
+pub mod scheme;
 pub mod stdio;
+pub mod wire;
+pub mod wire_tokens;
 
 pub use app::McpApp;
+pub use remote::RemoteTransport;
 pub use stdio::StdioTransport;
 
 /// 转发窗口的缺省值（秒）。与 terminal 同一量级：这是"慢工具的世界"。
@@ -326,9 +332,27 @@ impl McpFailure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpDeclaration {
     name: String,
-    command: String,
+    /// 走哪条通道（本机子进程 / 网络端点）。
+    endpoint: McpEndpoint,
     effect: McpEffect,
     timeout_seconds: u64,
+}
+
+/// 一条声明走的**通道**。
+///
+/// 两种的**信任边界不同**，因此不是一个字段的两种写法：
+/// - [`McpEndpoint::Stdio`]：同一台机器上的子进程——能洗环境、能收进程树；
+/// - [`McpEndpoint::Remote`]：网络上一个第三方端点——数据出门、只能靠加密地址与地址墙。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum McpEndpoint {
+    /// 本机子进程：命令交给平台默认 shell。
+    Stdio { command: String },
+    /// 网络端点：`credential_env` 是**环境变量的名字**——凭据本身不落声明、不进日志、
+    /// 不进主体的视野。地址的 scheme 与墙见 [`parse_declaration`]。
+    Remote {
+        address: String,
+        credential_env: Option<String>,
+    },
 }
 
 impl McpDeclaration {
@@ -337,9 +361,38 @@ impl McpDeclaration {
         &self.name
     }
 
-    /// 要跑的命令行（交给平台默认 shell，与 terminal 的"命令词法随 shell"同款）。
-    pub fn command(&self) -> &str {
-        &self.command
+    /// 这条声明走哪条通道。
+    pub fn endpoint(&self) -> &McpEndpoint {
+        &self.endpoint
+    }
+
+    /// 是不是网络端点（远程那一档）。
+    pub fn is_remote(&self) -> bool {
+        matches!(self.endpoint, McpEndpoint::Remote { .. })
+    }
+
+    /// 要跑的命令行（只有 stdio 有；远程端点没有子进程）。
+    pub fn stdio_command(&self) -> Option<&str> {
+        match &self.endpoint {
+            McpEndpoint::Stdio { command } => Some(command),
+            McpEndpoint::Remote { .. } => None,
+        }
+    }
+
+    /// 远程端点的地址（只有远程有）。
+    pub fn remote_address(&self) -> Option<&str> {
+        match &self.endpoint {
+            McpEndpoint::Remote { address, .. } => Some(address),
+            McpEndpoint::Stdio { .. } => None,
+        }
+    }
+
+    /// 远程端点要带的凭据：**环境变量的名字**，不是取值。
+    pub fn remote_credential_env(&self) -> Option<&str> {
+        match &self.endpoint {
+            McpEndpoint::Remote { credential_env, .. } => credential_env.as_deref(),
+            McpEndpoint::Stdio { .. } => None,
+        }
     }
 
     /// 宿主给的效果档。
@@ -355,42 +408,90 @@ impl McpDeclaration {
 
 /// 解析 `--mcp` 的一条声明；失败给**一个不带取值的稳定短语**（入口直接打出来）。
 ///
-/// 形状：`<名>=stdio:<命令>[,timeout=<秒>][,read-only]`——⚠ **`read-only` 收尾**：两个可选项
-/// 是**从末尾逐条剥**下来的（先剥 `,read-only`，再找 `,timeout=`），不是按逗号切（那样会把
-/// 命令里的逗号也切掉）。
+/// 两种形状：
+/// - `<名>=stdio:<命令>[,read-only][,timeout=<秒>]`
+/// - `<名>=<网络地址>[,credential-env=<环境变量名>][,read-only][,timeout=<秒>]`
+///   （本机回环允许明文地址，只供本地测试）
 ///
-/// 两条机械规矩：① 只认 `stdio:` 这一种通道——认不出来的前缀**不猜**；
-/// ② 名字必须是我们这边的合法前缀（ASCII 字母数字下划线、首字符是字母、且给工具名留得下位置），
-/// 否则这台 server 的动词名必然越界或读不出来，那时拒绝启动比让主体拿到一堆用不了的动词好。
+/// 可选项**从末尾逐条剥**（不按逗号切，那样会把命令或地址里的逗号也切掉），顺序不限。
 ///
-/// ⚠ **写反顺序会静默**（`…,read-only,timeout=30`）：`,read-only` 在末尾剥不下来 ⇒ 它被当成
-/// **命令的一部分**交给 shell，而效果档**静默**落回最严的 `unverifiable-write`。方向是安全的
-/// （更严的一档），但那不是声明者要的档，而且命令里多了一段。**如实登记：这一种今天没有用例
-/// 钉着**——它是"读解析器读出来的"，不是"测出来的"。
+/// ⚠ **远程端点在解析期就过地址墙**：非加密地址（回环除外）、私网/回环/链路本地地址、地址里带
+/// 凭据 —— 一律拒绝启动。那是"起任何东西之前"能拦下的那一半；运行期还有一条：**不跟随重定向**。
 pub fn parse_declaration(text: &str) -> Result<McpDeclaration, String> {
     let Some((name, rest)) = text.split_once('=') else {
-        return Err("声明缺少 `=`：形状是 `<名>=stdio:<命令>`".to_string());
-    };
-    let Some(command) = rest.strip_prefix("stdio:") else {
-        return Err("只认得 stdio 这一种通道：声明要以 `stdio:` 开头".to_string());
+        return Err("声明缺少 `=`：形状是 `<名>=stdio:<命令>`，或 `<名>=<网络地址>`".to_string());
     };
 
-    // 尾巴上的两个可选项：从**末尾**逐条剥（不按逗号切，那样会把命令里的逗号也切掉）。
-    let (command, effect) = match command.strip_suffix(",read-only") {
-        Some(head) => (head, McpEffect::ReadOnly),
-        None => (command, McpEffect::UnverifiableWrite),
-    };
-    let (command, timeout_seconds) = match command.rsplit_once(",timeout=") {
-        Some((head, raw)) => {
+    let mut body = rest.trim().to_string();
+    let mut effect = McpEffect::UnverifiableWrite;
+    let mut timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
+    let mut credential_env: Option<String> = None;
+    loop {
+        if let Some(head) = body.strip_suffix(",read-only") {
+            effect = McpEffect::ReadOnly;
+            body = head.to_string();
+            continue;
+        }
+        // ⚠ 顺序：**先把 credential-env 从尾巴上剥掉**，再找 `,timeout=`——否则
+        // `…,timeout=30,credential-env=X` 会把 `30,credential-env=X` 当成窗口值。
+        if let Some((head, raw)) = body.rsplit_once(",credential-env=") {
+            if credential_env.is_some() {
+                return Err("`credential-env=` 只能写一次".to_string());
+            }
+            let env_name = raw.trim();
+            let mut chars = env_name.chars();
+            let first = chars.next().unwrap_or('0');
+            if !(first.is_ascii_alphabetic() || first == '_')
+                || !env_name
+                    .chars()
+                    .all(|each| each.is_ascii_alphanumeric() || each == '_')
+            {
+                return Err(
+                    "`credential-env=` 的值必须是环境变量的名字（ASCII 字母数字下划线）"
+                        .to_string(),
+                );
+            }
+            credential_env = Some(env_name.to_string());
+            body = head.to_string();
+            continue;
+        }
+        if let Some((head, raw)) = body.rsplit_once(",timeout=") {
             let seconds: u64 = raw
                 .parse()
                 .map_err(|_| "`timeout=` 的值不是整数".to_string())?;
             if !(1..=MAX_TIMEOUT_SECONDS).contains(&seconds) {
                 return Err(format!("`timeout=` 必须在 1–{MAX_TIMEOUT_SECONDS} 之间"));
             }
-            (head, seconds)
+            timeout_seconds = seconds;
+            body = head.to_string();
+            continue;
         }
-        None => (command, DEFAULT_TIMEOUT_SECONDS),
+        break;
+    }
+
+    let endpoint = if let Some(command) = body.strip_prefix("stdio:") {
+        if credential_env.is_some() {
+            return Err(
+                "`credential-env=` 只用于网络端点：stdio 的 server 由我们起，凭据从它的环境里洗掉"
+                    .to_string(),
+            );
+        }
+        if command.trim().is_empty() {
+            return Err("命令不能为空".to_string());
+        }
+        McpEndpoint::Stdio {
+            command: command.to_string(),
+        }
+    } else if body.starts_with(scheme::SECURE) || body.starts_with(scheme::PLAIN) {
+        check_remote_address(&body)?;
+        McpEndpoint::Remote {
+            address: body.clone(),
+            credential_env,
+        }
+    } else {
+        return Err(
+            "只认得两种通道：`stdio:<命令>`，或一个网络地址（本机回环或加密地址）".to_string(),
+        );
     };
 
     if name.is_empty() {
@@ -411,16 +512,80 @@ pub fn parse_declaration(text: &str) -> Result<McpDeclaration, String> {
     if !verb_fits(name, "x") {
         return Err("server 名太长：加上工具名会超过工具名上限".to_string());
     }
-    if command.trim().is_empty() {
-        return Err("命令不能为空".to_string());
-    }
 
     Ok(McpDeclaration {
         name: name.to_string(),
-        command: command.to_string(),
+        endpoint,
         effect,
         timeout_seconds,
     })
+}
+
+/// 远程端点的**地址墙**（解析期，起任何东西之前）。
+///
+/// 它挡的是 SSRF 的第一步：**地址**。运行期还剩三步——不跟随重定向（一次重定向就是一个新的
+/// 目的地）、响应有界、每次请求都有窗口。
+fn check_remote_address(address: &str) -> Result<(), String> {
+    let secure = address.starts_with(scheme::SECURE);
+    let plain = address.starts_with(scheme::PLAIN);
+    if !secure && !plain {
+        return Err("远程端点缺少 scheme：要以加密地址开头（本机回环也可用明文）".to_string());
+    }
+    let rest = address
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() {
+        return Err("远程端点缺少主机".to_string());
+    }
+    if authority.contains('@') {
+        return Err("端点里不许带凭据：凭据走 `,credential-env=<环境变量名>`".to_string());
+    }
+    let host = authority
+        .rsplit_once(':')
+        .filter(|(_, port)| port.chars().all(|each| each.is_ascii_digit()))
+        .map(|(host, _)| host)
+        .unwrap_or(authority)
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    if host.is_empty() {
+        return Err("远程端点缺少主机".to_string());
+    }
+    let loopback = host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1";
+    if plain && !loopback {
+        return Err("远程端点必须是加密地址（只有本机回环允许明文，供本地测试）".to_string());
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>()
+        && !loopback
+        && !is_public_address(ip)
+    {
+        return Err("拒绝私网/回环/链路本地地址：远程端点必须是公网地址".to_string());
+    }
+    Ok(())
+}
+
+/// 公网地址吗（私网、回环、链路本地、未指定、组播都不算）。
+fn is_public_address(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(v4) => {
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_multicast())
+        }
+        std::net::IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            let unique_local = (first & 0xfe00) == 0xfc00;
+            let link_local = (first & 0xffc0) == 0xfe80;
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || unique_local
+                || link_local)
+        }
+    }
 }
 
 /// 工具名的长度上限（**权威在适配层**：那是 wire 事实）。
@@ -677,5 +842,209 @@ pub(crate) fn fault_outcome(fault: &CallFault, effect: McpEffect) -> ActionOutco
         (CallFault::Indeterminate(class), McpEffect::ReadOnly) => {
             ActionOutcome::failure(class.as_str())
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 主体自己的那一份：`<环境根>/mcp.conf`（2026-10-20）
+// ---------------------------------------------------------------------------
+
+/// 宿主声明的**凭据洗名单**（这一版固定三条：模型两把、im 一把）。
+///
+/// ⚠ **它必须同时用在两条路上**：`--mcp` 装的那几台，与 Agent 自己写在 `mcp.conf` 里的那几台。
+/// 如果后者拿到的子进程环境更干净，"装一台 server"就成了偷另一台被洗掉钥匙的路子——
+/// 所以名单只有这一份（入口 `agent_host` 也从这里取）。
+pub fn credential_names() -> Vec<String> {
+    vec![
+        "DEEPSEEK_API_KEY".to_string(),
+        "TAVILY_API_KEY".to_string(),
+        "CELIRA_IM_BACKEND_AUTH".to_string(),
+    ]
+}
+
+/// 主体自己的外部工具清单（自持物，与 `notes` 同层、在环境根里）。
+pub const SELF_DECLARATIONS_FILE: &str = "mcp.conf";
+
+/// 读主体自己的清单：一行一条 `<名>=stdio:<命令>[,read-only][,timeout=<秒>]`；空行与 `#` 跳过。
+///
+/// 坏行**跳过并记一句话**，不让整段起不来——这是主体自己的文件，fail-soft 才合理
+/// （与宿主 `--mcp` 的 fail-closed 是两种情形：那份是启动者写的，错了该拦）。
+pub fn read_self_declarations(env_root: &Path) -> (Vec<McpAccess>, Vec<String>) {
+    let mut accesses: Vec<McpAccess> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+    if !stdio_available() {
+        notes.push("本平台没有 stdio 通道，mcp.conf 里的声明一台都不挂".to_string());
+        return (accesses, notes);
+    }
+    let Ok(text) = std::fs::read_to_string(env_root.join(SELF_DECLARATIONS_FILE)) else {
+        return (accesses, notes);
+    };
+    for (index, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        match parse_declaration(line) {
+            Ok(declaration) => {
+                // **远程端点只许人声明**：主体自己的清单只接受本机子进程。加一个网络端点
+                // 就不是"多一只手"，而是"多一条把数据送出去的路"——那由启动者划，不由清单的写者划。
+                if declaration.is_remote() {
+                    notes.push(format!(
+                        "{SELF_DECLARATIONS_FILE} 第 {} 行：远程端点只许人声明，这一行跳过",
+                        index + 1
+                    ));
+                    continue;
+                }
+                if accesses
+                    .iter()
+                    .any(|each| each.declaration().name() == declaration.name())
+                {
+                    notes.push(format!(
+                        "{SELF_DECLARATIONS_FILE} 第 {} 行：`{}` 已经有一台，这一行跳过",
+                        index + 1,
+                        declaration.name()
+                    ));
+                    continue;
+                }
+                accesses.push(McpAccess::new(declaration, credential_names()));
+            }
+            Err(reason) => notes.push(format!(
+                "{SELF_DECLARATIONS_FILE} 第 {} 行读不懂：{reason}",
+                index + 1
+            )),
+        }
+    }
+    (accesses, notes)
+}
+
+/// 把主体自己的清单并进宿主的：**同名以宿主为准**（不能用同名换掉启动者给的那条命令）。
+pub fn merge_own_declarations(
+    host: &[McpAccess],
+    own: Vec<McpAccess>,
+) -> (Vec<McpAccess>, Vec<String>) {
+    let mut merged: Vec<McpAccess> = host.to_vec();
+    let mut notes = Vec::new();
+    for access in own {
+        let name = access.declaration().name().to_string();
+        if merged
+            .iter()
+            .any(|each| each.declaration().name() == name.as_str())
+        {
+            notes.push(format!(
+                "`{name}` 与宿主声明同名，以宿主为准（不能用它替换那条命令）"
+            ));
+            continue;
+        }
+        merged.push(access);
+    }
+    (merged, notes)
+}
+
+/// 这一段实际生效的外部工具：宿主声明 ＋（**只有开了终端档时**才读）主体自己的清单。
+///
+/// 判据：自配 MCP 不新增权力——`terminal=full` 时主体本来就能跑任意命令；没开时它就是一条
+/// 绕过终端档的后门（挂一台 `stdio:任意命令` 等于有手），所以那一档下 `mcp.conf` **不读**。
+pub fn declarations_for_run(
+    base: &[McpAccess],
+    env_root: &Path,
+    has_terminal: bool,
+) -> (Vec<McpAccess>, Vec<String>) {
+    if !has_terminal {
+        return (base.to_vec(), Vec::new());
+    }
+    let (own, notes) = read_self_declarations(env_root);
+    let (merged, conflicts) = merge_own_declarations(base, own);
+    let mut all = notes;
+    all.extend(conflicts);
+    (merged, all)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn env_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "celira-mcp-self-{}-{}-{}",
+            std::process::id(),
+            tag,
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_own_file_is_read_line_by_line_and_bad_lines_are_only_notes() {
+        let root = env_root("read");
+        std::fs::write(
+            root.join(SELF_DECLARATIONS_FILE),
+            "# 注释\n\nbrowser=stdio:npx playwright\nnot-a-declaration\n\
+             db=stdio:node db.js,read-only,timeout=30\nbrowser=stdio:other\n",
+        )
+        .unwrap();
+        let (accesses, notes) = read_self_declarations(&root);
+        let names: Vec<&str> = accesses
+            .iter()
+            .map(|each| each.declaration().name())
+            .collect();
+        assert_eq!(names, ["browser", "db"], "坏行与同名重复行只记账，不起作用");
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(notes[0].contains("读不懂"), "{notes:?}");
+        assert!(notes[1].contains("已经有一台"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_remote_endpoint_in_the_own_list_is_skipped() {
+        let root = env_root("remote");
+        std::fs::write(
+            root.join(SELF_DECLARATIONS_FILE),
+            format!(
+                "cloud={}example.com/mcp\nlocal=stdio:node x.js\n",
+                scheme::SECURE
+            ),
+        )
+        .unwrap();
+        let (accesses, notes) = read_self_declarations(&root);
+        let names: Vec<&str> = accesses
+            .iter()
+            .map(|each| each.declaration().name())
+            .collect();
+        assert_eq!(names, ["local"], "远程端点只许人声明：那一行不进清单");
+        assert!(notes[0].contains("只许人声明"), "{notes:?}");
+    }
+
+    #[test]
+    fn the_launchers_declaration_always_wins_on_the_same_name() {
+        let host = parse_declaration("db=stdio:host-command").expect("宿主那份合法");
+        let host = vec![McpAccess::new(host, credential_names())];
+        let own = parse_declaration("db=stdio:own-command").expect("主体那台也合法");
+        let (merged, notes) = merge_own_declarations(&host, vec![McpAccess::new(own, Vec::new())]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0].declaration().stdio_command(),
+            Some("host-command"),
+            "同名以宿主为准——换不掉启动者给的那条命令"
+        );
+        assert!(notes[0].contains("以宿主为准"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_resident_without_the_hand_never_reads_the_own_file() {
+        let root = env_root("gate");
+        std::fs::write(root.join(SELF_DECLARATIONS_FILE), "x=stdio:whatever\n").unwrap();
+        let host = vec![McpAccess::new(
+            parse_declaration("host=stdio:cmd").expect("合法"),
+            credential_names(),
+        )];
+        let (mcp, notes) = declarations_for_run(&host, &root, false);
+        assert_eq!(mcp.len(), 1, "没有终端档 ⇒ 只有宿主声明");
+        assert_eq!(mcp[0].declaration().name(), "host");
+        assert!(notes.is_empty(), "不读也不记");
     }
 }

@@ -1,7 +1,4 @@
 import type { ReactNode } from 'react'
-import { useNavigate } from 'react-router'
-import { ArrowLeft, Server } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { useHomeReading } from '@/components/celira/use-home-reading'
 import { localServiceReading } from '@/components/celira/reading-label'
 
@@ -45,29 +42,20 @@ function ReadingLine({ label, children }: { label: string; children: ReactNode }
 }
 
 export function SettingsServerPage() {
-  const navigate = useNavigate()
   const { reading } = useHomeReading()
   const view = reading.kind === 'loaded' ? reading.view : null
   const activities = view && typeof view.agent.activities === 'number' ? view.agent.activities : null
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
-      <div className="flex items-center gap-2 md:hidden">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
-          <ArrowLeft className="size-4" />
-        </Button>
-        <span className="text-title">本机服务</span>
-      </div>
-
-      <div className="hidden items-center gap-2 md:flex">
-        <Server className="size-5 text-muted-foreground" />
-        <h1 className="text-title">本机服务</h1>
-      </div>
+    // 内容栏的尺寸由 `SettingsLayout` 给（`max-w-3xl` ＋ `px-4 py-6`）：这一页**不再套一层**
+    // 自己的 `max-w-2xl / p-6`，否则它比同组任何一页都窄，圆角（`rounded-lg`）与内边距（`p-4`）
+    // 也各走一套 —— 切标签时内容会横向跳一格。标题也归布局（移动端那条 header 已给）。
+    <div className="space-y-3">
       <p className="text-caption text-muted-foreground">
         这台机器上的进程与本机记录，只读。
       </p>
 
-      <div className="space-y-3 rounded-lg border bg-card p-4">
+      <div className="space-y-3 rounded-xl border border-border bg-card p-5">
         <ReadingLine label="本机服务端">
           {/* 判据与机器页「运行」那一间**同一处**（`reading-label.ts` 的 `localServiceReading`）：
               有应答 ⇒ 在跑（哪怕它自报 500）；没答话 ⇒ **读不到**，不是"没在跑"。 */}

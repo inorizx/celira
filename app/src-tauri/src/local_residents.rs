@@ -216,6 +216,7 @@ pub fn start_resident(
         listen: facts.listen(),
         identity,
         model_sources_file: plan.sources_file(),
+        web_sources_file: Some(facts.home_dir.join("web_sources.json")),
         platform: host_process::HostPlatform::current(),
     };
     let launch = host_process::HostLaunch {

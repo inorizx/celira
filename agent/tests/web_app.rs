@@ -2,7 +2,8 @@
 //!
 //! 这一份用**离线回环假服务**（脚本化回执 + 请求原文捕获 + 连接计数）证明四件事：
 //!
-//! 1. **线形状**：搜索请求的路径、头与体逐项对得上；结果渲染有界；哨兵凭据不进任何输出；
+//! 1. **线形状**：搜索请求的路径、头与体逐项对得上；结果渲染有界（**地址除外**——它是把手，
+//!    剪过的地址比少一行更坏）；哨兵凭据不进任何输出；
 //! 2. **五堵墙逐堵**：只取不写（协议白名单）/ 单次上限（超限拒绝、不截断）/ 超时 / 重定向
 //!    上限与环 / 私网地址拒绝（含"放宽只对第一跳成立"那条）；
 //! 3. **失败词表**是封闭九项，同一种故障两次逐字节相同；
@@ -27,8 +28,9 @@ use celira_agent::app_contract::EffectClass;
 use celira_agent::core::{Action, ActionId, ActionOutcome, ActionParams, ActionPort};
 use celira_agent::foundation::{AgentId, OperationId, ResultState, RunId, Turn};
 use celira_agent::web_app::{
-    CAPABILITY_FETCH, CAPABILITY_SEARCH, MAX_FIELD_BYTES, MAX_PAGE_BYTES, MAX_QUERY_BYTES,
-    MAX_RESULTS, SearchAccess, WEB_APP_ID, WebApp, WebPolicy,
+    CAPABILITY_FETCH, CAPABILITY_SEARCH, FetchAccess, FetchWire, MAX_ADDRESS_BYTES,
+    MAX_FIELD_BYTES, MAX_QUERY_BYTES, MAX_RESULTS, SearchAccess, SearchWire, WEB_APP_ID, WebApp,
+    WebPolicy, WebTier,
 };
 
 /// 哨兵凭据：它只许进请求头，一个字节都不许出现在任何回执里。
@@ -45,16 +47,6 @@ enum Reply {
         headers: Vec<(String, String)>,
         body: String,
     },
-    /// 接住连接但一句话都不说（超时那一格用它）。
-    Silent,
-}
-
-fn text(body: &str) -> Reply {
-    with_kind(body, "text/plain; charset=utf-8")
-}
-
-fn html(body: &str) -> Reply {
-    with_kind(body, "text/html")
 }
 
 fn with_kind(body: &str, media: &str) -> Reply {
@@ -78,14 +70,6 @@ fn body_only(status: u16, body: &str) -> Reply {
         status,
         headers: vec![("Content-Type".to_string(), "application/json".to_string())],
         body: body.to_string(),
-    }
-}
-
-fn redirect(to: &str) -> Reply {
-    Reply::Answer {
-        status: 302,
-        headers: vec![("Location".to_string(), to.to_string())],
-        body: String::new(),
     }
 }
 
@@ -130,11 +114,6 @@ impl BoundSite {
                 let request = read_request(&mut peek);
                 let _ = sender.send(request);
                 match queue.next() {
-                    // 一句话都不说，但把连接**握在手里**（挂到用例的超时窗口之外）。
-                    Some(Reply::Silent) => {
-                        let _held = stream;
-                        std::thread::sleep(Duration::from_millis(1_500));
-                    }
                     Some(Reply::Answer {
                         status,
                         headers,
@@ -240,18 +219,30 @@ fn with_policy(site: &Site, policy: WebPolicy) -> WebApp {
     WebApp::with_policy(Some(access), policy).expect("可以装配 web 窗")
 }
 
-/// 只接"取页"那一条（没有搜索凭据）。
-fn fetch_app(policy: WebPolicy) -> WebApp {
-    WebApp::with_policy(None, policy).expect("可以装配 web 窗")
+/// 把假站点当**搜索接口那一种方言**的搜索源接进来（2026-10-20）。
+fn search_api_app(site: &Site) -> WebApp {
+    let endpoint = format!("{}/v1/tools/search", site.endpoint);
+    let access =
+        SearchAccess::with_wire(SearchWire::SearchApi, endpoint, SENTINEL).expect("声明可以建立");
+    WebApp::with_policy(Some(access), test_policy()).expect("可以装配 web 窗")
 }
 
-/// 用例策略：窗口调小（超时那一格不用等 30 秒）＋ 允许**第一跳**落在回环（才接得上假服务）。
+/// 把假站点当**抓取源**接进来（2026-10-20：抓取也走对面 API）。
+fn fetch_app(site: &Site, wire: FetchWire) -> WebApp {
+    let endpoint = format!("{}/v1/tools/fetch", site.endpoint);
+    let access = FetchAccess::new(wire, endpoint, SENTINEL).expect("声明可以建立");
+    WebApp::with_sources(None, Some(access), WebTier::Full, test_policy()).expect("可以装配 web 窗")
+}
+
+/// 没配任何来源的 web 窗（两个动词都该说 `credential-absent`）。
+fn bare_app() -> WebApp {
+    WebApp::with_policy(None, test_policy()).expect("可以装配 web 窗")
+}
+
+/// 用例策略：窗口调小（超时那一格不用等 30 秒）。
 fn test_policy() -> WebPolicy {
     WebPolicy {
         request_timeout: Duration::from_millis(400),
-        // 只担保回环：假服务住在那里。别的私网地址（比如内网）**不在**这份清单里，
-        // 因此"重定向把我们往内网指"那一格仍然会被拒——这一条在下面有用例。
-        allowed_private_hosts: vec!["127.0.0.1".to_string()],
     }
 }
 
@@ -355,7 +346,7 @@ fn the_search_request_carries_the_query_and_the_key_only_in_the_header() {
 }
 
 #[test]
-fn search_results_are_bounded_and_each_field_is_truncated() {
+fn search_results_are_bounded_and_the_display_columns_are_truncated() {
     let long = "长".repeat(MAX_FIELD_BYTES); // 每字 3 字节 ⇒ 远超上限
     let rows: Vec<(String, String, String)> = (0..MAX_RESULTS + 1)
         .map(|index| {
@@ -382,23 +373,130 @@ fn search_results_are_bounded_and_each_field_is_truncated() {
     let mut lines = reading.lines();
     assert_eq!(
         lines.next(),
-        Some(format!("results = {MAX_RESULTS}, truncated = true").as_str()),
+        Some(
+            format!("results = {MAX_RESULTS}, truncated = true, addresses_over_limit = 0").as_str()
+        ),
         "多出来的如实报截断：{reading}"
     );
     let body_lines: Vec<&str> = lines.collect();
     assert_eq!(body_lines.len(), MAX_RESULTS, "只列上限条数：{reading}");
     for line in &body_lines {
         let fields: Vec<&str> = line.split(" | ").collect();
-        assert_eq!(fields.len(), 3, "每条三段：{line}");
-        for field in &fields {
+        assert_eq!(fields.len(), 4, "每条四段：{line}");
+        // 展示栏（标题 / 摘要 / 日期）有界；**地址那一栏不参与截断**（见下一条用例）。
+        for field in [fields[0], fields[2], fields[3]] {
             assert!(
                 field.len() <= MAX_FIELD_BYTES + '…'.len_utf8(),
-                "每一栏都要有界（字符边界上截断）：{field} ({})",
+                "每一展示栏都要有界（字符边界上截断）：{field} ({})",
                 field.len()
             );
         }
         assert!(fields[2].ends_with('…'), "被截断的那一栏要说出口：{line}");
+        assert_eq!(fields[3], "-", "厂商没给日期就照实说没有：{line}");
     }
+}
+
+/// **地址是把手，不参与展示截断**（2026-10-20）：能力说明写着"把那一行的地址原样交给
+/// `web_fetch`"——剪过的地址要么解析不了、要么取到别处。这一条拿一个远超展示预算的地址
+/// （真实世界里带跟踪参数的那种）钉住：**逐字节原样**回来。
+///
+/// ⚠ 旧用例只把摘要那一栏弄长，地址那一栏从来没量过——那正是它被截断而没人发现的原因。
+#[test]
+fn an_address_is_never_cut_even_when_it_exceeds_the_display_budget() {
+    let address = format!(
+        "https://example.test/{}?{}",
+        "a".repeat(300),
+        "k=v&".repeat(200)
+    );
+    assert!(
+        address.len() > MAX_FIELD_BYTES,
+        "这一条要量的是**超过展示预算**的地址"
+    );
+    let site = bind(1).remove(0).serve(vec![with_kind(
+        &results_body(&[("标题甲", address.as_str(), "摘要甲")]),
+        "application/json",
+    )]);
+    let mut app = search_app(&site);
+
+    let outcome = call(&mut app, search(query("长地址")));
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    let reading = text_of(&outcome);
+    assert!(reading.contains(&address), "地址一个字都不许少：{reading}");
+    assert!(
+        !reading.lines().skip(1).any(|line| line.contains('…')),
+        "地址那一栏不该带省略号：{reading}"
+    );
+}
+
+/// 地址超过**把手上限**：那一行**整个不列**、首行点数——不剪成半截。
+/// 判据：少一行（她还能用其余几行）比给一个假地址（她会去取别的页）诚实。
+#[test]
+fn a_row_whose_address_exceeds_the_handle_cap_is_counted_not_listed() {
+    let too_long = format!("https://example.test/{}", "x".repeat(MAX_ADDRESS_BYTES));
+    let body = results_body(&[
+        ("能用的那一条", "https://example.test/ok", "摘要甲"),
+        ("地址太长的那一条", too_long.as_str(), "摘要乙"),
+    ]);
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind(&body, "application/json")]);
+    let mut app = search_app(&site);
+
+    let outcome = call(&mut app, search(query("超限地址")));
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    let reading = text_of(&outcome);
+    assert!(
+        reading.starts_with("results = 1, truncated = false, addresses_over_limit = 1"),
+        "首行要把丢掉的那几行说出来：{reading}"
+    );
+    assert!(reading.contains("https://example.test/ok"), "{reading}");
+    assert!(
+        !reading.contains("地址太长"),
+        "超限的那一行整个不列（不是剪一半）：{reading}"
+    );
+}
+
+/// 日期那一栏：厂商回执里带就读出来，没带就是 `-`——**不猜、不从正文推断**。
+#[test]
+fn the_date_column_carries_only_what_the_vendor_says() {
+    let body = serde_json::json!({
+        "results": [
+            {"title": "有日期", "url": "https://example.test/dated", "content": "摘要甲", "published_date": "2026-10-20"},
+            {"title": "没日期", "url": "https://example.test/undated", "content": "摘要乙"},
+        ]
+    })
+    .to_string();
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind(&body, "application/json")]);
+    let mut app = search_app(&site);
+
+    let outcome = call(&mut app, search(query("日期")));
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    let reading = text_of(&outcome);
+    assert!(
+        reading.contains("有日期 | https://example.test/dated | 摘要甲 | 2026-10-20"),
+        "{reading}"
+    );
+    assert!(
+        reading.contains("没日期 | https://example.test/undated | 摘要乙 | -"),
+        "缺的那一栏照实说 `-`：{reading}"
+    );
 }
 
 #[test]
@@ -412,8 +510,8 @@ fn a_result_row_with_a_missing_field_is_stated_as_dash() {
     assert_eq!(outcome.state(), ResultState::Success);
     let reading = text_of(&outcome);
     assert!(
-        reading.contains("只有标题 | https://example.test/x | -"),
-        "缺的一栏照实说 `-`，不静默省略：{reading}"
+        reading.contains("只有标题 | https://example.test/x | - | -"),
+        "缺的栏照实说 `-`，不静默省略：{reading}"
     );
 }
 
@@ -437,36 +535,6 @@ fn an_empty_or_overlong_query_is_refused_without_a_request() {
 // ---------------------------------------------------------------------------
 // 2. 凭据缺失与失败词表
 // ---------------------------------------------------------------------------
-
-#[test]
-fn a_missing_credential_fails_search_but_fetch_still_works() {
-    let mut site = bind(1);
-    let page = site.remove(0).serve(vec![text("外面的字")]);
-    let mut app = fetch_app(test_policy());
-
-    // 查：没有凭据 ⇒ 如实失败（动词在场，不是"用不了的能力"）。
-    // ⚠ **2026-10-13**：报的是 `credential-absent`（**这台机器没配**，本地事实、一次出网都不发），
-    // 不是 `credential-rejected`（对面拒了）。两者从前压成一档，代价是主人看到"被拒"会去查凭据
-    // 有效性，而真正该做的是**配一个**。
-    let failed = call(&mut app, search(query("随便")));
-    assert_eq!(failed.state(), ResultState::Failure);
-    assert_eq!(failure_of(&failed), "credential-absent");
-    assert_eq!(page.connections(), 0, "没配凭据时一次出网请求都不发");
-
-    // 取：与厂商无关，照常可用。
-    let fetched = call(&mut app, fetch(target(&page.endpoint)));
-    assert_eq!(
-        fetched.state(),
-        ResultState::Success,
-        "{}",
-        text_of(&fetched)
-    );
-    assert!(
-        text_of(&fetched).contains("外面的字"),
-        "{}",
-        text_of(&fetched)
-    );
-}
 
 #[test]
 fn the_search_failure_vocabulary_is_the_closed_table() {
@@ -517,282 +585,13 @@ fn the_same_failure_twice_is_byte_identical_and_a_dead_endpoint_is_transport() {
 // 3. 五堵墙（取页）
 // ---------------------------------------------------------------------------
 
-#[test]
-fn a_plain_page_comes_back_raw_with_its_source_and_size() {
-    let body = "第一行\n第二行";
-    let site = bind(1).remove(0).serve(vec![text(body)]);
-    let mut app = fetch_app(test_policy());
-
-    let outcome = call(&mut app, fetch(target(&site.endpoint)));
-    assert_eq!(
-        outcome.state(),
-        ResultState::Success,
-        "{}",
-        text_of(&outcome)
-    );
-    let reading = text_of(&outcome);
-    assert_eq!(
-        reading,
-        format!(
-            "source = {}/\nbytes = {}\n{body}",
-            site.endpoint,
-            body.len()
-        ),
-        "取页回执 = 取自哪里 + 多大 + 正文原文"
-    );
-}
-
-#[test]
-fn markup_is_extracted_mechanically() {
-    let site = bind(1).remove(0).serve(vec![html(
-        "<html><head><style>.a{color:red}</style><script>var secret=1;</script></head>\
-         <body><h1>标题</h1><p>正文 &amp; 更多</p><ul><li>甲</li><li>乙</li></ul></body></html>",
-    )]);
-    let mut app = fetch_app(test_policy());
-    let outcome = call(&mut app, fetch(target(&site.endpoint)));
-    assert_eq!(outcome.state(), ResultState::Success);
-    let reading = text_of(&outcome);
-
-    assert!(reading.contains("标题"), "{reading}");
-    assert!(reading.contains("正文 & 更多"), "实体要解码：{reading}");
-    assert!(reading.contains("甲"), "{reading}");
-    assert!(reading.contains("乙"), "{reading}");
-    assert!(!reading.contains("secret"), "脚本整段丢掉：{reading}");
-    assert!(!reading.contains("color:red"), "样式整段丢掉：{reading}");
-    assert!(!reading.contains('<'), "标记本身不进正文：{reading}");
-    assert!(
-        reading.lines().count() > 3,
-        "块级标记是「一段完了」的记号 ⇒ 至少分几行：{reading}"
-    );
-}
-
-#[test]
-fn the_private_address_wall_refuses_before_connecting() {
-    let page = bind(1).remove(0).serve(vec![text("不该到这里")]);
-    let mut app = fetch_app(WebPolicy::production());
-    let private = [
-        format!("{}/", page.endpoint),
-        "http://10.1.2.3/".to_string(),
-        "http://192.168.1.1/".to_string(),
-        "http://169.254.10.10/".to_string(),
-        "http://[::1]/".to_string(),
-        // IPv6 那一族：**字面量按解析判**之后才有这些格子。此前它们全落进
-        // `transport-unreachable`——因为带方括号的串在 Linux 上解析不了（见 `ensure_public`）。
-        "http://[fe80::1]/".to_string(),
-        "http://[fd00::1]/".to_string(),
-        "http://[::ffff:10.1.2.3]/".to_string(),
-        "http://[::]/".to_string(),
-    ];
-    for address in private {
-        let outcome = call(&mut app, fetch(target(&address)));
-        assert_eq!(outcome.state(), ResultState::Failure, "{address}");
-        assert_eq!(failure_of(&outcome), "private-address-refused", "{address}");
-    }
-    assert_eq!(page.connections(), 0, "拒绝发生在**连接之前**");
-}
-
-/// vouch 清单按**规范化后的主机文本**比：清单里写 `::1` 要认得出带方括号的写法。
-///
-/// 从前比的是 `host_str()`（IPv6 字面量带方括号）⇒ 清单里的 `::1` 永远认不出 ⇒
-/// **部署点过名的内网 IPv6 服务用不了**。这条与上面那条是同一件事的两面：
-/// 上面的地址被拒，是因为**没人点过名**；这里的地址放行，是因为**点过名了**。
-#[test]
-fn a_vouched_ipv6_literal_gets_through_the_wall() {
-    let mut policy = test_policy();
-    policy.allowed_private_hosts.push("::1".to_string());
-    let mut app = fetch_app(policy);
-    let outcome = call(&mut app, fetch(target("http://[::1]:9/")));
-    assert_eq!(outcome.state(), ResultState::Failure, "回环上没有服务");
-    assert_ne!(
-        failure_of(&outcome),
-        "private-address-refused",
-        "清单点过名的字面量不该被墙拒（这里该是连不上）"
-    );
-}
-
-#[test]
-fn only_the_two_page_schemes_are_accepted() {
-    let site = bind(1).remove(0).serve(vec![]);
-    let mut app = fetch_app(test_policy());
-    for address in [
-        "file:///C:/windows/win.ini",
-        "ftp://example.test/x",
-        "gopher://example.test/",
-        "这不是一个地址",
-        "",
-    ] {
-        let outcome = call(&mut app, fetch(target(address)));
-        assert_eq!(outcome.state(), ResultState::Failure, "{address}");
-        assert_eq!(failure_of(&outcome), "invalid-argument", "{address}");
-    }
-    // 没有给参数也一样。
-    let missing = call(&mut app, fetch(ActionParams::none()));
-    assert_eq!(failure_of(&missing), "invalid-argument");
-    assert_eq!(site.connections(), 0, "协议墙也在出网之前");
-}
-
-#[test]
-fn an_overlarge_page_is_refused_not_truncated() {
-    let exact = "x".repeat(MAX_PAGE_BYTES);
-    let over = "x".repeat(MAX_PAGE_BYTES + 1);
-    let site = bind(1).remove(0).serve(vec![text(&exact), text(&over)]);
-    let mut app = fetch_app(test_policy());
-
-    let ok = call(&mut app, fetch(target(&site.endpoint)));
-    assert_eq!(ok.state(), ResultState::Success, "正好等于上限是允许的");
-    assert!(
-        text_of(&ok).contains(&format!("bytes = {MAX_PAGE_BYTES}")),
-        "{}",
-        text_of(&ok)
-    );
-
-    let refused = call(&mut app, fetch(target(&site.endpoint)));
-    assert_eq!(refused.state(), ResultState::Failure);
-    assert_eq!(
-        failure_of(&refused),
-        "too-large",
-        "超限**拒绝**，不给半截（不截断）"
-    );
-}
-
-#[test]
-fn redirects_are_followed_up_to_the_limit_and_then_refused() {
-    // 五跳：允许（每一跳都由我们自己跟）。先把地址定下来，再写各跳的回执。
-    let sites = bind(6);
-    let hop: Vec<String> = sites.iter().map(|site| site.endpoint.clone()).collect();
-    // 逐个 serve：第 0..4 跳回 302 指向下一跳，第 5 跳回正文。
-    let mut handles = Vec::new();
-    for (index, site) in sites.into_iter().enumerate() {
-        let reply = if index < 5 {
-            redirect(&hop[index + 1])
-        } else {
-            text("终点")
-        };
-        handles.push(site.serve(vec![reply]));
-    }
-
-    let mut app = fetch_app(test_policy());
-    let outcome = call(&mut app, fetch(target(&hop[0])));
-    assert_eq!(outcome.state(), ResultState::Success, "五跳内应当跟完");
-    let reading = text_of(&outcome);
-    assert!(
-        reading.contains(&format!("source = {}", hop[5])),
-        "回执说的是**终点**（我们跟到哪儿了）：{reading}"
-    );
-    assert!(reading.contains("终点"), "{reading}");
-
-    // 六跳：拒绝。
-    let many = bind(7);
-    let chain: Vec<String> = many.iter().map(|site| site.endpoint.clone()).collect();
-    let mut hops = Vec::new();
-    for (index, site) in many.into_iter().enumerate() {
-        let reply = if index < 6 {
-            redirect(&chain[index + 1])
-        } else {
-            text("不该到这里")
-        };
-        hops.push(site.serve(vec![reply]));
-    }
-    let mut app = fetch_app(test_policy());
-    let refused = call(&mut app, fetch(target(&chain[0])));
-    assert_eq!(refused.state(), ResultState::Failure);
-    assert_eq!(failure_of(&refused), "redirect-loop", "超过上限即拒绝");
-    drop(handles);
-    drop(hops);
-}
-
-#[test]
-fn a_redirect_loop_is_detected() {
-    let mut sites = bind(2);
-    let first = sites[0].endpoint.clone();
-    let second = sites[1].endpoint.clone();
-    let a = sites
-        .remove(0)
-        .serve(vec![redirect(&second), redirect(&second)]);
-    let b = sites.remove(0).serve(vec![redirect(&first)]);
-    let mut app = fetch_app(test_policy());
-
-    let outcome = call(&mut app, fetch(target(&first)));
-    assert_eq!(outcome.state(), ResultState::Failure);
-    assert_eq!(failure_of(&outcome), "redirect-loop");
-    drop((a, b));
-}
-
-#[test]
-fn a_redirect_into_the_private_range_is_refused_even_when_the_first_hop_was_allowed() {
-    // 第一跳是调用方点名的目标（策略允许落在回环），它却把我们往内网指 ⇒ 严格面拒绝。
-    let page = bind(1)
-        .remove(0)
-        .serve(vec![redirect("http://10.1.2.3/inside")]);
-    let mut app = fetch_app(test_policy());
-    let outcome = call(&mut app, fetch(target(&page.endpoint)));
-    assert_eq!(outcome.state(), ResultState::Failure);
-    assert_eq!(
-        failure_of(&outcome),
-        "private-address-refused",
-        "放宽只对第一跳成立：重定向的目标一律按严格面看"
-    );
-    assert_eq!(page.connections(), 1, "只发了第一跳那一次请求");
-}
-
-#[test]
-fn a_relative_redirect_is_resolved_against_the_current_address() {
-    // 相对地址按**当前地址**解析：`/next` 落在同一台服务器上，所以同一个站点给两条回执。
-    let site = bind(1).remove(0);
-    let origin = site.endpoint.clone();
-    let served = site.serve(vec![redirect("/next"), text("相对跳转也跟得上")]);
-    let mut app = fetch_app(test_policy());
-
-    let outcome = call(&mut app, fetch(target(&origin)));
-    assert_eq!(
-        outcome.state(),
-        ResultState::Success,
-        "{}",
-        text_of(&outcome)
-    );
-    assert!(
-        text_of(&outcome).contains(&format!("source = {origin}/next")),
-        "相对地址按当前地址解析（同一台服务器、同一个端口）：{}",
-        text_of(&outcome)
-    );
-    assert_eq!(served.connections(), 2, "两跳：先 302、再取到正文");
-}
-
-#[test]
-fn non_text_content_is_refused() {
-    let site = bind(1).remove(0).serve(vec![
-        with_kind("不是文本", "application/pdf"),
-        with_kind("不是文本", "image/png"),
-        Reply::Answer {
-            status: 200,
-            headers: vec![],
-            body: "没说是什么".to_string(),
-        },
-    ]);
-    let mut app = fetch_app(test_policy());
-    for expected in ["application/pdf", "image/png", "没有类型"] {
-        let outcome = call(&mut app, fetch(target(&site.endpoint)));
-        assert_eq!(outcome.state(), ResultState::Failure, "{expected}");
-        assert_eq!(failure_of(&outcome), "wrong-kind", "{expected}");
-    }
-}
-
-#[test]
-fn a_silent_site_is_a_timeout() {
-    let site = bind(1).remove(0).serve(vec![Reply::Silent]);
-    let mut app = fetch_app(test_policy());
-    let outcome = call(&mut app, fetch(target(&site.endpoint)));
-    assert_eq!(outcome.state(), ResultState::Failure);
-    assert_eq!(failure_of(&outcome), "timeout");
-}
-
 // ---------------------------------------------------------------------------
 // 4. 能力面与效果声明
 // ---------------------------------------------------------------------------
 
 #[test]
 fn both_verbs_are_declared_read_only_and_preinstalled() {
-    let app = fetch_app(WebPolicy::production());
+    let app = bare_app();
     assert_eq!(app.app_id(), WEB_APP_ID);
 
     let capabilities = app.declared_capabilities();
@@ -831,7 +630,7 @@ fn the_two_verbs_are_read_only_and_the_contrast_is_a_real_write() {
     let access = celira_agent::im_channel::ImAccess::new("http://127.0.0.1:1/", SENTINEL)
         .expect("端点与凭据非空");
     let im = celira_agent::im_app::ImApp::new(access).expect("可以装配 im app");
-    let web = fetch_app(WebPolicy::production());
+    let web = bare_app();
 
     let web_declared = web.declared_effects();
     for verb in [CAPABILITY_SEARCH, CAPABILITY_FETCH] {
@@ -900,4 +699,223 @@ fn the_tier_decides_whether_the_window_and_the_search_verb_are_in_play() {
             "词表逐条对称"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// 1b. 第二个方言：一家的**搜索接口**（2026-10-20）
+// ---------------------------------------------------------------------------
+
+/// 方言二说自己的形状：请求体 `{query, count, need_content}`，回执是 `results[]`——
+/// 摘要取 `summary`（给模型读的长摘要），缺了退回 `snippet`；时间取 `date`。
+#[test]
+fn the_search_api_dialect_sends_its_own_body_and_reads_the_official_fields() {
+    let body = serde_json::json!({
+        "results": [
+            {
+                "title": "甲",
+                "url": "https://a.example/1",
+                "snippet": "短甲",
+                "summary": "长甲",
+                "date": "2026-06-01T00:00:00+00:00"
+            },
+            {
+                "title": "乙",
+                "url": "https://b.example/2",
+                "snippet": "只有短摘要"
+            }
+        ]
+    })
+    .to_string();
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind(&body, "application/json")]);
+    let mut app = search_api_app(&site);
+
+    let outcome = call(&mut app, search(query("今天发生了什么")));
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    let reading = text_of(&outcome);
+    assert!(
+        reading.starts_with("results = 2, truncated = false, addresses_over_limit = 0"),
+        "{reading}"
+    );
+    assert!(
+        reading.contains("甲 | https://a.example/1 | 长甲 | 2026-06-01T00:00:00+00:00"),
+        "摘要取 summary、时间取 date：{reading}"
+    );
+    assert!(
+        reading.contains("乙 | https://b.example/2 | 只有短摘要 | -"),
+        "没有 summary 就退回 snippet；没有 date 就是 `-`：{reading}"
+    );
+
+    let request = site.next_request().to_ascii_lowercase();
+    assert!(
+        request.starts_with("post /v1/tools/search "),
+        "端点就是配置的那一个：{request}"
+    );
+    assert!(
+        request.contains("authorization: bearer tvly-sentinel-credential"),
+        "凭据进请求头：{request}"
+    );
+    assert!(request.contains("\"count\":5"), "{request}");
+    assert!(request.contains("\"need_content\":false"), "{request}");
+    assert!(request.contains("今天发生了什么"), "{request}");
+    assert!(
+        !reading.contains("tvly-sentinel-credential"),
+        "凭据不进回执"
+    );
+    assert_eq!(site.connections(), 1, "一次调用恰好一次出网请求");
+}
+
+/// 没匹配到是**正常结束**（对面明文写着返回空数组），不是失败——如实给一行 `results = 0`。
+#[test]
+fn no_matches_is_an_empty_reading_not_a_failure() {
+    let body = serde_json::json!({ "results": [] }).to_string();
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind(&body, "application/json")]);
+    let mut app = search_api_app(&site);
+
+    let outcome = call(&mut app, search(query("一个没有结果的词")));
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    assert_eq!(
+        text_of(&outcome),
+        "results = 0, truncated = false, addresses_over_limit = 0\n"
+    );
+    assert_eq!(site.connections(), 1);
+}
+
+/// `search-api` 方言**自己的**字数上限：129 个字符本地就拒、零出网。
+///
+/// 判据：放过去只会换来对面一个 400，而 400 在这里会被归成 `server-error` —— 同一件事分成两格，
+/// 操作者会去查"服务端怎么了"，而真正该做的是**把查询写短**。
+#[test]
+fn the_search_api_dialect_refuses_an_overlong_query_before_going_out() {
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind("{}", "application/json")]);
+    let mut app = search_api_app(&site);
+
+    let outcome = call(&mut app, search(query(&"a".repeat(129))));
+    assert_eq!(outcome.state(), ResultState::Failure);
+    assert_eq!(failure_of(&outcome), "invalid-argument");
+    assert_eq!(site.connections(), 0, "本地拒绝：一次出网请求都不发");
+}
+
+// ---------------------------------------------------------------------------
+// 5. 抓取也走对面 API（2026-10-20：与搜索同形，**没有自己抓的回退**）
+// ---------------------------------------------------------------------------
+
+/// 方言一（`fetch-doc`）：请求 `{url}`，回执 `{title, content}`；读数首行三格，
+/// 其中 `via` 说明这一页是**谁取的**。
+#[test]
+fn a_vendor_fetch_comes_back_with_source_via_and_bytes() {
+    let body = serde_json::json!({ "title": "标题", "content": "# 正文\n第二行" }).to_string();
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind(&body, "application/json")]);
+    let mut app = fetch_app(&site, FetchWire::Doc);
+
+    let outcome = call(&mut app, fetch(target("https://example.test/a")));
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    let reading = text_of(&outcome);
+    assert!(
+        reading.starts_with("source = https://example.test/a\nvia = fetch-doc\nbytes = "),
+        "首行三格：{reading}"
+    );
+    assert!(reading.contains("# 正文"), "正文原样搬回来：{reading}");
+
+    let request = site.next_request().to_ascii_lowercase();
+    assert!(
+        request.starts_with("post /v1/tools/fetch "),
+        "端点就是配置的那一个：{request}"
+    );
+    assert!(
+        request.contains("authorization: bearer tvly-sentinel-credential"),
+        "凭据进请求头：{request}"
+    );
+    assert!(
+        request.contains("\"url\":\"https://example.test/a\""),
+        "{request}"
+    );
+    assert!(
+        !reading.contains("tvly-sentinel-credential"),
+        "凭据不进回执"
+    );
+    assert_eq!(site.connections(), 1, "一次调用恰好一次请求");
+}
+
+/// 方言二（`fetch-raw`）：请求 `{urls:[url], format:"markdown"}`，回执取 `results[0].raw_content`。
+/// ⚠ **200 ＋ 空 `results` 是失败**（对面没取到），不是"这一页是空的"。
+#[test]
+fn a_raw_fetch_reads_the_first_result_and_empty_results_is_a_failure() {
+    let ok = serde_json::json!({
+        "results": [{ "url": "https://example.test/a", "raw_content": "# 正文" }],
+        "failed_results": []
+    })
+    .to_string();
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind(&ok, "application/json")]);
+    let mut app = fetch_app(&site, FetchWire::Raw);
+
+    let outcome = call(&mut app, fetch(target("https://example.test/a")));
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    let reading = text_of(&outcome);
+    assert!(reading.contains("via = fetch-raw"), "{reading}");
+    assert!(reading.contains("# 正文"), "{reading}");
+    let request = site.next_request().to_ascii_lowercase();
+    assert!(
+        request.contains("\"urls\":[\"https://example.test/a\"]"),
+        "{request}"
+    );
+    assert!(request.contains("\"format\":\"markdown\""), "{request}");
+
+    let empty = serde_json::json!({
+        "results": [],
+        "failed_results": [{ "url": "https://example.test/a", "error": "Failed to retrieve content" }]
+    })
+    .to_string();
+    let site = bind(1)
+        .remove(0)
+        .serve(vec![with_kind(&empty, "application/json")]);
+    let mut app = fetch_app(&site, FetchWire::Raw);
+    let outcome = call(&mut app, fetch(target("https://example.test/a")));
+    assert_eq!(outcome.state(), ResultState::Failure);
+    assert_eq!(failure_of(&outcome), "server-error");
+    assert_eq!(site.connections(), 1, "失败也不重试");
+}
+
+/// **没配来源**：两个动词都如实说 `credential-absent`——与搜索同形，没有"自己抓"这一条。
+#[test]
+fn without_a_source_both_verbs_say_credential_absent() {
+    let mut app = bare_app();
+    let searching = call(&mut app, search(query("青苔")));
+    assert_eq!(failure_of(&searching), "credential-absent");
+    let fetching = call(&mut app, fetch(target("https://example.test/a")));
+    assert_eq!(failure_of(&fetching), "credential-absent");
+    assert_eq!(
+        failure_of(&fetching),
+        failure_of(&searching),
+        "两个动词同一句话"
+    );
 }

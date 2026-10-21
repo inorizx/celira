@@ -13,6 +13,8 @@ import { MarkdownText } from '@/components/celira/MarkdownText'
 import { ConversationItem } from '@/components/celira/ConversationItem'
 import { MessageInput } from '@/components/celira/MessageInput'
 import { ThemeToggle } from '@/components/celira/ThemeToggle'
+import { Segmented } from '@/components/celira/Segmented'
+import { CommandLine } from '@/components/celira/CommandLine'
 import { ThemePresetPreview } from '@/components/celira/ThemePresetCard'
 import { THEME_PRESETS } from '@/lib/themes'
 import { MentionText } from '@/components/celira/MentionText'
@@ -92,6 +94,9 @@ function ThemePanel({
   previewOpen: boolean
   onTogglePreview: () => void
 }) {
+  /** 分段控件是受控件 —— 摆进陈列室就得真能点，否则"选中态长什么样"看不出来。 */
+  const [gallerySeg, setGallerySeg] = useState<'system' | 'light' | 'dark'>('dark')
+  const [galleryDim, setGalleryDim] = useState<'low' | 'medium' | 'high'>('medium')
   return (
     <div className={cn('rounded-xl border border-border bg-background p-6 text-foreground', dark && 'dark')}>
       <div className="mb-5 flex items-center gap-2 text-title">
@@ -159,6 +164,52 @@ function ThemePanel({
             <ThemeToggle />
           </div>
           <Input placeholder="输入框占位" className="max-w-xs" />
+        </Section>
+        <Separator />
+        <Section title="Segmented（选中态的唯一说法）">
+          <div className="flex flex-wrap items-start gap-6">
+            <div className="w-64 space-y-1">
+              <Segmented
+                label="示例：明暗模式"
+                value={gallerySeg}
+                onChange={setGallerySeg}
+                options={[
+                  { id: 'system', label: '跟随系统' },
+                  { id: 'light', label: '日间' },
+                  { id: 'dark', label: '夜间' },
+                ] as const}
+              />
+              <p className="text-caption text-muted-foreground">等分 ＋ 满宽（设置页）</p>
+            </div>
+            <div className="space-y-1">
+              <Segmented
+                dense
+                fill={false}
+                label="示例：蒙版强度"
+                value={galleryDim}
+                onChange={setGalleryDim}
+                options={[
+                  { id: 'low', label: '弱' },
+                  { id: 'medium', label: '中' },
+                  { id: 'high', label: '强' },
+                ] as const}
+              />
+              <p className="text-caption text-muted-foreground">紧凑 ＋ 内容宽（壁纸那一族）</p>
+            </div>
+          </div>
+          <p className="text-caption text-muted-foreground">
+            选中 = accent 底 ＋ accent-foreground 字 ＋ 加粗，与会话列表选中行同族；轨道靠一条 ring-border
+            站住（暗色的容器靠线分层，不靠把底调亮）。判据：不许靠阴影、不许只靠字的深浅。
+          </p>
+        </Section>
+        <Separator />
+        <Section title="Command Line（要你跑的东西）">
+          <div className="max-w-md">
+            <CommandLine
+              command='celira-im create-human --display-name "你的名字"'
+              note="等宽字 ＋ 复制按钮 ＋ 一句「这行是干什么的」；命令不混在正文句子里。"
+            />
+          </div>
         </Section>
         <Separator />
         <Section title="Avatars">

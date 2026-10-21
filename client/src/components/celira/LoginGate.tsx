@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { Globe, House, KeyRound, Link2, Loader2, PlayCircle, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CommandLine } from '@/components/celira/CommandLine'
 import { useAppStore, useConnection } from '@/api/store'
 import { normalizeServerUrl, serverUrlError } from '@/api/prefs'
 
@@ -197,10 +198,13 @@ export function LoginGate({
           />
         </div>
 
-        <p className="text-caption text-muted-foreground">
-          本机服务端签发：<code className="font-mono">celira-im create-human --display-name "你的名字"</code>
-          ，把输出的 token 粘到上面。token 只存在这个浏览器里。
-        </p>
+        <div className="space-y-1.5">
+          <p className="text-caption text-muted-foreground">
+            本机服务端签发（在仓根跑，把输出的那一串粘到上面）：
+          </p>
+          <CommandLine command='celira-im create-human --display-name "你的名字"' />
+          <p className="text-caption text-muted-foreground">token 只存在这个浏览器里。</p>
+        </div>
 
         <Button type="submit" className="w-full" disabled={busy}>
           {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Link2 className="size-4" aria-hidden />}

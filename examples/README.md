@@ -4,7 +4,7 @@
 
 | 样例 | 是哪一格 | 怎么用 |
 |---|---|---|
-| [`skill-pack-receipt-check/`](skill-pack-receipt-check/) | **方法**（技能包） | 把整个目录拷进 `<家>/materials/skills/`，下一段清醒期开场读数就变 |
+| [`skill-pack-receipt-check/`](skill-pack-receipt-check/) | **方法**（技能包） | 把整个目录拷进 `<家>/materials/skills/`，下一段清醒期开场索引里就多一条 |
 
 ⚠ **这一份是「包」，不是「散技能」**——两者形状不同，别拷错一层。`skills/` 下的**一级条目**
 可以是散技能（`skills/<名字>/SKILL.md`，**一层**），也可以是包（`skills/<包>/<技能>/SKILL.md`，

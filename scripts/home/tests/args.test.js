@@ -139,6 +139,24 @@ argCase('起 Agent 的命令行（Linux）：**给** `--terminal full` —— �
   )
 })
 
+argCase('起 Agent 的命令行（搜索源清单）：`--search-sources` 紧随 `--model-sources`（2026-10-20）', () => {
+  const args = up.buildHostArgs({
+    ...base,
+    declarations: [],
+    modelSourcesFile: '/h/model_sources.json',
+    webSourcesFile: '/h/web_sources.json',
+    identity: { id: 'i-1', displayName: '名' },
+    isWindows: false,
+  })
+  const at = args.indexOf('--web-sources')
+  assert.ok(at > 0, '给了清单就要传这一对')
+  assert.equal(args[at + 1], '/h/web_sources.json')
+  assert.equal(args.indexOf('--model-sources') + 2, at, '紧跟模型清单，在身份两件之前')
+  assert.equal(args[at + 2], '--identity-agent')
+  // 不给就不出现（老路一个字节不变）。
+  assert.ok(!up.buildHostArgs({ ...base, declarations: [] }).includes('--web-sources'))
+})
+
 argCase('起 Agent 的命令行（没有终端臂的平台）：**不给** `--terminal` —— 如实，不降级', () => {
   const args = up.buildHostArgs({ ...base, declarations: [], isWindows: false, isLinux: false })
   assert.deepEqual(args, [

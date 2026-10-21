@@ -44,7 +44,7 @@ use celira_agent::model_choice::ModelChoice;
 use celira_agent::provider_adapter::DeepSeekModel;
 use celira_agent::store::{Environment, TracePayload};
 use celira_agent::timer_app::TIMER_FILE;
-use celira_agent::wake::{WakePort, Woken};
+use celira_agent::wake::{WakeHub, WakePort, Woken};
 mod common;
 use common::binary;
 
@@ -2639,4 +2639,50 @@ fn a_quiet_waking_states_her_pending_holdings_and_never_consumes_them() {
         Some("pending"),
         "没到点的那条**不许**被收掉"
     );
+}
+
+/// **合并窗口**（2026-10-19）：头一声铃之后要等满窗口才开段；默认（`ZERO`）不等。
+///
+/// 这一格是"默认收到群消息"能不能上线的前提：没有它，群里每一条消息都换来一次模型调用。
+/// 两条断言成对——**关着时快、开着时慢**——只量一条的话，"慢"也可能是别的原因。
+#[test]
+fn a_ring_waits_for_the_coalesce_window_only_when_it_is_open() {
+    for (window, must_wait) in [
+        (std::time::Duration::ZERO, false),
+        (std::time::Duration::from_millis(150), true),
+    ] {
+        let fixture = Fixture::new(if must_wait {
+            "coalesce-on"
+        } else {
+            "coalesce-off"
+        });
+        fixture.im_face.reply(200, &rooms_body());
+        let access = fixture.access();
+        let bell = fixture.rings.doorbell();
+        let mut host = fixture.host(&access).with_coalesce(window);
+        fixture.rings.answer(200, "text/event-stream");
+
+        // ⚠ 用**生产那条合并通道**：`small` 的门铃包装自己不带窗口语义，
+        // 合并发生在 `WakeHub` 上（这也正是生产装配的样子）。
+        let hub = WakeHub::bell_only(bell);
+        let started = std::time::Instant::now();
+        let woken = host.next_wake(&hub).expect("一声铃");
+        let waited = started.elapsed();
+
+        assert!(
+            matches!(woken, Woken::Opened | Woken::Changed),
+            "开段那一档必须是铃: {woken:?}"
+        );
+        if must_wait {
+            assert!(
+                waited >= window,
+                "窗口开着就必须等满（等的是 {window:?}，实际 {waited:?}）"
+            );
+        } else {
+            assert!(
+                waited < window.max(std::time::Duration::from_millis(60)),
+                "窗口关着就不该等（实际 {waited:?}）"
+            );
+        }
+    }
 }

@@ -1853,7 +1853,7 @@ const ADAPTER_SOURCES: [&str; 3] = [
 /// 自己读响应，理由与 `im_app.rs` 同类（"某个 App 要读外部世界"），只是对面不是我们的服务端，
 /// 而是**任何一个站点**与一家搜索厂商。它搬回来的东西**一律是外部内容**（不是我们的任何事实），
 /// 而且五堵机械墙全部钉在它自己这一层。
-const NETWORK_SOURCES: [&str; 6] = [
+const NETWORK_SOURCES: [&str; 7] = [
     "provider_adapter.rs",
     // TASK_44：第二条 wire（Responses）同样自己发请求、自己读响应——它自己的九类失败与
     // 四种机械墙（`store: false` / 相邻配对 / 状态非 completed 即拒 / 平铺 usage）钉在它自己那层。
@@ -1865,6 +1865,11 @@ const NETWORK_SOURCES: [&str; 6] = [
     // 三个 im 包（通信 / 社交 / 资料）共用它，而 App 之间不得有实现依赖。自己发请求、自己读响应
     // 这件事因此**多了一个文件**（不是变成"随处可用"）：按同一份纪律显式列入。
     "im_channel.rs",
+    // 2026-10-20：MCP 的**远程通道**（HTTPS 上的 MCP 端点）自己发请求、自己读响应。
+    // 它是 `mcp/` 里唯一碰网络的文件——stdio 那条仍然只碰进程；两条共用同一份 `Transport` 契约，
+    // 因此"换一条通道"没有变成"核心也能发请求"。地址墙在解析期（`mcp::parse_declaration`），
+    // 运行期的三道（不跟随重定向 / 响应有界 / 每次请求一个窗口）钉在这个文件里。
+    "mcp/remote.rs",
 ];
 
 /// Core 自己实现的两个文件：它们不得引用 Adapter / App / OS，也不得引用它们的依赖。
@@ -1932,7 +1937,7 @@ const CORE_SOURCES: [&str; 2] = ["core.rs", "foundation.rs"];
 /// [`every_module_is_accounted_for_in_the_layering_ledger`] 机械检查——新模块会自动要一个说法，
 /// 账本里留着一个不存在的模块也会红。**代价的来历**：这份名单手抄了两次都漏项
 /// （2026-10-10 一次补 11 项；2026-10-11 落的两件又漏了），缺的从来不是记性。
-const BOUNDARY_MODULES: [&str; 47] = [
+const BOUNDARY_MODULES: [&str; 48] = [
     "provider_adapter",
     "file_app",
     "file_view",
@@ -1964,6 +1969,9 @@ const BOUNDARY_MODULES: [&str; 47] = [
     // TASK_77：**模型配置门**（环境根下的私有配置文件）同样不许进 Core / Foundation——
     // "模型凭据从哪儿来"是装配期事实，不是执行语义。
     "model_source",
+    // 2026-10-20：**搜索源的清单 + 绑定**与模型那一对同族——"这一支用哪一家搜索"是装配期事实，
+    // 不是执行语义（Core 只知道"有一次查询"）。按「新增模块就得跟着进名单」那条纪律显式列入。
+    "web_source",
     // TASK_79：**环境根里的两份出厂文档**（出厂说明 ＋ 手册）同样不许进 Core / Foundation——
     // "环境根里有哪两份文件、读回哪一态"是装配期事实，不是执行语义。Core 只认识那条中立的接缝：
     // 装配把静态头装订给模型（`ModelPort::declare_static_head`），Core 连它的内容都不知道。
@@ -2077,7 +2085,7 @@ const ADAPTER_DEPENDENCIES: [&str; 3] = ["reqwest", "serde", "serde_json"];
 /// 阶段八把 `serde_json` 的使用从“只有 Adapter”扩到“Adapter + 身份环境存储”：
 /// 存储把经历与事实写成 NDJSON，**不引入新依赖**。这是一次必须被人看见的变化，
 /// 所以它是一条显式、封闭的名单，而不是让 `serde_json` 变成随处可用。
-const SERDE_JSON_SOURCES: [&str; 20] = [
+const SERDE_JSON_SOURCES: [&str; 23] = [
     "provider_adapter.rs",
     "store.rs",
     // 2026-10-08（同上那一刀）：NDJSON 的编解码跟着**分卷**走，因此新文件也显式列入。
@@ -2106,12 +2114,22 @@ const SERDE_JSON_SOURCES: [&str; 20] = [
     "mcp/mod.rs",
     "mcp/stdio.rs",
     "mcp/app.rs",
+    // 2026-10-20：两条通道共用的 **wire 形状**（JSON-RPC 的答复/清单/错误 → 有界回执）从
+    // `stdio.rs` 搬到这里，于是它也开始读 JSON。它与三条同族：不是"让 serde_json 随处可用"，
+    // 是又一次必须被人看见的变化（两条通道共用一份，正是那次搬家的理由）。
+    "mcp/wire.rs",
+    // 同一天：**远程通道**（HTTPS 上的 MCP 端点）自己发请求、自己读答复——它按同一份纪律列入，
+    // 理由与 `provider_adapter.rs` 同款：wire 的 JSON 只在传输层出现。
+    "mcp/remote.rs",
     // TASK_44：第二条 wire（Responses）的请求体与响应同样是 JSON（`input` 条目**原样**收与回传，
     // 因此这里用 `serde_json::Value` 而不是强类型）。它按同一份纪律显式列入。
     "responses_adapter.rs",
     // TASK_77：**模型配置门**读的是环境根下那个私有文件的 JSON（我们自己的本机格式，
     // 不是任何外部协议）。它按同一份纪律显式列入——不是"让 serde_json 随处可用"。
     "model_source.rs",
+    // 2026-10-20：**搜索源的清单与绑定**（`<家>/web_sources.json` / `<环境根>/web_binding.json`）
+    // 是同一族的第二件事——我们自己的本机格式，不是外部协议。按同一份纪律显式列入。
+    "web_source.rs",
     // **2026-10-02 im 拆包**：im 的动词按能力域分成三个包（通信 / 社交 / 资料），读的仍是 im
     // 服务端那份**外部冻结形状**的 JSON 投影，而机械搬运落在中立层。三个新文件按同一份纪律
     // 显式列入——这同样不是"让 serde_json 随处可用"。
@@ -2130,7 +2148,7 @@ const SERDE_JSON_SOURCES: [&str; 20] = [
 /// **唯一**允许碰文件系统的模块"——那句话从第二个 App 起就不成立了（拥有自己存储的 App
 /// 自己碰文件系统），而它和这张表只隔一行，正是"描述句与事实打架"的典型形状。
 /// 表里每一行各自带理由，判据只认这张表。
-const FILE_SYSTEM_SOURCES: [&str; 19] = [
+const FILE_SYSTEM_SOURCES: [&str; 21] = [
     "file_app.rs",
     "file_view.rs",
     "composition.rs",
@@ -2146,8 +2164,8 @@ const FILE_SYSTEM_SOURCES: [&str; 19] = [
     // 第二个 App 拥有**自己的**存储（`<环境根>/notes/`），因此它自己碰文件系统。
     // 这是"App 有自己的数据"应有的样子，不是串层：它没有碰环境的既有记录格式。
     "notes_app.rs",
-    // TASK_41：技能桌面**只读**材料区的 `<材料根>/skills/`（**一次目录读**——2026-09-22 降级为
-    // 一行读数后不再读任何 SKILL.md）。
+    // TASK_41：技能桌面**只读**材料区的 `<材料根>/skills/`（**一次目录读 ＋ 每个一级条目读一次
+    // `SKILL.md` 的开头**——2026-10-20 升成名字索引后重新开始读 frontmatter 那两行，**正文不读**）。
     // 它是纯投影（不写、不落盘），但"能看见什么"仍然是边界事实，因此照样进这条封闭名单。
     // TASK_75：**第三个 App 拥有自己的存储**——`<环境根>/timers`（主体的第三件自持物：约时间）。
     // 与 notes 同款：那是 App 私有格式、与既有记录格式无关；读的是自己地盘，不需要授权、
@@ -2163,6 +2181,10 @@ const FILE_SYSTEM_SOURCES: [&str; 19] = [
     // （本文件下面的独立性断言机械检查它；这一刀正是被它拦下过一次）。它仍然碰文件系统
     // （逐段 `symlink_metadata` + 读字节），因此照样进这条封闭名单；它**不写**任何东西。
     "sandbox.rs",
+    // 2026-10-20：**主体自己的外部工具清单**（`<环境根>/mcp.conf`）由 `mcp/mod.rs` 读——
+    // 一行一条声明，**只读、不写**；只有开了终端档时才读（没开时它就是绕过终端档的后门）。
+    // 与技能桌面同款：读的是自持物，但"能看见什么"仍是边界事实，因此照样进这条封闭名单。
+    "mcp/mod.rs",
     // TASK_68 P3：**动作 pin** 读自己地盘上的那一份（`<环境根>/pinned_actions`，一行一个
     // 标识）——与纸条板同款：读的是主体自持物，不需要授权、不写任何东西（读失败 ⇒ `None`
     // ⇒ 如实渲染 `unknown`）。因此照样进这条封闭名单。
@@ -2178,6 +2200,10 @@ const FILE_SYSTEM_SOURCES: [&str; 19] = [
     // TASK_77：**模型配置门**读环境根下的 `<环境根>/model_source.json`（**只读**，不写任何
     // 东西）。它在装配期判"这一次听谁的"（文件 / 进程侧），因此照样进这条封闭名单。
     "model_source.rs",
+    // 2026-10-20：**搜索源的清单与绑定**——装配期**只读**（`<家>/web_sources.json` 与
+    // `<环境根>/web_binding.json`），不写任何东西。与模型配置门同款：它判"这一支用哪一条"，
+    // 因此照样进这条封闭名单。
+    "web_source.rs",
     // TASK_79：**出厂说明与手册**（`<环境根>/orientation.md` 与 `<环境根>/manual.md`）——
     // 读回由装配做（与自识同款），而**写**只在创建那一次（`orientation::place`，从显式初始化
     // 调过来）。它读的是自己的地盘、不需要授权，因此照样进这条封闭名单。
@@ -2250,7 +2276,33 @@ const FORBIDDEN_WORD_EXCEPTIONS: [&str; 1] = ["json"];
 ///
 /// 放行方式是"把这短语从待扫描文本里去掉再扫"——因此同一个词在**别处**出现（别的文件、别的
 /// 形态、别的短语）仍然照旧违规，整个词与整份文件都没有被豁免。
-const CORE_ALLOWED_PHRASES: [(&str, &str); 10] = [
+const CORE_ALLOWED_PHRASES: [(&str, &str); 20] = [
+    // 2026-10-20：远程 MCP 端点的两个 scheme 记号（`mcp/scheme.rs` 里各写一次）。
+    // 放行的是**带引号的字面量**：同一个词作为标识符、注释或别的形态出现照旧违规；
+    // 别的文件一个都不放行——地址墙要用它，就只许在那个文件里说它。
+    ("mcp/scheme.rs", "\"https://\""),
+    ("mcp/scheme.rs", "\"http://\""),
+    // 同一天：远程通道要说的两个**媒体类型**（wire 的语言，不是我们的词）。三条字面量各写一次，
+    // 别处一律引用常量——放行的仍是**带引号的字面量**。
+    ("mcp/wire_tokens.rs", "\"application/json\""),
+    (
+        "mcp/wire_tokens.rs",
+        "\"application/json, text/event-stream\"",
+    ),
+    ("mcp/wire_tokens.rs", "\"text/event-stream\""),
+    // 同一天：`bearer_auth` 是请求库的**方法名**（外部协议的凭据头写法），不是我们的标识符。
+    // 放行的是这一条**调用写法**；别的词、别的文件照旧违规。
+    ("mcp/remote.rs", "bearer_auth"),
+    // 2026-10-20：`credential_names()` 搬进本件后，那个**环境变量名**第一次出现在被扫描的
+    // 源码里（它里面带着 `auth` 这个短词）。放行的是**带引号的字面量**：它是"要洗掉的键名"，
+    // 不是我们的词；别的形态、别的文件照旧违规。
+    ("mcp/mod.rs", "\"CELIRA_IM_BACKEND_AUTH\""),
+    // 2026-10-20：手册里那三串是**文件名字面量**（主体在自己家目录里会看到的真实名字，
+    // 她照着它去找文件）。放行的是**这条路径名**，不是 `json` 这个词——同一个词作为标识符、
+    // 注释或别的短语出现照旧违规，别的文件一个都不放行。
+    ("orientation.rs", "identity.json"),
+    ("orientation.rs", "model_binding.json"),
+    ("orientation.rs", "model_sources.json"),
     ("core.rs", "http-status-failure"),
     ("doorbell.rs", "\"/v1/backend/events/stream\""),
     ("doorbell.rs", "\"text/event-stream\""),
@@ -2299,10 +2351,15 @@ const CORE_ALLOWED_PHRASES: [(&str, &str); 10] = [
 /// 工具名的长度上限归适配层（那是 wire 事实），而外部来源的 App 造动词名时必须**读那一份**，
 /// 不许另抄一个数字。放行的是这条路径——`provider` 那个词在本文件里换个形态出现照旧违规
 /// （短词扫描照旧生效）。
-const SUBSTRING_ALLOWED_PHRASES: [(&str, &str); 3] = [
+const SUBSTRING_ALLOWED_PHRASES: [(&str, &str); 5] = [
     ("im_app.rs", "\"messages\""),
     ("im_app.rs", "\"/messages\""),
     ("mcp/mod.rs", "provider_adapter::TOOL_NAME_MAX"),
+    // 2026-10-20：`credential_names()` 从入口搬进本件后，两个**环境变量名**（别人的键名）
+    // 第一次出现在被扫描的源码里。放行的是**带引号的字面量**——它们是"要洗掉的键名"，
+    // 不是我们的词；别的形态、别的文件照旧违规。
+    ("mcp/mod.rs", "\"DEEPSEEK_API_KEY\""),
+    ("mcp/mod.rs", "\"TAVILY_API_KEY\""),
 ];
 
 /// 按 [`CORE_ALLOWED_PHRASES`] 把允许的短语从待扫描文本里去掉（只对点名的那个文件生效）。

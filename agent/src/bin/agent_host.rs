@@ -57,7 +57,7 @@ use celira_agent::self_concept::IdentityClaim;
 use celira_agent::terminal_app::{TerminalAccess, TerminalTier};
 use celira_agent::timer_app::TIMER_FILE;
 use celira_agent::wake::{TimerSource, WakeHub, Woken};
-use celira_agent::web_app::{SearchAccess, WebTier};
+use celira_agent::web_app::{FetchAccess, SearchAccess, WebTier};
 
 /// im 的 BackendAuth 凭据环境变量（与既有入口同一个变量、同一条纪律：只报变量名，不报值）。
 const IM_CREDENTIAL_ENV: &str = "CELIRA_IM_BACKEND_AUTH";
@@ -152,6 +152,8 @@ struct Options {
     model_protocol: Option<String>,
     /// **模型源清单**的路径（刀2b：宿主显式声明；这个 Agent 用清单哪一条看环境根的绑定文件）。
     model_sources: Option<String>,
+    /// **搜索源清单**的路径（2026-10-20：与 --model-sources 同形；这一支用哪一条看环境根的绑定）。
+    web_sources: Option<String>,
     /// **主体是谁**的两个值（原始声明；**成对**给出，缺一半是入口拒绝）。
     ///
     /// 门铃路径也**当次声明**：此世界的名字会改，而"此刻我是谁"只能由这一次的宿主说得准。
@@ -174,6 +176,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
     let mut model_endpoint: Option<String> = None;
     let mut model_protocol: Option<String> = None;
     let mut model_sources: Option<String> = None;
+    let mut web_sources: Option<String> = None;
     let mut identity_agent: Option<String> = None;
     let mut identity_name: Option<String> = None;
 
@@ -184,8 +187,8 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
             "--help" | "-h" => return Ok(None),
             "--root" | "--agent" | "--materials" | "--max-turns" | "--context-window"
             | "--terminal" | "--files" | "--web" | "--mcp" | "--model" | "--model-endpoint"
-            | "--model-protocol" | "--model-sources" | "--identity-agent" | "--identity-name"
-            | "--im-endpoint" => {
+            | "--model-protocol" | "--model-sources" | "--web-sources" | "--identity-agent"
+            | "--identity-name" | "--im-endpoint" => {
                 index += 1;
                 let value = args
                     .get(index)
@@ -209,6 +212,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
                     "--model-endpoint" => model_endpoint = Some(value),
                     "--model-protocol" => model_protocol = Some(value),
                     "--model-sources" => model_sources = Some(value),
+                    "--web-sources" => web_sources = Some(value),
                     "--identity-agent" => identity_agent = Some(value),
                     "--identity-name" => identity_name = Some(value),
                     _ => im_endpoint = Some(value),
@@ -262,6 +266,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
         model_endpoint,
         model_protocol,
         model_sources,
+        web_sources,
         identity_agent,
         identity_name,
         im_endpoint: im_endpoint.ok_or_else(|| "缺 --im-endpoint（门铃就来自它）".to_string())?,
@@ -509,9 +514,9 @@ fn main() -> ExitCode {
         }
     };
 
-    // 搜索凭据（可选）：没有它不是错误——「查」那一条照旧在场，执行时如实说没配（`credential-absent`）。
+    // 搜索源（可选）：清单 + 绑定优先；没有绑定才走环境变量那一条老路。
     // ⚠ 决定"在不在场"的是上面那一格**出网档**（`--web`）；凭据只管"能不能执行"，两者是两件事。
-    let search = search_access();
+    let (search, fetch) = web_access(options.web_sources.as_deref().map(Path::new), root);
 
     // **在跑表**：门铃的铃回调与宿主共用同一份（跑着就拉一次 B1 写进事件卡片的细胞）。
     let watch = RunWatch::new();
@@ -563,6 +568,7 @@ fn main() -> ExitCode {
         identity: identity_claim(&options),
         web: web_tier,
         search,
+        fetch,
         terminal,
         files,
         mcp,
@@ -812,41 +818,33 @@ fn main() -> ExitCode {
     }
 }
 
-/// 搜索凭据的环境变量名（只报名字，不报取值）与本仓认的那一个端点。
-const SEARCH_CREDENTIAL_ENV: &str = "TAVILY_API_KEY";
-const DEFAULT_SEARCH_ENDPOINT: &str = "https://api.tavily.com/search";
-
-/// 搜索厂商的声明（**可选**）：凭据来自环境变量，端点用本仓认的那一个。
+/// **web 源**（可选）：清单 + 绑定，**一条源两个能力**（查与取）。
 ///
-/// 缺凭据**不是**常驻宿主起不来的理由：web 窗是出厂内置、预装常开的，缺的只是「查」那一条
-/// 的凭据——它会如实失败 `credential-absent`（**没配**，不是被拒），而「取」不依赖厂商、照常可用。
+/// 判据三条：
 ///
-/// ⚠ **2026-10-13 修**：从前只有"变量在但为空"才打那行说明，而**变量压根没设**（最常见的那种）
-/// **一声不响**——操作者看到的是"被拒"，而真相是这台机器没配。⇒ 两条路都打，而且**报同一个
-/// 分类词**（人不许比系统知道得更少）。
-fn search_access() -> Option<SearchAccess> {
-    const ENDPOINT_ENV: &str = "CELIRA_SEARCH_ENDPOINT";
-    let credential = std::env::var(SEARCH_CREDENTIAL_ENV).ok();
-    let usable = credential
-        .as_deref()
-        .filter(|value| !value.trim().is_empty());
-    let Some(credential) = usable else {
-        let why = if credential.is_none() {
-            "环境变量未设置"
-        } else {
-            "环境变量为空"
-        };
-        eprintln!(
-            "agent_host: web 搜索凭据不可用（{SEARCH_CREDENTIAL_ENV}：{why}）⇒ web_search 会如实失败 \
-             credential-absent（这台机器没配，不是对面拒绝）；web_fetch 不受影响"
-        );
-        return None;
+/// 1. 没有 `--web-sources` / 这一支没有绑定 ⇒ **两个动词都说没配**（`credential-absent`）。
+///    **不再有"环境变量那一条老路"**（2026-10-20 主人裁）：没配就是没配；想要原生抓取是
+///    `bash` 的事，不是本件偷偷留的一条回退。
+/// 2. 绑定读不出来 ⇒ 如实报一行，两个动词都说没配（**不回落**：静默换一家＝换一种花法）。
+/// 3. **不拒绝启动**：web 不是"能不能想"，缺它主体照样醒着（与模型绑定那格刻意不同，见 §3.24）。
+fn web_access(list: Option<&Path>, env_root: &Path) -> (Option<SearchAccess>, Option<FetchAccess>) {
+    let Some(list) = list else {
+        return (None, None);
     };
-    let endpoint = std::env::var(ENDPOINT_ENV)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_SEARCH_ENDPOINT.to_string());
-    SearchAccess::new(endpoint, credential.to_string())
+    match celira_agent::web_source::resolve(list, env_root) {
+        celira_agent::web_source::Resolved::Bound(entry) => {
+            eprintln!(
+                "agent_host: web 源 `{}`（{}）：查与取都走它",
+                entry.id, entry.name
+            );
+            (entry.search_access(), entry.fetch_access())
+        }
+        celira_agent::web_source::Resolved::Unbound => (None, None),
+        celira_agent::web_source::Resolved::Broken(message) => {
+            eprintln!("agent_host: web 源读不出来 ⇒ 这一次两个动词都说没配：{message}");
+            (None, None)
+        }
+    }
 }
 
 /// terminal 档位的解析（在打开环境、起任何东西之前）。

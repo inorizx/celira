@@ -215,6 +215,8 @@ function buildHostArgs({
   declarations = [],
   identity = null,
   modelSourcesFile = null,
+  // **web 源清单在哪**（2026-10-20）：与模型源同款——给清单，用哪一条在环境根的绑定里。
+  webSourcesFile = null,
   // ⚠ **缺省是"不给手"**（2026-10-14 主人裁）：只有 `terminal === 'full'` 才给这只手。
   //   入参的默认值也是 `'none'` —— "没说"与"说了不要"在这一档上是同一个结果，而"要"必须被说出来。
   terminal = 'none',
@@ -238,6 +240,7 @@ function buildHostArgs({
   // **模型源清单在哪**（刀2b）：与 `--im-endpoint` 同款"宿主显式声明"——Agent 本机不去猜路径。
   // 给 Agent 的是**清单**（机器级那份）；"这个 Agent 用哪一条"在环境根的绑定文件里（自己去读）。
   if (modelSourcesFile) args.push('--model-sources', modelSourcesFile)
+  if (webSourcesFile) args.push('--web-sources', webSourcesFile)
   // **是谁**（TASK_70）：两个值**成对**给（缺一半会被入口拒绝 ⇒ 要么都给、要么都不给）。
   // 问不到（没声明 identity）⇒ **一个参数都不多** ⇒ 开场照旧跳过那一行。
   if (identity) {
@@ -1689,6 +1692,7 @@ async function startResidentHost({
       declarations,
       identity,
       modelSourcesFile: modelSources.listPath(homeDir),
+    webSourcesFile: path.join(homeDir, 'web_sources.json'),
       // **这一支的手**（第五刀）：档位由支级/家级声明解析出来（缺省仍是平台默认）。
       terminal: terminal.mode,
       // **这一支的资源上界**（2026-10-05）：从它自己的 `agent.conf` 读；缺省 = 内置 300。

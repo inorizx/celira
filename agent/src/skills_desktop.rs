@@ -1,103 +1,68 @@
-//! 技能桌面：材料区里的**资源索引**（系统服务第五件，照纸条板的结构与纪律做）。
+//! 技能桌面：材料区里的**方法索引**（2026-10-20 从「一行读数」改成「有界的名字索引」）。
 //!
-//! 模型得知道技能区**存在**才会想起来去翻——上下文里没有这条线索，就没有提取的起点。所以
-//! "技能区有多少东西"常驻；但**逐条索引已经降级**（2026-09-22 裁决）：技能是"**有时**才需要"的
-//! 信息，而逐条列名字 + 一句话是"每次开场"都要付的成本。尺子是「每次醒都需要 ⇒ 注入目录；
-//! 有时才需要 ⇒ 纯拉取」——技能落在后者，于是整块只剩**一行读数**。
+//! 模型得知道技能区**有什么**才会想起来去翻——上下文里没有这条线索，就没有提取的起点。
+//! 2026-09-22 的裁决把整块压成一行计数（"有时才需要 ⇒ 纯拉取"）；实测（`probe-recall`，28 次）
+//! 证明**任务点到那份材料时**那一行够用（28/28 都翻了）。它没证的那一半是**任务没点名的情形**：
+//! 那时"去翻"全靠主体自己想起来，而技能的价值恰恰是"任务来了能想起来用"。
 //!
-//! **判据一句话：给目录，不给判断**——这一行只报"有什么、几个"，**不排序、不评分、不推荐、
-//! 不挑该读哪一份**。翻哪一份是主体的判断，系统只保证两件事：它知道技能区里有东西、以及怎么翻。
+//! ## 判决（2026-10-20，主人裁）
 //!
-//! ```text
-//! 一级（常驻，开场一行读数）：技能桌面——`skills: N 项（要翻看用 files_list，路径 skills/）`
-//! 二级（按需，翻包）        ：files_list（已有动词）
-//! 三级（按需，全文）        ：files_read（已有动词）
-//! ```
+//! **名字与一句触发说明进场，正文不进场**。判据是把两件事拆开：
 //!
-//! 这三档之外还有**第四档：`files_grep`**——"主体自己检索"的那一格（它不属于本件那一行读数）；
-//! 判据与真跑读数在 [`crate::file_app`] 的模块文档里。
+//! - **名字 + 触发**（`description:` 那一行）＝**检索索引**：决定"要不要翻它"的那一格；
+//! - **正文**＝**方法本身**：仍然是 `files_read` 的地盘，一个字节都不进场。
 //!
-//! 收益是机械的：读数**不随技能数增长**——三百个一级条目也仍是一行
-//! （`tests/skills_desktop.rs::the_reading_does_not_grow_with_the_number_of_skills`）。日常形态逐字
-//! 是 `skills: N 项（要翻看用 files_list，路径 skills/）`，为空则是 `skills: 0 项（技能区为空）`。
-//! 逐条的名字与说明**本来就在 `files` 的地盘**（`files_list skills/` 列得出、`files_read` 读得到），
-//! 这里再抄一份是重复，不是索引。技能区不存在时这一块**整块不出场**：那时连"有多少项"都不存在。
+//! 行业里"名字 + 描述放开场"（Agent Skills 那套三层渐进披露的第一层）之所以成立，就是因为
+//! 第二层的"按需加载"**依赖第一层的触发线索**；没有第一层，"按需"退化成"靠主体想起去翻"。
 //!
-//! 它是**第四块处境投影**：通知栏（世界的动静）｜纸条板（主体的 pin）｜事件卡片（Run 中新事件）｜
-//! **技能桌面（材料区资源索引——宿主装了什么）**。
+//! ## 三条纪律（与旧版一脉相承）
+//!
+//! 1. **只读、纯投影**：读材料区的目录与每个一级条目的 `SKILL.md` **开头**（≤8 KiB，只取
+//!    `name` / `description` 两行），不持有跨活动状态，不落盘、不新增存储；
+//! 2. **有界**：一级条目最多列 [`MAX_LISTED`] 个（按目录名排序，**稳定身份序、不是推荐序**），
+//!    名字 ≤ [`MAX_NAME_BYTES`]、触发说明 ≤ [`MAX_HINT_BYTES`]（截断带 `…`），超出部分如实说
+//!    `…另 N 项`。一行读数的**记账**变成"有界增长"，不再"不随 N 增长"；
+//! 3. **零正文**：正文一个字都不进场——`SKILL.md` 的 `# 步骤` 那一段仍然只能 `files_read` 读到。
+//!
+//! ## 缺省不等于零
+//!
+//! `skills/` **不存在** ⇒ 这个块**整块不出场**（不是空标题）；存在但一个一级条目都没有 ⇒
+//! 如实写 `skills: 0 项（技能区为空）`——`None ≠ Some(0)`，`0 项` 也不是"没有技能区"的另一种说法。
+//! ⚠ **`None` 这一格里仍合着三种情形**（`skills/` 不存在 / 不是目录 / 读不出来）——本件不区分。
 //!
 //! ## 物理约定（零机制，只定形状）
 //!
-//! - 技能根：`<材料根>/skills/`——**只有这个目录下的才算技能**（别处不投影：渐进的默认不可见，
-//!   扫描也有界）；
-//! - **两种形状只说明"装在哪"，不参与判定**：散 skill `skills/<name>/SKILL.md`（单层）；包
-//!   `skills/<pack>/<skill>/SKILL.md`（两层）；
-//! - **一级条目 = `skills/` 的直接子目录**（散 skill 或包）——散**文件**不是技能，不计入。
+//! - 技能根：`<材料根>/skills/`——只有这个目录下的才算；
+//! - **一级条目 = `skills/` 的直接子目录**（散 skill 或包）；散**文件**不是技能，不计入；
+//! - **数的是结构**：没有 `SKILL.md` 的一级目录照样算一项（名字回退成目录名）；
+//! - 名字取 `SKILL.md` frontmatter 的 `name:`，缺省回退目录名；触发说明取 `description:`
+//!   ——单行、引号、折叠块（`>` / `|`）三种写法都认，渲染时**按预算取整句**（切在句末，
+//!   切不到才硬截并加 `…`）。**不认识的字段一律忽略**。
 //!
-//! ⚠ **数的是结构，不是"能解析出的技能"**：一个**没有 `SKILL.md`** 的一级目录（包本身，或主体
-//! 刚建的空目录）**照样算一项**。**本件不读任何 `SKILL.md`**——逐条内容既然不进场，读它就是
-//! **纯浪费**（接替旧渲染纪律的两条用例：`the_count_is_the_number_of_top_level_directories`、
-//! `the_manifest_content_no_longer_changes_the_reading`）。
+//! ## 降级时删掉、这次**没有**捡回来的机制
 //!
-//! ## 纪律（逐条对齐纸条板）
-//!
-//! 1. **只读、纯投影**：直接读材料区的目录（与 files app 的展开无关——存在性线索不能等主体点开
-//!    材料窗），不持有跨活动状态，不落盘、不新增存储；
-//! 2. **缺省不等于零**：`skills/` **不存在** ⇒ 这个块**整块不出场**（不是空标题）；存在但一个
-//!    一级条目都没有 ⇒ 如实写 `skills: 0 项（技能区为空）`——`None ≠ Some(0)`，`0 项` 也不是
-//!    "没有技能区"的另一种说法。
-//!    ⚠ **`None` 这一格里合着三种情形**（`skills/` 不存在 / 不是目录 / 读不出来）——本件**不区分**
-//!    它们：这一格只有一个数，没有可标"读不出来"的位（纸条板那种三态在这里没有落脚处）。要守的
-//!    分界是 `None` 与 `Some(0)` 分开，别把"没有技能区"写成"0 项"；
-//! 3. **零正文**：桌面块只有这一行读数，**没有任何 SKILL.md 的名字、说明或正文**——要看自己
-//!    `files_list` / `files_read`；
-//! 4. **永不让活动失败**：读不出来就少摆一块（与通知栏同律：便利坏了不挡清醒）。
-//!
-//! ## 降级时删掉的那些机制（零消费者，别再捡回来）
-//!
-//! frontmatter 最小解析、`name:` / `description:` 取值、60 字节预览与截断、显示名"frontmatter
-//! 优先"规则、"最多 50 条"上限——它们当时存在的**唯一理由**就是渲染逐条；逐条降级后**零消费者**
-//! ⇒ 随降级一起删除。⚠ 本节就是那批删除的登记处：想在读数里再露出名字或说明，先回答"谁消费它"。
+//! 60 字节预览与按条截断的旧算法、显示名"frontmatter 优先"的**逐条渲染**、一次最多 50 条——
+//! 它们的形状属于"逐条清单"，不是本件这个"有界索引"；这次只按 [`MAX_LISTED`] / [`MAX_NAME_BYTES`] /
+//! [`MAX_HINT_BYTES`] 三个界重写。
 //!
 //! ## 那一行读数的效用（2026-10-06 第一次量过）
 //!
-//! 上面那句动机（"模型得知道技能区存在才会想起来去翻"）**是一句可证伪的假设**；而在 2026-10-06
-//! 之前，登记下来的只有**成本**（读数不随技能数增长，有用例钉着）——**效用一次都没量过**。探针
-//! `scripts/home/probe-recall.js` 量了它：临时家里放一份**随机生成、猜不到**的码 ＋ 人发一条
-//! **只说"你手上那份 ZOK"**的任务（不提路径、不提"技能区"），**主判据完全黑盒**（回信里有没有
-//! 那个码）。**真跑 28 次**：
+//! `probe-recall` 量了"一行线索够不够"：临时家里放一份**随机、猜不到**的码 ＋ 人发一条
+//! **只说"你手上那份 ZOK"** 的任务，主判据完全黑盒（回信里有没有那个码）。真跑 28 次：
+//! 翻了 **28/28**，报对 19/28（其余 9 次全部有解释，且都不是"找不回来"）。
 //!
-//! | `N`（技能份数） | 翻了 | 报对 |
-//! |---|---|---|
-//! | 1（十六次） | **16/16** | 12/16 |
-//! | 30（十二次） | **12/12** | 7/12 |
-//!
-//! **⇒ 翻了 28/28：一次都没靠猜。**"报对"那一栏剩下的 **9 次**全部有解释、没有一次是"找不回来"
-//! ——4 次是**探针自己的措辞歧义**（第一版用"回执"，而它已经是【动作结果】的正式词）、4 次是
-//! **探针自己的大小写不一致**（任务说 `ZOK`、技能里写 `zok` ⇒ `files_grep` 命中 0 条）、1 次是
-//! 它那一场没读完。**两处都是探针的毛病，都已钉进用例**（`scripts/home/tests/probe-recall.test.js`）。
-//!
-//! **★ 还有一条是判据的活证据**：失败那几次主体**一次都没编**，而是如实说找不到——原话：
-//! 「我不想凭空编一份像模像样的 ZOK 报告糊弄你」「我不打算凭印象编」「我报不出来——我手上找不到
-//! 任何叫 ZOK 的规矩……候选 = 0，扫了 30 份材料，没有截断」。它不但不编，还把自己做过的核对
-//! 逐条列出来。（这 28 次跑的是**正常模式**：目标那一份真的在场；"指一个不存在的东西、看它报
-//! 什么"是后来另立的 `--absent` 模式，判据与退出码在探针文件头。）
-//!
-//! ⚠ **这 28 次证不到什么（如实登记，不许外推）**：**一个任务族**（都是"按你手上那份 X 的规矩
-//! 报 X"）、**一个模型**、**`N` 只到 30**。⇒ 它证明的是"**在这个模型 ＋ 这个任务族上，那一行
-//! 线索足够**"，**不是**"任何模型都会翻"，也**不是**"`N` 再大也够"。
-//!
-//! **跑法与触发条件**：`node scripts/home/probe-recall.js`（参数与退出码见探针自己的文件头；
-//! 它花**真模型调用**）；**什么时候必须跑**写在 `AGENTS.md`「验证与汇报」——换模型 / 改技能桌面
-//! 与开场线索 / 改 `files_*` 那一面。
+//! ⚠ **它证不到什么**：**一个任务族**（都是"按你手上那份 X 的规矩报 X"）、**一个模型**、
+//! `N` 只到 30；它证明的是"任务点名了那份材料时，一行线索足够"，**不是**"任务没点名时主体会去翻"。
+//! 后者是这一次改成名字索引的**理由**，也是它的**未验证假设**——要量就得另写一个"不点名"的探针。
 //!
 //! ## 权威位置
 //!
-//! **物理约定（技能根、一级条目、数的是结构）的唯一权威是这里**：`agent/SKILL_PACK_GUIDE.md` 是
-//! **对外入口**（只写"外部作者怎么接"那半），`agent/README.md` §3.28 是**指针**——两处都
-//! **不另立权威**。行为证明：`tests/skills_desktop.rs`。
+//! **物理约定（技能根、一级条目、数的是结构）的唯一权威是这里**：`agent/SKILL_PACK_GUIDE.md`
+//! 是**对外入口**（只写"外部作者怎么接"那半），`agent/README.md` §3.28 是**指针**。
+//! 行为证明：[`tests/skills_desktop.rs`](../../tests/skills_desktop.rs)。
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::core::combine;
@@ -106,62 +71,265 @@ use crate::core::{ContentBatch, ContentBlock, ContextSource, InjectionContext};
 /// 技能桌面的内容块标签（呈现时的区域名）。
 pub const SKILLS_DESKTOP_LABEL: &str = "skills";
 
-/// 技能根（材料区里的那一个目录名）。它同时是那条读数里给出的**相对路径**——主体翻看时要用的
-/// 正是这个字面量（读数与 `files_list` 的参数因此同源，不靠主体猜）。
+/// 技能根（材料区里的那一个目录名）。它同时是那条读数里给出的**相对路径**。
 pub const SKILLS_DIR: &str = "skills";
 
-/// 材料根的技能目录路径（装配期要用它读一次；单独给出来是为了让调用方不必知道内部布局）。
+/// 一级条目最多列几个（超出如实说"另 N 项"）。
+pub const MAX_LISTED: usize = 12;
+
+/// 显示名（frontmatter `name:` 或目录名）的字节上限。
+pub const MAX_NAME_BYTES: usize = 64;
+
+/// 触发说明（frontmatter `description:`）的字节预算：放不下就在预算内**按句末**切。
+///
+/// 160 字节 ≈ 53 个汉字：够写一句"什么时候用"，最坏 12 条约 2 KB（首屏现在约 9 KB）。
+pub const MAX_HINT_BYTES: usize = 160;
+
+/// 只读 `SKILL.md` 的开头这么多字节（frontmatter 在顶部；读正文是浪费）。
+const MAX_MANIFEST_BYTES: u64 = 8 * 1024;
+
+/// 清单文件名（物理约定的一部分）。
+const MANIFEST_FILE: &str = "SKILL.md";
+
+/// 材料根的技能目录路径（装配期要用它读一次）。
 pub fn skills_root(material_root: &Path) -> PathBuf {
     material_root.join(SKILLS_DIR)
 }
 
-/// 读材料区里的技能**条目数**。
+/// 一个一级条目：显示名 ＋ 一句触发说明（正文不在里面）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillEntry {
+    /// frontmatter `name:`，缺省回退目录名；已消毒（单行、≤ [`MAX_NAME_BYTES`]）。
+    pub display: String,
+    /// frontmatter `description:` 的一句触发（按预算取整句）；没有/不可解析 ⇒ `None`。
+    pub hint: Option<String>,
+}
+
+/// 压成单行：控制字符换空格，去两头空白；空 ⇒ `None`；超界按 UTF-8 边界截断并加 `…`。
+fn one_line(raw: &str, max_bytes: usize) -> Option<String> {
+    let collapsed: String = raw
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect();
+    let trimmed = collapsed.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(truncate_bytes(trimmed, max_bytes))
+}
+
+/// 按**字节**截断，但只在字符边界上切；截了就加 `…`。
+fn truncate_bytes(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
+}
+
+/// 取**一句触发**：先压成单行；放得下就整句；放不下就在预算内**最后一个句末**切开
+/// （`。！？.!?`），切不到才硬截加 `…`。
+///
+/// 为什么不像 [`truncate_bytes`] 那样直接切：外部技能的 `description` 往往是一整段，
+/// 直接按字节切会把"什么时候用"那半句切掉；按句子切，至少留下一个完整的判断。
+fn cue(raw: &str, max_bytes: usize) -> Option<String> {
+    let collapsed: String = raw
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect();
+    let trimmed = collapsed.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.len() <= max_bytes {
+        return Some(trimmed.to_string());
+    }
+    let mut last_end = None;
+    for (index, ch) in trimmed.char_indices() {
+        if index >= max_bytes {
+            break;
+        }
+        if matches!(ch, '。' | '！' | '？' | '.' | '!' | '?') {
+            last_end = Some(index + ch.len_utf8());
+        }
+    }
+    match last_end {
+        Some(end) => Some(trimmed[..end].to_string()),
+        None => Some(truncate_bytes(trimmed, max_bytes)),
+    }
+}
+
+/// 去掉 YAML 值两头可能有的引号。
+fn unquote(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    let stripped = trimmed
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|rest| rest.strip_suffix('\''))
+        });
+    stripped.unwrap_or(trimmed)
+}
+
+/// 解析 frontmatter 的 `name` / `description`（只认文件开头 `---` 到下一个 `---` 那一段）。
+///
+/// **两个分隔符都要在**：只有开头、没有收口的那一段不算 frontmatter（坏清单 ⇒ 回退目录名，
+/// 不拿半截正文当名字）。
+///
+/// 兼容外部技能的三种写法：单行值、引号值、**折叠/字面块**（`>` / `|` 及其 `-` / `+` 变体——
+/// 收后面的缩进行、按空格拼起来再取一句）。**不认识的字段一律忽略**（`license` / `metadata` /
+/// `allowed-tools` 这些都不拦、不报错）。
+fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>) {
+    let mut lines = text.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return (None, None);
+    }
+    let body: Vec<&str> = lines.collect();
+    let Some(close) = body.iter().position(|line| line.trim_end() == "---") else {
+        return (None, None);
+    };
+    let block = &body[..close];
+    let mut name = None;
+    let mut hint = None;
+    let mut index = 0;
+    while index < block.len() {
+        let line = block[index];
+        if name.is_none()
+            && let Some(value) = line.strip_prefix("name:")
+        {
+            name = one_line(unquote(value), MAX_NAME_BYTES);
+            index += 1;
+            continue;
+        }
+        if hint.is_none()
+            && let Some(value) = line.strip_prefix("description:")
+        {
+            let value = unquote(value);
+            if matches!(value, ">" | "|" | ">-" | "|-" | ">+" | "|+") {
+                // 折叠块：收后面的缩进行，直到非缩进行 / 收口 / 结束。
+                let mut collected: Vec<&str> = Vec::new();
+                index += 1;
+                while index < block.len() {
+                    let next = block[index];
+                    if next.trim().is_empty() {
+                        index += 1;
+                        continue;
+                    }
+                    if next.starts_with(' ') || next.starts_with('\t') {
+                        collected.push(next.trim());
+                        index += 1;
+                        continue;
+                    }
+                    break;
+                }
+                hint = cue(&collected.join(" "), MAX_HINT_BYTES);
+                continue;
+            }
+            hint = cue(value, MAX_HINT_BYTES);
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+    (name, hint)
+}
+
+/// 读一个一级条目的清单开头；读不到/读不懂 ⇒ `(None, None)`（回退目录名，不阻断）。
+fn read_manifest(path: &Path) -> (Option<String>, Option<String>) {
+    let Ok(file) = fs::File::open(path) else {
+        return (None, None);
+    };
+    let mut head = String::new();
+    if file
+        .take(MAX_MANIFEST_BYTES)
+        .read_to_string(&mut head)
+        .is_err()
+    {
+        return (None, None);
+    }
+    parse_frontmatter(&head)
+}
+
+/// 读材料区里的技能索引。
 ///
 /// 返回 `None` = **这个材料根上没有技能区**（`skills/` 不存在、不是目录，或读不出来）⇒ 整块不出场；
-/// `Some(0)` = 技能区在、但一个一级条目都没有（如实说"为空"）。
+/// `Some(entries)` = 技能区在（`Some(vec![])` 就是"为空"，如实说）。
 ///
-/// **数的是目录**（散 skill 与包都是一级条目）——与既有的物理约定同一口径；散文件不是技能。
-/// 这里**不读任何 SKILL.md**：逐条的名字与说明不在本块出场（见模块文档），读它就没有消费者。
-pub fn read_skills(material_root: &Path) -> Option<usize> {
+/// 顺序是**目录名的稳定身份序**（不是推荐序、不是评分序）——"给目录不给判断"。
+pub fn read_skills(material_root: &Path) -> Option<Vec<SkillEntry>> {
     let root = skills_root(material_root);
     let metadata = fs::metadata(&root).ok()?;
     if !metadata.is_dir() {
         return None;
     }
-    let children = fs::read_dir(&root).ok()?;
+    let mut dirs: Vec<PathBuf> = fs::read_dir(&root)
+        .ok()?
+        .flatten()
+        .filter(|child| child.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .map(|child| child.path())
+        .collect();
+    dirs.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
     Some(
-        children
-            .flatten()
-            .filter(|child| child.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
-            .count(),
+        dirs.into_iter()
+            .map(|dir| {
+                let dir_name = dir
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let (name, hint) = read_manifest(&dir.join(MANIFEST_FILE));
+                SkillEntry {
+                    display: name
+                        .or_else(|| one_line(&dir_name, MAX_NAME_BYTES))
+                        .unwrap_or_default(),
+                    hint,
+                }
+            })
+            .collect(),
     )
 }
 
 /// 技能桌面（与纸条板同款：装配期读一次，开场摆一次）。
 pub struct SkillsDesktop<Inner> {
-    /// 装配期读回来的**条目数**：`None` = 没有技能区（**整块不出场**），`Some(0)` = 有但是空的。
-    entries: Option<usize>,
+    /// 装配期读回来的索引：`None` = 没有技能区（**整块不出场**）。
+    entries: Option<Vec<SkillEntry>>,
     inner: Inner,
 }
 
 impl<Inner> SkillsDesktop<Inner> {
-    /// 用装配期读回来的那一份装配：条目数（可缺）+ 内层来源。
-    pub fn new(entries: Option<usize>, inner: Inner) -> Self {
+    /// 用装配期读回来的那一份装配：索引（可缺）＋ 内层来源。
+    pub fn new(entries: Option<Vec<SkillEntry>>, inner: Inner) -> Self {
         Self { entries, inner }
     }
 
     /// 本件那一条读数；`None` = 这一块不出场。
     ///
-    /// **一行说尽**，而且**免查也免学**：主体要知道怎么翻，就不用先去看格式——翻看的动词名与路径
-    /// 随这一行一起给出（`files_list` 吃 `path`，值就是那个目录名）。
+    /// **有界**：最多 [`MAX_LISTED`] 条，其余如实说"另 N 项"；每条只有名字与一句触发说明。
     pub fn reading(&self) -> Option<String> {
-        let entries = self.entries?;
-        if entries == 0 {
+        let entries = self.entries.as_ref()?;
+        if entries.is_empty() {
             return Some("skills: 0 项（技能区为空）".to_string());
         }
-        Some(format!(
-            "skills: {entries} 项（要翻看用 files_list，路径 {SKILLS_DIR}/）"
-        ))
+        let mut out = format!(
+            "skills: {} 项（要翻看用 files_list，路径 {SKILLS_DIR}/）",
+            entries.len()
+        );
+        for entry in entries.iter().take(MAX_LISTED) {
+            out.push('\n');
+            match &entry.hint {
+                Some(hint) => out.push_str(&format!("  {} — {hint}", entry.display)),
+                None => out.push_str(&format!("  {}", entry.display)),
+            }
+        }
+        if entries.len() > MAX_LISTED {
+            out.push('\n');
+            out.push_str(&format!("  …另 {} 项", entries.len() - MAX_LISTED));
+        }
+        Some(out)
     }
 
     /// 此刻的内容块；没有技能区时**没有块**。
@@ -200,19 +368,23 @@ mod tests {
     use super::*;
     use crate::activity_origin::ActivityOrigin;
 
-    /// **这一处的界算术**：技能桌面的读数在结构上**不可能**超限。
+    /// **这一处的界算术**：有界索引在结构上不可能撞批次上限。
     ///
-    /// 整块是一条定长句子 + 一个十进制数：取最坏的一个 `usize`（20 位数字）也远小于
-    /// [`ContentBatch::MAX_BYTES`]（这条断言就是那句话的机械版）。
-    ///
-    /// 因此那一处的诚实回退是**防御性**的：这里**构造不出**一个超限块，"内容装不下"这一态在
-    /// 这条路上不存在。它的纪律证据是形状守卫
-    /// （`tests/minimal_agent.rs::a_batch_that_does_not_fit_is_never_silently_dropped`），
-    /// 不是"喂一个超限输入给它"——那样的输入在这条路上不存在。
+    /// 最坏形状 = 12 条 × （名字 64 ＋ `…` ＋ ` — ` ＋ 说明 160 ＋ `…`）＋ 头 ＋ "另 N 项"。
+    /// 这条断言就是那句话的机械版；构造得更大的输入在这条路上不存在——`read_skills` 交出来的
+    /// 每个字段都已经过 [`one_line`] / [`cue`] 的界，渲染只 take [`MAX_LISTED`] 条。
     #[test]
     fn the_reading_is_bounded_so_it_can_never_need_the_fallback() {
-        let board = SkillsDesktop::new(Some(usize::MAX), ActivityOrigin::new());
-        let empty = SkillsDesktop::new(Some(0), ActivityOrigin::new());
+        let display = one_line(&"名".repeat(200), MAX_NAME_BYTES).expect("非空");
+        let hint = cue(&"说".repeat(200), MAX_HINT_BYTES).expect("非空");
+        let entries: Vec<SkillEntry> = (0..MAX_LISTED)
+            .map(|_| SkillEntry {
+                display: display.clone(),
+                hint: Some(hint.clone()),
+            })
+            .collect();
+        let board = SkillsDesktop::new(Some(entries), ActivityOrigin::new());
+        let empty = SkillsDesktop::new(Some(Vec::new()), ActivityOrigin::new());
         for reading in [
             board.reading().expect("有技能区就有读数"),
             empty.reading().expect("有技能区就有读数"),
@@ -227,7 +399,63 @@ mod tests {
                 "离上限还有四倍以上的余量（实测 {} 字节）",
                 reading.len()
             );
-            assert_eq!(reading.lines().count(), 1, "整块就是一行: {reading}");
         }
+    }
+
+    #[test]
+    fn frontmatter_takes_name_and_trigger_in_all_three_shapes() {
+        // ① 单行值。
+        let (name, hint) =
+            parse_frontmatter("---\nname: receipt-check\ndescription: 核回执时用\n---\n# 正文\n");
+        assert_eq!(name.as_deref(), Some("receipt-check"));
+        assert_eq!(hint.as_deref(), Some("核回执时用"));
+
+        // ② 引号值。
+        let (name, hint) =
+            parse_frontmatter("---\nname: \"quoted\"\ndescription: '有人要你核时用'\n---\n");
+        assert_eq!(name.as_deref(), Some("quoted"));
+        assert_eq!(hint.as_deref(), Some("有人要你核时用"));
+
+        // ③ 折叠块（外部技能常见的写法）：后面的缩进行按空格拼成一句。
+        let (name, hint) = parse_frontmatter(
+            "---\nname: folded\ndescription: >\n  有人要你核对\n  刚收到的东西时用。\n---\n# 正文\n",
+        );
+        assert_eq!(name.as_deref(), Some("folded"));
+        assert_eq!(hint.as_deref(), Some("有人要你核对 刚收到的东西时用。"));
+
+        // ④ 不认识的字段忽略，不打断解析。
+        let (name, hint) = parse_frontmatter(
+            "---\nlicense: MIT\nallowed-tools: [Bash]\nname: with-extra\ndescription: 核回执时用\nmetadata:\n  owner: x\n---\n",
+        );
+        assert_eq!(name.as_deref(), Some("with-extra"));
+        assert_eq!(hint.as_deref(), Some("核回执时用"));
+
+        // ⑤ 没有开头的 `---`、或有开头没收口 ⇒ 两格都没有（不猜）。
+        assert_eq!(parse_frontmatter("name: x\n"), (None, None));
+        assert_eq!(
+            parse_frontmatter("---\nname: x\ndescription: y\n"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn a_trigger_is_cut_at_the_last_sentence_end_within_budget() {
+        // 放不下 ⇒ 切在预算内最后一个句末（留下完整的一句，而不是半句）。
+        let text = format!("{}。{}。", "甲".repeat(20), "乙".repeat(200));
+        let cut = cue(&text, MAX_HINT_BYTES).expect("非空");
+        assert_eq!(cut, format!("{}。", "甲".repeat(20)), "切在句末");
+        // 预算内一个句末都没有 ⇒ 硬截并标记。
+        let long = "描".repeat(100);
+        let cut = cue(&long, MAX_HINT_BYTES).expect("非空");
+        assert!(cut.ends_with('…'), "{cut}");
+        assert!(
+            cut.len() <= MAX_HINT_BYTES + '…'.len_utf8(),
+            "{}",
+            cut.len()
+        );
+        assert!(
+            cut.trim_end_matches('…').chars().all(|ch| ch == '描'),
+            "不许切出半个字"
+        );
     }
 }

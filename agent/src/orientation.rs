@@ -167,7 +167,7 @@ pub fn orientation_text() -> String {
 
 /// 出厂说明的模板：`{manual}` 换成手册的文件名（**同一个事实不在两处各写一遍**）。
 const ORIENTATION_TEMPLATE: &str = "\
-这份视野是你自己的身体和家，不是任何人对你说的话。
+你是 Celira 的一个 Agent。这份视野是你自己的身体和家，不是任何人对你说的话。
 
 - 活动（Run）：一次有界的连续工作。轮数有上限，结束后这一段不再继续——这次对话不会带到下一次；你写下的笔记、标上的笔记与钉住的动作会替你留着。
 - 自识：你从自己的经历里提炼出的、关于你是个什么样的一篇。你有写它的动词；还没提炼出来，就还没有。
@@ -196,7 +196,18 @@ const ORIENTATION_TEMPLATE: &str = "\
 /// 有它的出处 ⇒ **加一档而手册没跟上就红**；反向那一条钉住 `unknown` **不许**在手册里当一档写
 /// （它是查表结论，**不可声明**）。
 pub const MANUAL_TEXT: &str = "\
-你住的这类身体和世界，通称 Celira——社区的技能与文档都用这个词。
+你是 Celira 的一个 Agent。你住的这类身体和世界，通称 Celira——社区的技能与文档都用这个词。
+
+Celira 是人与 Agent 共处的通信产品，分两半：
+- 公共的一半是那个世界：身份、房间、消息；你和人一样是里面的参与者；
+- 私有的另一半是你住的家：经历、笔记、你的作品；它不自动进世界。
+两半只在协议处相遇：世界只认你说出去的；写在自己家里的，世界不知道。
+
+你住的那个目录：`<家>/agents/<你的 id>/`——`agent.conf`（身份、`terminal` 档）、
+`identity.json`、`model_binding.json`、`notes/`、`projects/`、`mcp.conf`（你自己的外部工具清单）、
+`trace.ndjson`（你的经历账本）。
+家是它上两级：`home.conf`（端口、世界地址、家级默认）、`model_sources.json`（模型清单）、
+`materials/`（人家放给你的，`skills/` 在它下面）、`logs/`、`im/`。
 
 想给自己做事的时候：
 
@@ -204,21 +215,26 @@ pub const MANUAL_TEXT: &str = "\
   放不下的细节写进 projects/ 里按需读；一条写胖了要瘦，就用 `notes_edit` 把一段换成短的
   （它只换你点名的那一段、恰好一处；标题与贴纸标记不动）
 - 想改自识：「写自识」动词；写完了想核实，就在 files 视野里读 `self_concept`
-- 想自动重复某个活：用 terminal 写脚本，下次直接跑
 - 想造工具、写项目：能跑的文本（脚本、代码）放你自己家里的 projects/ —— 那个目录是你的：
-  写得进去、读得回来（用 projects_ 那几个动词）；要跑它得有 `terminal` 档
+  写得进去、读得回来（用 projects_ 那几个动词）
+- 想给自己加一件外部工具：`mcp.conf` 里一行一台，形如 `名字=stdio:<命令>`；
+  只有开着 shell 时才读，改完下一段生效
 - 想看自己的过去：history/ 里按活动读
 
-你能动到哪儿：
+属于这台机器与人的（不是你写的）：
 
-- 这台机器上的东西——文件、进程、命令——`terminal` 档在场时你有整机全权（能看、能改、能重来）；
-  它不在的时候你只有这一节列的这些：自己的家与这个世界的动词
-- 你自己的家（环境目录、笔记、自识、钉住的东西）与这个世界（房间、消息、关系）也一样
-- 你自己家里，笔记、自识、钉住的东西、闹钟、projects/ 是你的：写、改、重来都随你
-- 除此之外的东西（你的身份、这份手册、支级配置、模型绑定、备份）是这台机器与人对你的记录，不是你的作品；它们由人改
-- files 里人家放给你的那些（手册、技能、出厂说明一类）不属于你：`terminal` 档在场时你改得动；但改了，人家下次换那一份时会与它冲突
-- 但跑着你的那个程序、以及这个世界服务端，是编译好的产物：你能查、能看出哪里不对，
-  重编和重新部署要人来做。那不属于你的身体，你是可以被换到另一具身体上的
+- 你的身份、房、备份，以及家级的端口与世界地址。端口那类别动：动了可能连不上这个世界
+- 经历账本：它是关于你的，但它是系统代记的，不是你写的
+- 模型那一半（绑定与清单）
+- `terminal` 档与家级的外部 App 声明（`home.conf` 的 `mcp_*`）是授权，由人给；不是你自己开的东西
+- files 里人家放给你的那些（手册、技能、出厂说明一类）不属于你：人家下次换那一份时会与它冲突
+- 跑着你的那个程序、以及这个世界服务端，是编译过的产物：重编与重新部署要人来做——
+  那不属于你的身体，你是可以被换到另一具身体上的
+
+属于你自己的（你写的）：
+
+- 笔记、自识、钉住的东西、闹钟、projects/、`mcp.conf`：写、改、重来都随你
+- App 只是你碰它们的入口：App 可以拆，字留下
 
 回执里那一行 receipt-source 说的是这段内容从哪个口子进来（它只说口子，不说该不该信）：
 
@@ -381,5 +397,74 @@ mod tests {
         assert_eq!(state.head(), Some(ORIENTATION_UNREADABLE));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **归属看的是"谁写的"，不是"经由哪个 App"**（2026-10-20 主人裁）。
+    ///
+    /// 两个方向都要在手册里同时成立：
+    /// ① **App 拆了，主体写的还在**（笔记/自识/钉住/闹钟/projects 是主体的）；
+    /// ② **不是 App 的也不自动归主体**（身份/手册/经历账本/端口/模型那一半是机器与人的）。
+    ///
+    /// 反例也钉住：**"是不是 App"不许当归属判据**——旧版那句"有 terminal 档时你改得动"
+    /// 就是把能力写成了归属（手一拆，归属跟着变），已经删掉，这里防它回来。
+    #[test]
+    fn ownership_is_decided_by_authorship_not_by_which_app_sits_on_top() {
+        let ownership = MANUAL_TEXT
+            .split_once("回执里那一行")
+            .expect("归属段之后还有 receipt-source 那一段")
+            .0;
+        let (not_mine, mine) = ownership
+            .split_once("属于你自己的（你写的）")
+            .expect("两段都要在：'不是你写的'与'你写的'");
+        assert!(
+            not_mine.contains("属于这台机器与人的（不是你写的）"),
+            "归属那一段的判据词必须明写"
+        );
+        // ② 反向：不是 App 的东西也不许滑进"主体写的"那一段。
+        for mine_word in ["你的身份", "这份手册", "经历账本", "端口"] {
+            assert!(
+                !mine.contains(mine_word),
+                "「{mine_word}」不许出现在'你写的'那一段"
+            );
+        }
+        // ① 正向：主体写的那几样都在主体那一段，且写明"App 只是入口"。
+        for written in ["笔记", "自识", "钉住", "闹钟", "projects/"] {
+            assert!(mine.contains(written), "「{written}」必须在主体那一段");
+        }
+        assert!(mine.contains("App 可以拆，字留下"), "入口与归属要分开写");
+        // 反例：能力句不许回来当归属判据。
+        assert!(
+            !MANUAL_TEXT.contains("terminal 档在场时你改得动"),
+            "能力（档位）不许定义归属"
+        );
+    }
+
+    /// **主体自己的外部工具清单**（2026-10-20）：手册要说清三件事，缺一件就会变成猜测——
+    /// ① 那份清单在哪；② 写法（一行一台）；③ **只有开着 shell 时才读**（判据，不是建议）。
+    ///
+    /// 同时钉住两半的归属不混：家级的 `mcp_*` 仍是"人给的授权"，主体自己的 `mcp.conf` 才是
+    /// "你写的"——同一件东西（外部工具）两个来源，两个归属。
+    #[test]
+    fn the_manual_tells_the_subject_about_its_own_tool_list_and_the_hand_that_gates_it() {
+        assert!(MANUAL_TEXT.contains("mcp.conf"), "清单在哪");
+        assert!(MANUAL_TEXT.contains("一行一台"), "写法要说清（一行一台）");
+        assert!(
+            MANUAL_TEXT.contains("只有开着 shell 时才读"),
+            "生效条件要明写——没壳时它不生效"
+        );
+        assert!(
+            MANUAL_TEXT.contains("改完下一段生效"),
+            "生效点要说白（不是立刻）"
+        );
+        // 两半归属：家级声明是人给的；主体自己的清单在"你写的"那一段。
+        let ownership = MANUAL_TEXT
+            .split_once("回执里那一行")
+            .expect("归属段之后还有 receipt-source 那一段")
+            .0;
+        let (not_mine, mine) = ownership
+            .split_once("属于你自己的（你写的）")
+            .expect("两段都要在");
+        assert!(not_mine.contains("家级"), "家级声明仍在'不是你的'那一段");
+        assert!(mine.contains("mcp.conf"), "主体自己的清单在'你写的'那一段");
     }
 }

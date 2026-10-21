@@ -254,6 +254,20 @@ pathCase('仓库根：本模块在 <repo>/scripts/home/ ⇒ 往上是仓库根',
   assert.ok(fs.existsSync(path.join(P.REPO, 'scripts', 'home', 'paths.js')))
 })
 
+pathCase('技能区路径：<家>/materials/skills（建家时连空目录一起建）', () => {
+  const home = path.join('tmp-home')
+  // 资料根是宿主 `--materials` 吃的那个；技能区在它下面，独占一层。
+  assert.equal(P.materialsRoot(home), path.join(home, 'materials'))
+  assert.equal(P.skillsRoot(home), path.join(home, 'materials', 'skills'))
+  // 判据一句话：**没有技能区**（`None`，整块不出场）与**技能区空着**（`Some(0)`）是两件事，
+  // 所以建家必须先把这个目录建出来——否则主体只看得见"没有那一行"。
+  assert.equal(
+    P.skillsRoot(home),
+    path.join(P.materialsRoot(home), 'skills'),
+    '技能区必须落在资料根下面（Agent 那边按 material_root.join("skills") 读）',
+  )
+})
+
 test('门禁不许空跑：本文件真的执行了用例', () => {
   assert.ok(cases > 0, '本文件一条用例都没跑（空跑不算过）')
   assert.ok(cases >= 5, `用例数 ${cases} 少于声明的 5`)

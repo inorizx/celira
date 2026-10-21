@@ -44,6 +44,7 @@
 //! - **不代理**：壳不做同源代转，也不做中继。前端要连什么地址，就是什么地址 ——
 //!   本机那条地址**由壳解析出来交给它**（§8.4 推论 2）。
 
+pub mod agent_hands;
 pub mod anjia;
 pub mod app_version;
 pub mod console_window;
@@ -354,6 +355,10 @@ pub fn run() {
         // **壳 ↔ 前端的最窄接口**：安家一个命令 ＋ 本机世界三个命令 ＋ 本机服务两个命令
         // （前端按能力探测分支：`client/src/api/anjia.ts` / `shellLocal.ts`）。
         .invoke_handler(tauri::generate_handler![
+            // **这一支在这台机器上的手**（终端档，2026-10-20）：页面那一格只读写
+            // `agent.conf` 的 `terminal=` 一行；生效在它下一次启动（见 `agent_hands` 的文件头）。
+            agent_hands::hands_readout,
+            agent_hands::hands_set,
             anjia::commands::anjia_start,
             // 关于页那一行"我在跑哪一版"：号从 exe 旁边的 `VERSION` 来（源码形态退回编译期那个，
             // 并如实说 source）—— 这一格从前是前端里写死的（见 `app_version.rs` 的文件头）。

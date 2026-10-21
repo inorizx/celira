@@ -67,7 +67,7 @@ export function AppShell() {
   const groups = navGroupsFor(isRealWorldSession({ mode, token }))
   // 真实世界下 me 暂缺时的中性非 fixture 占位头像。
   const selfNode = self ? (
-    <ParticipantAvatar participant={self} size="md" />
+    <ParticipantAvatar participant={self} size="lg" />
   ) : (
     <div className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
       <UserRound className="size-4" aria-hidden />
@@ -135,23 +135,34 @@ export function AppShell() {
           </div>
         ))}
         {/* 底部用户区（Discord 式）：主题 / 设置直达 / 用户头像。
-            设置与用户身份同区——设置本质即「关于我和这台设备」。 */}
+            设置与用户身份同区——设置本质即「关于我和这台设备」。
+            ★ **2026-10-21 尺寸对齐**：三颗一律 40 命中面 / 20 图标（主题那颗的 `size-5`
+            由 `ThemeToggle` 自己按 `icon-lg` 给），与上面导航项的 40/20 同一个尺度与 48 节奏。
+            判据不是"看起来齐"，是**层级自洽**：移动端「我的」是 TabBar 的一等 tab，
+            桌面上它就不该缩成次级按钮（实测原先 36/16 ⇒ 描边细 25%、节奏 44 对 48）。
+            圆角也一并对齐：导航项是 `rounded-xl`（14px），按钮默认 `rounded-md`（8px）——
+            40 的面上 6px 的差看得出来。 */}
         <div className="mt-auto flex flex-col items-center gap-2">
-          <ThemeToggle />
+          <ThemeToggle size="icon-lg" className="rounded-xl" />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-lg"
                 aria-label="设置"
-                aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}
-                className={cn(
-                  'cursor-pointer',
-                  location.pathname.startsWith('/settings') && 'bg-accent text-accent-foreground',
-                )}
-                onClick={() => navigate('/settings')}
+                className="cursor-pointer rounded-xl"
+                // ★ **2026-10-21：这里没有「当前页」样式**（那一行 `startsWith('/settings')` 是死判断，
+                // 已删）。判据在 `App.tsx` 的路由表：`/settings` 与 `/app` 是**并列的两个壳**，
+                // 设置页不经过这条图标栏 ⇒ 它永远不可能"亮在栏里"。给一个永不成立的激活态
+                // 只会让下一个读代码的人以为设置长在栏内。
+                //
+                // 代价要一起还：点进去整条栏就没了。所以**把来路交给设置页**（`state.from`），
+                // 让它的「返回」回得来你刚才那间房 —— 否则这就是一扇单向门
+                // （来源那个坑：`/settings` 会 `replace` 到 `/settings/general`，
+                //   `SettingsIndex` 必须把 state 转发过去，不然这里传的 `from` 会丢）。
+                onClick={() => navigate('/settings', { state: { from: location.pathname } })}
               >
-                <Settings className="size-4" />
+                <Settings className="size-5" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">设置</TooltipContent>

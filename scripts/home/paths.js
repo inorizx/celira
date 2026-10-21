@@ -162,6 +162,24 @@ function agentsRoot(homeDir) {
   return path.join(homeDir, AGENTS_DIR)
 }
 
+/** 资料根：`<家>/materials/`（宿主 `--materials` 给的就是它；Agent 读得到的东西都从这里授权出去）。 */
+function materialsRoot(homeDir) {
+  return path.join(homeDir, 'materials')
+}
+
+/**
+ * 技能区：`<家>/materials/skills/`。
+ *
+ * **建家时要把它建出来，哪怕一个技能都没有**（2026-10-20）。判据在 Agent 那一侧：
+ * `agent/src/skills_desktop.rs` 把 `None`（没有技能区 ⇒ 整块不出场）与 `Some(0)`
+ * （有、但空 ⇒ `skills: 0 项（技能区为空）`）当成两件事。不建它，"这具身体没有技能区"
+ * 与"技能区空着"在主体眼里合成一片空白——真机上她据此答成"没有可安装的技能包"。
+ * 语义权威在 `skills_desktop.rs`，这里只管家的形状。
+ */
+function skillsRoot(homeDir) {
+  return path.join(materialsRoot(homeDir), 'skills')
+}
+
 /**
  * 一支 Agent 的**环境根**：`<家>/agents/<支>/`。
  *
@@ -272,6 +290,8 @@ module.exports = {
   LEGACY_ENV_DIR,
   AGENT_CONF,
   agentsRoot,
+  materialsRoot,
+  skillsRoot,
   agentEnvRoot,
   agentConfPath,
   agentLogDir,

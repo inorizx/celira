@@ -62,7 +62,7 @@ use celira_agent::provider_adapter::{
 use celira_agent::responses_adapter::{self, ResponsesModel};
 use celira_agent::self_concept::IdentityClaim;
 use celira_agent::terminal_app::{TerminalAccess, TerminalTier};
-use celira_agent::web_app::{SearchAccess, WebTier};
+use celira_agent::web_app::{FetchAccess, SearchAccess, WebTier};
 
 /// 换家档的模型凭据环境变量（**唯一权威在这里**：装配那一处用它取值，模型门的冲突判据用它
 /// 认"进程侧在不在说话"）。只报变量名，不报取值。
@@ -76,7 +76,8 @@ const USAGE: &str = "\
                    [--create-dir <资料根内的单个目录名>]
                    [--context-window <正整数>] [--im-endpoint <URL>]
                    [--identity-agent <core 里的 id> --identity-name <此世界的名字>]
-                   [--search-endpoint <URL>] [--terminal <tier>] [--files <own|full>]
+                   [--web-sources <路径>]
+    [--terminal <tier>] [--files <own|full>]
                    [--mcp <声明>]
                    [--model <id>] [--model-endpoint <URL>]
                    [--model-protocol <responses|chat-completions>]
@@ -187,7 +188,7 @@ fn run(arguments: Vec<String>) -> i32 {
             reading,
             usage,
             im_endpoint,
-            search_endpoint,
+            web_sources,
             terminal_tier,
             files_scope,
             web_tier,
@@ -204,7 +205,7 @@ fn run(arguments: Vec<String>) -> i32 {
             usage,
             Declarations {
                 im_endpoint,
-                search_endpoint,
+                web_sources,
                 terminal_tier,
                 files_scope,
                 web_tier,
@@ -229,7 +230,6 @@ struct Declarations {
     /// 宿主声明的 im 端点（与凭据成对；只给一半是入口拒绝）。
     im_endpoint: Option<String>,
     /// 宿主声明的搜索厂商端点（不给就用本仓认的那一个）。
-    search_endpoint: Option<String>,
     /// 宿主声明的 terminal 档位（不给就没有这只手）。
     terminal_tier: Option<String>,
     /// **文件面的档位**（`--files own|full`；不给 = `own` ⇒ 只能动自己那一块）。
@@ -242,6 +242,8 @@ struct Declarations {
     model_source: ModelSourceRequest,
     /// **模型源清单**的路径（刀2b：宿主显式声明；用清单哪一条看环境根的绑定文件）。
     model_sources: Option<String>,
+    /// **搜索源清单**的路径（2026-10-20）。
+    web_sources: Option<String>,
 }
 
 /// 初始化：只调用既有 create，并把环境里**实际记录**的身份报出来。
@@ -276,7 +278,7 @@ fn start(
 ) -> i32 {
     let Declarations {
         im_endpoint,
-        search_endpoint,
+        web_sources,
         terminal_tier,
         files_scope,
         web_tier,
@@ -290,9 +292,13 @@ fn start(
     }
 
     // im 的端点与凭据必须成对：缺一半是**入口拒绝**（退出码与模型凭据同族），不静默降级。
-    // 搜索凭据是**可选**的：没有它那不是入口错误——web 窗照旧在场，只有「查」这一条会如实
-    // 说没有凭据。要报的是变量名，永远不报取值。
-    request.declarations.search = resolve_search(&search_endpoint);
+    // web 源是**可选**的：没有它那不是入口错误——web 窗照旧在场，两个动词执行时都如实说没配。
+    let (web_search, web_fetch) = web_access(
+        web_sources.as_deref().map(Path::new),
+        &request.environment_root,
+    );
+    request.declarations.search = web_search;
+    request.declarations.fetch = web_fetch;
     // **出网档**（2026-10-13）：`--web off|fetch|full`，缺省 full（不改现有行为）。
     // 与 terminal 同形：不认识的档位不降级，直接拒绝。
     request.declarations.web = web_tier.unwrap_or_default();
@@ -449,6 +455,10 @@ fn report_readings_failure(log: &ModelReadings) {
 }
 
 /// 命令行解析结果。
+/// ⚠ `Run` 比 `Init` 大得多：它带着整份**声明面**（十几个 `Option<String>`），`ManualRun` 已经装箱。
+/// 2026-10-20 加 `--web-sources` 时这一格**刚过 clippy 的阈值**；把剩下的格再各自装箱，只是把
+/// 一个 `Option<String>` 换成"指针 ＋ 一次分配"，换不来任何东西 ⇒ **显式豁免这一条**（别的 lint 照旧）。
+#[allow(clippy::large_enum_variant)]
 enum Invocation {
     Init {
         root: PathBuf,
@@ -466,7 +476,8 @@ enum Invocation {
         /// 宿主声明的 im 端点（原始取值）：凭据要等入口读环境变量，因此**在入口里**成对解析。
         im_endpoint: Option<String>,
         /// 宿主声明的搜索厂商端点（原始取值；不给就用本仓认的那一个）。
-        search_endpoint: Option<String>,
+        /// **搜索源清单**的路径（2026-10-20；这一支用哪一条看环境根的绑定）。
+        web_sources: Option<String>,
         /// 宿主声明的 terminal 档位（原始取值；不给就没有这只手）。
         terminal_tier: Option<String>,
         /// **文件面的档位**（原始取值已解析成封闭枚举；不给 = `own`）。
@@ -506,7 +517,7 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
     let mut create_dir: Option<String> = None;
     let mut context_window: Option<String> = None;
     let mut im_endpoint: Option<String> = None;
-    let mut search_endpoint: Option<String> = None;
+    let mut web_sources: Option<String> = None;
     let mut terminal_tier: Option<String> = None;
     let mut files_scope: Option<FilesScope> = None;
     let mut web_tier: Option<WebTier> = None;
@@ -539,11 +550,10 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
             "--im-endpoint" => {
                 set_once(&mut im_endpoint, option, take_value(rest, index, option)?)?
             }
-            "--search-endpoint" => set_once(
-                &mut search_endpoint,
-                option,
-                take_value(rest, index, option)?,
-            )?,
+
+            "--web-sources" => {
+                set_once(&mut web_sources, option, take_value(rest, index, option)?)?
+            }
             "--terminal" => set_once(&mut terminal_tier, option, take_value(rest, index, option)?)?,
             // **文件面的档位**（2026-10-20）：封闭枚举，**在解析这一处就 fail-closed**——
             // 认不出的取值不降级（既不当"全开"，也不当"只读"）：那是主人的政策，猜错就是替主人做主。
@@ -630,7 +640,7 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
                 ("--create-dir", create_dir.is_some()),
                 ("--context-window", context_window.is_some()),
                 ("--im-endpoint", im_endpoint.is_some()),
-                ("--search-endpoint", search_endpoint.is_some()),
+                ("--web-sources", web_sources.is_some()),
                 ("--terminal", terminal_tier.is_some()),
                 ("--files", files_scope.is_some()),
                 ("--web", web_tier.is_some()),
@@ -716,7 +726,7 @@ fn parse(arguments: &[String]) -> Result<Invocation, String> {
                 reading: reading_writer,
                 usage: usage_writer,
                 im_endpoint,
-                search_endpoint,
+                web_sources,
                 terminal_tier,
                 files_scope,
                 web_tier,
@@ -994,33 +1004,23 @@ fn resolve_im(endpoint: &Option<String>) -> Result<Option<ImAccess>, (String, i3
     }
 }
 
-/// 本仓认的那一个搜索厂商端点（**配置**：换厂商就是换这一行或 `--search-endpoint`）。
-const DEFAULT_SEARCH_ENDPOINT: &str = "https://api.tavily.com/search";
-/// 搜索凭据的环境变量名（只报名字，不报取值）。
-const SEARCH_CREDENTIAL_ENV: &str = "TAVILY_API_KEY";
-
-/// 搜索厂商的声明：**凭据**来自环境变量、**端点**来自命令行（不给就用本仓认的那一个）。
+/// **web 源**（可选）：清单 + 绑定，**一条源两个能力**（查与取）。
 ///
-/// 与 `resolve_im` 有意不同：**缺凭据不是入口错误**。web 窗是出厂内置的（两条动词从第一轮起
-/// 就在场），没有凭据只意味着「查」这一条会如实失败 `credential-absent`（**没配**，是本地事实，
-/// 不是对面拒了），而「取」不依赖厂商、照常可用。这里报变量名、不报取值，也绝不拿一个空凭据去试。
-fn resolve_search(endpoint: &Option<String>) -> Option<SearchAccess> {
-    let credential = std::env::var(SEARCH_CREDENTIAL_ENV).ok()?;
-    if credential.trim().is_empty() {
-        eprintln!(
-            "web 搜索凭据不可用：{SEARCH_CREDENTIAL_ENV} 为空。本命令不打印它的取值；\
-             `web_search` 会如实失败（credential-rejected），`web_fetch` 不受影响。"
-        );
-        return None;
-    }
-    let endpoint = endpoint
-        .clone()
-        .unwrap_or_else(|| DEFAULT_SEARCH_ENDPOINT.to_string());
-    match SearchAccess::new(endpoint, credential) {
-        Some(access) => Some(access),
-        None => {
-            eprintln!("搜索端点与 {SEARCH_CREDENTIAL_ENV} 都必须非空");
-            None
+/// 判据与 `agent_host` 那一处**同一份**（那是权威）：没有 `--web-sources` / 没有绑定 ⇒ 两个动词都
+/// 如实说 `credential-absent`（**没有环境变量那一条老路**，也没有"自己抓"的回退）；绑定读不出来 ⇒
+/// 如实报一行、两个动词都说没配；**不拒绝启动**——web 不是"能不能想"。
+fn web_access(list: Option<&Path>, env_root: &Path) -> (Option<SearchAccess>, Option<FetchAccess>) {
+    let Some(list) = list else {
+        return (None, None);
+    };
+    match celira_agent::web_source::resolve(list, env_root) {
+        celira_agent::web_source::Resolved::Bound(entry) => {
+            (entry.search_access(), entry.fetch_access())
+        }
+        celira_agent::web_source::Resolved::Unbound => (None, None),
+        celira_agent::web_source::Resolved::Broken(message) => {
+            eprintln!("web 源读不出来 ⇒ 这一次两个动词都说没配：{message}");
+            (None, None)
         }
     }
 }

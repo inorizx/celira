@@ -64,6 +64,18 @@ pub trait WakePort {
     /// 等下一次。**它永不返回"没有"**：通道结束本身也是一种读数（[`Woken::Refused`]），
     /// 报出来而不是让宿主永远阻塞。
     fn next(&self) -> Woken;
+
+    /// **在 `window` 之内再看一眼**：有就交回那一信号，没有就是 `None`。
+    ///
+    /// 它是"合并窗口"的接缝（2026-10-19）：一段里的头一声铃之后，宿主在窗口内**继续收**，
+    /// 把同一批动静合成一次开段（否则"默认收到群消息"会变成每条消息一次模型调用）。
+    ///
+    /// **默认实现 = 不合并**（立刻 `None`）：这样"没有合并语义的端口"（离线夹具、只跑门铃的
+    /// 路径）行为一个字节都不变——要合并的人自己实现它。
+    fn next_within(&self, window: std::time::Duration) -> Option<Woken> {
+        let _ = window;
+        None
+    }
 }
 
 impl WakePort for Doorbell {
@@ -262,5 +274,14 @@ impl WakePort for WakeHub {
         self.signals
             .recv()
             .unwrap_or(Woken::Refused(DoorbellFailure::ChannelLost))
+    }
+
+    /// **合并窗口**：窗口内有信号就交回，超时就是 `None`。
+    ///
+    /// ⚠ 通道是**有界 1**（[`WAKE_QUEUE`]）：窗口里第二声铃**已经被合并掉了**（`forward` 用
+    /// `try_send`、满了就丢）——本方法因此通常第一次就超时。它买到的不是"数铃"，而是
+    /// **"等一小会儿再开段"**：窗口内到的动静要么已在通道里，要么已经在世界里（下一次读账看得见）。
+    fn next_within(&self, window: Duration) -> Option<Woken> {
+        self.signals.recv_timeout(window).ok()
     }
 }

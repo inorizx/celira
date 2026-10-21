@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400">
+  <rect width="640" height="400" fill="#f7f5fc"/>
+  <!-- 顶栏 -->
+  <circle cx="36" cy="30" r="8" fill="#7c6cf0"/>
+  <rect x="52" y="24" width="46" height="12" rx="6" fill="#c9c1e6"/>
+  <rect x="424" y="25" width="44" height="10" rx="5" fill="#ded9ec"/>
+  <rect x="480" y="25" width="44" height="10" rx="5" fill="#ded9ec"/>
+  <rect x="536" y="19" width="72" height="22" rx="11" fill="#7c6cf0"/>
+  <!-- 首屏标题 -->
+  <rect x="48" y="92" width="356" height="26" rx="13" fill="#2b2638"/>
+  <rect x="48" y="130" width="290" height="26" rx="13" fill="#3a3450"/>
+  <rect x="48" y="178" width="420" height="10" rx="5" fill="#cfc8e4"/>
+  <rect x="48" y="196" width="332" height="10" rx="5" fill="#ded9ec"/>
+  <rect x="48" y="228" width="96" height="30" rx="15" fill="#7c6cf0"/>
+  <rect x="156" y="228" width="96" height="30" rx="15" fill="none" stroke="#c9c1e6" stroke-width="2"/>
+  <!-- 三张卡片 -->
+  <g>
+    <rect x="48" y="296" width="168" height="68" rx="14" fill="#ffffff" stroke="#e6e1f4"/>
+    <circle cx="72" cy="322" r="9" fill="#e9e4f8"/>
+    <rect x="88" y="317" width="70" height="9" rx="4.5" fill="#d8d2ea"/>
+    <rect x="64" y="340" width="118" height="8" rx="4" fill="#eae6f6"/>
+  </g>
+  <g>
+    <rect x="236" y="296" width="168" height="68" rx="14" fill="#ffffff" stroke="#e6e1f4"/>
+    <circle cx="260" cy="322" r="9" fill="#e9e4f8"/>
+    <rect x="276" y="317" width="70" height="9" rx="4.5" fill="#d8d2ea"/>
+    <rect x="252" y="340" width="118" height="8" rx="4" fill="#eae6f6"/>
+  </g>
+  <g>
+    <rect x="424" y="296" width="168" height="68" rx="14" fill="#ffffff" stroke="#e6e1f4"/>
+    <circle cx="448" cy="322" r="9" fill="#e9e4f8"/>
+    <rect x="464" y="317" width="70" height="9" rx="4.5" fill="#d8d2ea"/>
+    <rect x="440" y="340" width="118" height="8" rx="4" fill="#eae6f6"/>
+  </g>
+</svg>

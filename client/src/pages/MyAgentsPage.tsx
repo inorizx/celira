@@ -40,6 +40,7 @@ import {
   supportsAgentRevoke,
 } from '@/api/uiPolicy'
 import { isRealWorldSession } from '@/api/prefs'
+import { AgentHandsRow } from '@/components/celira/AgentHands'
 import { AgentBadge } from '@/components/celira/AgentBadge'
 import { ParticipantAvatar } from '@/components/celira/ParticipantAvatar'
 import { AgentsListPanel } from '@/components/celira/AgentsListPanel'
@@ -1177,6 +1178,10 @@ function AgentMachine({ agentId }: { agentId: string }) {
             {health.text}
           </p>
         )}
+        {/* ★ **这台机器上的手**（2026-10-20）：支级授权，读写 `agent.conf` 的 `terminal=` 一行。
+            只在"这一支住在这台机器上"时出场；没有壳 / 读不到时不出场或只印"读不到"——
+            **绝不画成一个关着的开关**（判据与三态在 `api/agentHands.ts`）。 */}
+        <AgentHandsRow agentId={agentId} />
         {/* ★ **它用哪一条模型**（2026-10-12；2026-10-14「选择先于接上」）：
             这一支一行、就在这一支的页面上选 —— **它还没被接到这台机器上时也摆**
             （那时选的是"接上之后用哪条"：绑定的落点就是它的环境根，选择可以先落盘）。

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, Loader2, LogOut, UserPlus, XCircle } from 'lucide-react'
+import { CheckCircle2, Copy, KeyRound, Link2, Loader2, LogOut, Ticket, UserPlus, UserRound, XCircle } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CommandLine } from '@/components/celira/CommandLine'
 import { getApi, useAppStore, useConnection } from '@/api/store'
 import { normalizeServerUrl, serverUrlError } from '@/api/prefs'
 // 「现在连的是哪儿」的读数：**权威在这一页**（地址在这里可编辑）。2026-10-11 之前它被
@@ -48,6 +49,8 @@ export function SettingsGeneralPage() {
   // （纯函数、有 `node --test` 用例），本页只负责把 origin 递进去。
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const addressReading = serverAddressReading(serverUrl, origin)
+  /** 已经连着（含自动重连）才配说"现在连的是"；其余状态说的是"将连到"。 */
+  const linked = connection === 'connected' || connection === 'reconnecting'
   const setPrefs = useAppStore((s) => s.setPrefs)
   const connect = useAppStore((s) => s.connect)
   const revokeSession = useAppStore((s) => s.revokeSession)
@@ -180,12 +183,17 @@ export function SettingsGeneralPage() {
   }
 
   const addressField = (
-    <div className="space-y-1">
+    <div className="space-y-2">
+      {/* 常驻 label（照 `LoginGate` 那一套）：占位符只给例子，一打字不会把"这一格是什么"带走。 */}
+      <label className="flex items-center gap-2 text-caption text-muted-foreground" htmlFor="settings-server-url">
+        <Link2 className="size-3.5 shrink-0" aria-hidden />
+        服务器地址（留空 = 本页同源）
+      </label>
       <Input
+        id="settings-server-url"
         value={addressDraft}
         onChange={(e) => setAddressDraft(e.target.value)}
-        placeholder="服务器地址（留空 = 本页同源）"
-        aria-label="服务器地址"
+        placeholder="http://127.0.0.1:8080"
         autoComplete="off"
         spellCheck={false}
       />
@@ -193,21 +201,30 @@ export function SettingsGeneralPage() {
         留空即用本页同源（<code className="font-mono">/v1</code>）；跨机或跨端口时填
         <code className="font-mono"> http://主机:端口</code>。
       </p>
-      {/* ★ **现在连的是哪儿**（2026-10-11 从「本机服务」那一页搬回来的）：那一档
-          "就是这一页"（空值）**只有这个读数说得出** —— 输入框空着看不出它到底连哪儿。 */}
-      <p className="text-caption text-muted-foreground">现在连的是：{addressReading.address}</p>
+      {/* ★ **连到哪儿**（2026-10-11 从「本机服务」那一页搬回来的）：那一档
+          "就是这一页"（空值）**只有这个读数说得出** —— 输入框空着看不出它到底连哪儿。
+          ⚠ 空闲时不许写"现在连的是"：那时还没连上，说的是**将要去的地方**。 */}
+      <p className="text-caption text-muted-foreground">
+        {linked ? '现在连的是' : '将连到'}：{addressReading.address}
+      </p>
     </div>
   )
 
   const tokenField = (
-    <Input
-      type="password"
-      value={tokenDraft}
-      onChange={(e) => setTokenDraft(e.target.value)}
-      placeholder="Bearer token（celira-im create-human 签发）"
-      aria-label="访问令牌"
-      autoComplete="off"
-    />
+    <div className="space-y-2">
+      <label className="flex items-center gap-2 text-caption text-muted-foreground" htmlFor="settings-token">
+        <KeyRound className="size-3.5 shrink-0" aria-hidden />
+        访问令牌
+      </label>
+      <Input
+        id="settings-token"
+        type="password"
+        value={tokenDraft}
+        onChange={(e) => setTokenDraft(e.target.value)}
+        placeholder="粘贴上面那行命令输出的那一串"
+        autoComplete="off"
+      />
+    </div>
   )
 
   return (
@@ -232,10 +249,11 @@ export function SettingsGeneralPage() {
         </div>
         {addressField}
         {tokenField}
-        <p className="text-caption text-muted-foreground">
-          本机 CLI 签发：<code className="font-mono">celira-im create-human --display-name "你的名字"</code>，
-          把输出的 token 粘贴到这里。
-        </p>
+        {/* 命令是"要执行的东西"，不是"要读的东西" —— 给它自己的块和复制按钮。 */}
+        <CommandLine
+          command='celira-im create-human --display-name "你的名字"'
+          note="在本机终端里跑（仓根），把输出的那一串粘到上面「访问令牌」里。"
+        />
         <Button className="w-full" onClick={saveAndConnect}>
           保存并连接
         </Button>
@@ -263,22 +281,36 @@ export function SettingsGeneralPage() {
           这个世界没有注册：要么你自己部署一个，要么有人请你进来。把对方给你的邀请码
           粘到这里，名字由你自己填——世界里的其他人会看到它。
         </p>
-        <Input
-          value={inviteCode}
-          onChange={(e) => setInviteCode(e.target.value)}
-          placeholder="邀请码（clr_pg_ 开头的一整串）"
-          aria-label="邀请码"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <Input
-          value={inviteName}
-          onChange={(e) => setInviteName(e.target.value)}
-          placeholder="我的名字"
-          aria-label="我的名字"
-          autoComplete="off"
-        />
-        <Button className="w-full" disabled={inviteBusy} onClick={() => void joinWithInvite()}>
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-caption text-muted-foreground" htmlFor="settings-invite-code">
+            <Ticket className="size-3.5 shrink-0" aria-hidden />
+            邀请码
+          </label>
+          <Input
+            id="settings-invite-code"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
+            placeholder="clr_pg_ 开头的一整串"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-caption text-muted-foreground" htmlFor="settings-invite-name">
+            <UserRound className="size-3.5 shrink-0" aria-hidden />
+            我的名字
+          </label>
+          <Input
+            id="settings-invite-name"
+            value={inviteName}
+            onChange={(e) => setInviteName(e.target.value)}
+            placeholder="世界里的其他人会看到它"
+            autoComplete="off"
+          />
+        </div>
+        {/* 一屏只有一个主行动：上面那张卡的「保存并连接」是它。
+            这一颗描边仍然可点、仍然是这一张卡的动作，只是不与它并列抢主角。 */}
+        <Button variant="outline" className="w-full" disabled={inviteBusy} onClick={() => void joinWithInvite()}>
           {inviteBusy ? '正在进来…' : '用这个邀请码进来'}
         </Button>
         {inviteError && <p className="text-caption text-presence-failed">{inviteError}</p>}

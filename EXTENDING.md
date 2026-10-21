@@ -33,13 +33,13 @@
 
 ```text
 1. 在 <家>/materials/skills/ 下建一个目录，比如 my-skill/
-2. 里面放一个 SKILL.md，第一行写清这份技能是干什么的
-3. Agent 下一段醒过来，开场那行读数就从 skills: N 项 变成 N+1 项
+2. 里面放一个 SKILL.md：开头 frontmatter 的 description 第一行写清"什么时候用这份"
+3. Agent 下一段醒过来，开场索引里就多一条：`my-skill — <那一行>`
 4. 让 Agent 用一次：说"按你手上那份 my-skill 的规矩做 X"
 ```
 
-⚠ **不要在技能里期待"自动生效"**：技能区**不注入正文**，开场只给一行存在性读数，
-Agent 要**自己搜、自己翻**（`files_grep` → `files_read`）。这是设计，不是缺陷——
+⚠ **不要在技能里期待"自动生效"**：开场只给**名字 ＋ 一句触发**的有界索引，
+**正文不进场**，Agent 要**自己搜、自己翻**（`files_grep` → `files_read`）。这是设计，不是缺陷——
 技能是"**有时**才需要"的信息。
 
 **一个能直接抄的样例在 [`examples/skill-pack-receipt-check/`](examples/skill-pack-receipt-check/)**

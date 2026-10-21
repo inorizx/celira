@@ -735,6 +735,7 @@ pub fn run_anjia(req: &AnjiaRequest<'_>) -> AnjiaReport {
         listen: listen.clone(),
         identity,
         model_sources_file: plan.sources_file(),
+        web_sources_file: Some(crate::home_facts::web_sources_list_path(&home_dir)),
         platform: host_process::HostPlatform::current(),
     };
     let launch = host_process::HostLaunch {

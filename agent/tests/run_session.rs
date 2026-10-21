@@ -1268,17 +1268,17 @@ fn the_first_request_of_a_real_session_already_carries_her_own_verbs() {
     );
 
     // TASK_41（灵魂判据："主体什么也不做"的舞台）：材料区里有两个一级条目 ⇒ **第一轮上下文里
-    // 技能桌面块就在场**（一行读数：几项 ＋ 怎么翻），而主体这一轮什么都没做——存在性线索不依赖
-    // 主体的任何动作。
-    // 2026-09-22 降级：逐条名字与说明**不再进场**（那是 `files_list` 的地盘），整块只剩那一行。
+    // 技能桌面块就在场**，而主体这一轮什么都没做——线索不依赖主体的任何动作。
+    // 2026-10-20 升成有界索引：**名字 ＋ 一句触发进场**（那是 `files_list` 之前就要知道的东西）；
+    // 正文仍然零进场。
     assert!(
         first.contains("skills: 2 项（要翻看用 files_list，路径 skills/）"),
-        "技能桌面块必须在首轮在场（一行读数）: {}",
+        "技能桌面块必须在首轮在场（计数 ＋ 路径）: {}",
         redacted(first)
     );
     assert!(
-        !first.contains("web-search") && !first.contains("notes-pack"),
-        "逐条名字不再进场: {}",
+        first.contains("web-search") && first.contains("notes-pack"),
+        "名字要进场（索引的那一半）: {}",
         redacted(first)
     );
     assert!(

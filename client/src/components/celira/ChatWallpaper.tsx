@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { Check, ImagePlus, Trash2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Segmented } from '@/components/celira/Segmented'
 import { lastRoomSnapshot, OFFICIAL_WALLPAPERS, validateWallpaperBlob, WALLPAPER_ACCEPT, WALLPAPER_MAX_BYTES, type WallpaperSelection } from '@/lib/wallpaper'
 import { useWallpaper } from '@/hooks/wallpaper-context'
 
@@ -102,32 +103,17 @@ export function WallpaperPicker() {
       {lastRoom && (
         <div className="flex items-center gap-2">
           <span className="text-caption text-muted-foreground">作用于</span>
-          <div className="flex gap-1 rounded-lg bg-muted p-0.5">
-            <button
-              type="button"
-              onClick={() => setScope('global')}
-              className={cn(
-                'cursor-pointer rounded-md px-2.5 py-1 text-caption transition-colors',
-                scope === 'global'
-                  ? 'bg-card text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              所有会话
-            </button>
-            <button
-              type="button"
-              onClick={() => setScope('room')}
-              className={cn(
-                'cursor-pointer rounded-md px-2.5 py-1 text-caption transition-colors',
-                scope === 'room'
-                  ? 'bg-card text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              仅此会话（{lastRoom.name}）
-            </button>
-          </div>
+          <Segmented
+            dense
+            fill={false}
+            label="壁纸作用范围"
+            value={scope}
+            onChange={setScope}
+            options={[
+              { id: 'global', label: '所有会话' },
+              { id: 'room', label: `仅此会话（${lastRoom.name}）` },
+            ] as const}
+          />
         </div>
       )}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
@@ -214,29 +200,18 @@ export function WallpaperPicker() {
       {uploadError && <p className="text-caption text-destructive">{uploadError}</p>}
       <div className="flex items-center gap-2">
         <span className="text-caption text-muted-foreground">蒙版</span>
-        <div className="flex gap-1 rounded-lg bg-muted p-0.5">
-          {(
-            [
-              { key: 'low', label: '弱' },
-              { key: 'medium', label: '中' },
-              { key: 'high', label: '强' },
-            ] as const
-          ).map((d) => (
-            <button
-              key={d.key}
-              type="button"
-              onClick={() => setDim(d.key)}
-              className={cn(
-                'cursor-pointer rounded-md px-2.5 py-1 text-caption transition-colors',
-                pref.global.dim === d.key
-                  ? 'bg-card text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {d.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          dense
+          fill={false}
+          label="蒙版强度"
+          value={pref.global.dim}
+          onChange={setDim}
+          options={[
+            { id: 'low', label: '弱' },
+            { id: 'medium', label: '中' },
+            { id: 'high', label: '强' },
+          ] as const}
+        />
       </div>
     </div>
   )

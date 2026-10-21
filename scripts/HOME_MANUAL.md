@@ -1029,6 +1029,36 @@ terminal=none
   「换机器 / 换家：一支 Agent 搬家」那一节。
 - 脚本**从不**把凭据写进文件、写进命令行参数、写进日志：只用变量名读、只注入子进程的环境。
 
+### 联网那一条：`node home.js web …`（查 ＋ 取，一条源两个能力；2026-10-20）
+
+搜索凭据也走「**清单 + 绑定**」这两件事，与模型同一对落点：
+
+| 文件 | 归属 | 是什么 |
+|---|---|---|
+| `<家>/web_sources.json` | **机器** | 这台机器上有哪些外网凭据（含明文 `api_key`） |
+| `<家>/agents/<支>/web_binding.json` | **Agent** | **这一支**用清单里的哪一条 |
+
+```text
+node home.js web list                                   # 有哪几条（key 只印掩码）
+node home.js web add --provider deepseek --key sk-...   # 加一条（查与取两个端点用那家默认值）
+node home.js web add --provider tavily   --key tvly-... # 另一家；两条可以并存
+node home.js web use ss-2 [--agent <id>]                # 选这一支用哪一条
+node home.js web show [--agent <id>]                    # 现在用的是哪一条（或"没配"）
+node home.js web remove ss-2                            # 删一条（被绑定的不许删）
+```
+
+- **一个能力一个方言**：查是 `results-json`（对面直接回一个结果列表）／`search-api`（一家的**搜索接口**
+  `POST /v1/tools/search`，**按请求次数计费**）；取是 `fetch-doc`（`{url}` → `{title, content}`）／
+  `fetch-raw`（`{urls:[url]}` → `results[].raw_content`）。换一家**同方言**的只改清单里的 `endpoint`；
+  换一种方言才要改代码。**一条源必须两个能力都在**（今天两家都能查能取）。
+- **生效点**：下一次装配（`node home.js up` 起的那一段）；跑着的那一段不换。
+- **没有绑定就是没配**：`web_search` 与 `web_fetch` 都如实说 `credential-absent`（**没有环境变量
+  那一条老路，也没有"自己抓"的回退**——想要原生抓取就用 `bash`）。**绑定读坏了**（JSON 坏了、
+  指向不存在的条目）⇒ 两个动词都说没配，
+  `node home.js status` 与宿主 stderr 都会点名是哪一份 —— **不会**悄悄换一家去花钱。
+- **key 只到这台机器为止**：清单里是明文（暴露面与环境变量同级），CLI 只印掩码、永不回显。
+
+
 ---
 
 ## 你与谁说话：那间房

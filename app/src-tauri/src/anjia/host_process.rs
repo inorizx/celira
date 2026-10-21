@@ -103,6 +103,9 @@ pub struct HostSpec {
     pub identity: Option<(String, String)>,
     /// 模型**清单**（机器级那份）——只在文件档（环境根有绑定）时给。
     pub model_sources_file: Option<PathBuf>,
+    /// **搜索源清单**的路径（2026-10-20）：与模型那一格同款——给清单，用哪一条看环境根的绑定。
+    /// None = 没声明 ⇒ 宿主走环境变量那一条老路（CLI / 无头形态的配置方式）。
+    pub web_sources_file: Option<PathBuf>,
     /// 平台缝（见 `HostPlatform`）。
     pub platform: HostPlatform,
 }
@@ -220,10 +223,21 @@ pub fn build_host_args(spec: &HostSpec) -> Vec<String> {
         args.push("--terminal".into());
         args.push("full".into());
     }
+    // **外部工具的授权面**（`home.conf` 的 `mcp_*` 行）：剥掉 `mcp_` 前缀，等号右边**原样**
+    // 交给宿主（`conf.js` 的 `mcpDeclarations` 同一条）。⇒ 装了哪几台由**家**声明一次，
+    // 每一支住户都看得见；**不在这里校验**——解析与拒绝只有一处权威（宿主入口）。
+    for declaration in crate::home_facts::read_conf(&spec.home_dir).mcp {
+        args.push("--mcp".into());
+        args.push(declaration);
+    }
     args.push("--im-endpoint".into());
     args.push(format!("http://{}", spec.listen));
     if let Some(list) = &spec.model_sources_file {
         args.push("--model-sources".into());
+        args.push(list.display().to_string());
+    }
+    if let Some(list) = &spec.web_sources_file {
+        args.push("--web-sources".into());
         args.push(list.display().to_string());
     }
     if let Some((id, name)) = &spec.identity {
@@ -432,6 +446,7 @@ mod tests {
             } else {
                 None
             },
+            web_sources_file: None,
             platform,
         }
     }
@@ -536,6 +551,7 @@ mod tests {
             listen: "127.0.0.1:8080".to_string(),
             identity: None,
             model_sources_file: None,
+        web_sources_file: None,
             platform,
         };
         (dir, spec)
@@ -583,6 +599,55 @@ mod tests {
         assert!(!build_host_args(&other)
             .iter()
             .any(|arg| arg == "--terminal"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **外部工具的授权面**：`home.conf` 里每一条 `mcp_<名>=…` 进一份 `--mcp <名>=…`，
+    /// **按文件里的顺序**、等号右边原样交给宿主；裸的 `mcp_` 跳过。
+    #[test]
+    fn host_args_carry_every_declared_external_tool_in_file_order() {
+        let (dir, spec) = temp_spec(
+            "mcp",
+            HostPlatform::Windows,
+            "terminal=full\n\
+             mcp_browser=stdio:npx @playwright/mcp --browser chrome\n\
+             mcp_=oops\n\
+             mcp_db=stdio:node db.js,read-only,timeout=30\n",
+            "",
+        );
+        let args = build_host_args(&spec);
+        let declared: Vec<&str> = args
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index > 0 && args[*index - 1] == "--mcp")
+            .map(|(_, value)| value.as_str())
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                "browser=stdio:npx @playwright/mcp --browser chrome",
+                "db=stdio:node db.js,read-only,timeout=30",
+            ],
+            "每一条都在、按文件顺序、原样交出；裸的 `mcp_` 跳过"
+        );
+        // 位置：`--terminal` 之后、`--im-endpoint` 之前（与 `up.js` 拼参数的次序一致）。
+        let terminal_at = args.iter().position(|arg| arg == "--terminal").unwrap();
+        let mcp_at = args.iter().position(|arg| arg == "--mcp").unwrap();
+        let endpoint_at = args.iter().position(|arg| arg == "--im-endpoint").unwrap();
+        assert!(terminal_at < mcp_at && mcp_at < endpoint_at);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **没声明就不带**：家是干净的 ⇒ 一个 `--mcp` 都不出现（默认面是"一台都没有"）。
+    #[test]
+    fn host_args_without_any_declaration_carry_no_external_tool() {
+        let (dir, spec) = temp_spec(
+            "mcp-none",
+            HostPlatform::Windows,
+            "listen_addr=127.0.0.1:8080\n",
+            "",
+        );
+        assert!(!build_host_args(&spec).iter().any(|arg| arg == "--mcp"));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -678,6 +743,7 @@ mod tests {
         let spec = HostSpec {
             identity: Some(("a-1".to_string(), "小满".to_string())),
             model_sources_file: Some(spec.home_dir.join("model_sources.json")),
+        web_sources_file: Some(spec.home_dir.join("web_sources.json")),
             ..spec
         };
         let args = build_host_args(&spec);

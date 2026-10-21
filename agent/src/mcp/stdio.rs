@@ -34,10 +34,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::{
-    CallFault, CallReply, MAX_TEXT_BYTES, MAX_TOOLS, McpDeclaration, McpFailure, RawTool,
-    Transport, sanitize,
-};
+use super::wire::{as_object, describe_error, read_result, read_tool};
+use super::{CallFault, CallReply, MAX_TOOLS, McpDeclaration, McpFailure, RawTool, Transport};
 
 /// 我们在 **legacy 代**说的协议版本（`initialize` 的 `protocolVersion`）。
 ///
@@ -235,12 +233,14 @@ impl StdioTransport {
     /// 命令的拼装与收树收在 `crate::platform` 里，与 terminal 那只手同一份知识）。
     #[cfg(any(windows, target_os = "linux"))]
     pub fn spawn(declaration: &McpDeclaration, scrub: &[String]) -> Result<Self, McpFailure> {
+        // 只给 stdio 声明起进程：远程端点由 `McpApp` 分流到另一条通道，走到这里就是调用方
+        // 搞错了（不 panic——如实报"起不来"，那是这一格的既有分类）。
+        let Some(command) = declaration.stdio_command() else {
+            return Err(McpFailure::SpawnFailure);
+        };
         let (mut environment, scrubbed, unscrubbed) = crate::platform::child_environment(scrub);
-        let mut builder = crate::platform::mcp_command(
-            crate::platform::MCP_SHELL,
-            declaration.command(),
-            &mut environment,
-        );
+        let mut builder =
+            crate::platform::mcp_command(crate::platform::MCP_SHELL, command, &mut environment);
         builder
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -699,129 +699,6 @@ impl Drop for StdioTransport {
     fn drop(&mut self) {
         let _ = self.collect(DROP_WINDOW);
     }
-}
-
-/// 把一行读成一个**对象**（不是一个对象就当噪声：剥掉可能的前导字节序标记与空白再解析）。
-fn as_object(text: &str) -> Option<Value> {
-    let cleaned = text.trim_start_matches(['\u{feff}', ' ', '\t', '\r', '\n']);
-    let value: Value = serde_json::from_str(cleaned).ok()?;
-    value.is_object().then_some(value)
-}
-
-/// 错误对象 → 一句**只作携带**的原文（已消毒、已截断）。
-///
-/// ⚠ **只搬运"对面说出来的话"**（2026-10-13 收口，理由见下）：
-/// - 有 `message` ⇒ `code=<码>: <那句话>`（码是附带事实，不是我们编的）；
-/// - **没有 `message`** ⇒ 只给 `code=<码>`。
-///
-/// **不再把整个错误对象 JSON 化当原文。** 那条旧写法有两个毛病：
-/// ① 它**不是"对面的话"**，是我们把对面的**结构**序列化了一遍——记进"原文"那一格就是
-/// 记录在替对面说话；② 那一格是**文本**，`data` 是任意嵌套结构（可以很大、可以有我们
-/// 读不懂的东西），把它摊平成文本，等于让一个"携带原文"的格子去承载结构。
-/// 结构该有自己的格子，那是另一件事（见 `mcp` 模块文档里登记的那两格）。
-///
-/// ⇒ 缺 `message` 时**如实只报码**："对面没留话"与"我们读到了话"因此分得开。
-///
-/// ⚠ **这句话不被解析，也不参与分类**：分类只看结构字段（`code`、`data.supported`），从不读
-/// 它的正文——把对面一句自由文本读成"它就是那个原因"，就是**我们替它说话**。同一把尺子的
-/// 另一面：它也**不被改写成我们的话**，对面说了什么就带什么（只消毒、只截断）。
-fn describe_error(error: &Value) -> String {
-    let code = error.get("code").and_then(Value::as_i64);
-    let raw = match error.get("message").and_then(Value::as_str) {
-        Some(message) => match code {
-            Some(code) => format!("code={code}: {message}"),
-            None => message.to_string(),
-        },
-        None => match code {
-            Some(code) => format!("code={code}"),
-            // 连码都没有：那就真的没有可携带的东西了。
-            None => String::new(),
-        },
-    };
-    let clean = sanitize(&raw);
-    let (clipped, truncated) = super::clip(&clean, 400);
-    if truncated {
-        format!("{clipped}…（截断）")
-    } else {
-        clipped
-    }
-}
-
-/// 清单里的一条工具。名字是**必须有**的；说明与参数模式可以缺。
-fn read_tool(item: &Value) -> Option<RawTool> {
-    let name = item.get("name").and_then(Value::as_str)?.to_string();
-    if name.is_empty() {
-        return None;
-    }
-    Some(RawTool {
-        name,
-        description: item
-            .get("description")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        input_schema: item
-            .get("inputSchema")
-            .cloned()
-            .unwrap_or_else(|| json!({})),
-    })
-}
-
-/// 一次调用的答复 → 有界的回执形状。
-///
-/// **有界**是这里做的：正文只留到 [`MAX_TEXT_BYTES`]（读的时候就不再多收），而原文一共多少字节
-/// 照旧报出来。非文本的块**不搬**，只按类型记条数——主体看到的是"有什么"，不是"几兆的字节"。
-fn read_result(result: &Value, noise: usize) -> CallReply {
-    let is_error = result
-        .get("isError")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let mut text = String::new();
-    let mut text_bytes = 0usize;
-    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-
-    if let Some(blocks) = result.get("content").and_then(Value::as_array) {
-        for block in blocks {
-            let kind = block
-                .get("type")
-                .and_then(Value::as_str)
-                .map(sanitize)
-                .filter(|each| !each.is_empty())
-                .unwrap_or_else(|| "unknown".to_string());
-            if kind != "text" {
-                *counts.entry(kind).or_insert(0) += 1;
-                continue;
-            }
-            let part = block.get("text").and_then(Value::as_str).unwrap_or("");
-            text_bytes += part.len();
-            add_bounded(&mut text, part);
-        }
-    }
-    // 结构化的那一份我们也不搬（v1 只搬文本）——它出现就要看得见。
-    if result.get("structuredContent").is_some() {
-        *counts.entry("structured-content".to_string()).or_insert(0) += 1;
-    }
-
-    CallReply::Replied {
-        is_error,
-        truncated: text_bytes > MAX_TEXT_BYTES,
-        text,
-        text_bytes,
-        unsupported: counts.into_iter().collect(),
-        noise,
-    }
-}
-
-/// 往正文里追加，**只追加到上限为止**（不再多收）。
-fn add_bounded(text: &mut String, part: &str) {
-    if text.len() >= MAX_TEXT_BYTES {
-        return;
-    }
-    if !text.is_empty() {
-        text.push('\n');
-    }
-    let room = MAX_TEXT_BYTES.saturating_sub(text.len());
-    let (piece, _) = super::clip(part, room);
-    text.push_str(&piece);
 }
 
 /// 有界地读一行；返回它是什么。

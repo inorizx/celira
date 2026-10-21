@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { ArrowLeft, AlertTriangle, Loader2, Plus, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { CommandLine } from '@/components/celira/CommandLine'
 import { cn } from '@/lib/utils'
 import { hasRealWorldTransport, useAppStore, useConnection } from '@/api/store'
 import { isRealWorldSession } from '@/api/prefs'
@@ -812,14 +813,12 @@ export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
                     也存不下 —— 这不是 Agent 出问题了。
                   </p>
                   {entry.local && (
-                    <div className="space-y-1 text-caption text-muted-foreground">
-                      <div>
-                        启动：<code className="rounded bg-muted px-1.5 py-0.5 font-mono">node home.js up</code>
-                      </div>
-                      <div>
-                        单独起本机数据服务（读口 ＋ 写口，一个进程）：
-                        <code className="rounded bg-muted px-1.5 py-0.5 font-mono">node home.js doors</code>
-                      </div>
+                    <div className="space-y-2">
+                      <CommandLine command="node home.js up" note="起这台机器上的世界（仓根跑）。" />
+                      <CommandLine
+                        command="node home.js doors"
+                        note="只起本机数据服务（读口 ＋ 写口，一个进程）。"
+                      />
                     </div>
                   )}
                   <Button variant="outline" size="sm" onClick={() => void load()}>

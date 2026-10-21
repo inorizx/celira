@@ -58,7 +58,7 @@ use crate::skills_desktop::{SkillEntry, SkillsDesktop, read_skills};
 use crate::status_bar::StatusBar;
 use crate::store::{Admission, Environment, EnvironmentReader, TracePayload, WakeOrigin};
 use crate::terminal_app::{TERMINAL_APP_ID, TerminalAccess, TerminalApp};
-use crate::web_app::{SearchAccess, WEB_APP_ID, WebApp};
+use crate::web_app::{FetchAccess, SearchAccess, WEB_APP_ID, WebApp};
 
 /// 一次只读文件活动的装配结果。
 ///
@@ -402,6 +402,7 @@ pub fn run_activity_in_environment<M: ModelPort>(
             // 一次性入口**没有档位声明**（与它不接 im 同款）：取默认档 `full` = 出厂以来的样子。
             web: WebDeclaration {
                 search: None,
+                fetch: None,
                 tier: crate::web_app::WebTier::Full,
             },
             terminal: None,
@@ -629,13 +630,14 @@ pub struct SessionDeclarations {
     /// `None` = 这一次**没有声明** ⇒ 身份行**跳过**（不注入空壳）。与 `im` 同款：成对的值由
     /// 宿主在命令行上给出（`--identity-agent` / `--identity-name`），**装配只搬运**。
     pub identity: Option<IdentityClaim>,
-    /// **搜索厂商的访问声明**（端点 + 凭据）：`None` = 没声明凭据。
+    /// **外网源的访问声明**（一条源**两个能力**：查 ＋ 取）：`None` = 没配。
     ///
-    /// 与 `im` 不同，**没声明不等于没有这个 App**：web 窗是出厂内置的（两条动词从第一轮起就在场），
-    /// 缺的只是搜索那一条执行时需要的凭据——那时它如实失败 `credential-absent`（**没配**，不是被拒），
-    /// 而取页那一条与厂商无关，照常可用。因此这份声明只影响**一条动词能不能执行**，不影响能力面。
-    /// ⚠ 真正决定能力面的是下面那一格**出网档**（`web`）：凭据管"能不能执行"，档位管"在不在场"。
+    /// 与 `im` 不同，**没配不等于没有这个 App**：web 窗是出厂内置的（两条动词从第一轮起就在场），
+    /// 缺的是执行时那份传递——那时两条动词都如实失败 `credential-absent`（**没配**，不是被拒）。
+    /// ⚠ 真正决定能力面的是下面那一格**出网档**（`web`）：来源管"能不能执行"，档位管"在不在场"。
     pub search: Option<SearchAccess>,
+    /// **取**那一条的声明（与 `search` 同一族：同源、同一份凭据、同一时刻在场或不在场）。
+    pub fetch: Option<FetchAccess>,
     /// **出网档**（2026-10-13）：这台机器给不给它出网窗——`off` / `fetch` / `full`，默认 `full`。
     ///
     /// 判据一句话：**"主体能不能出网"是主人的政策**（与 `--terminal` 同一类事实），因此：
@@ -1954,6 +1956,7 @@ const HOST_INPUT_TOO_LARGE: &str = "too-large";
 #[derive(Clone, Copy)]
 struct WebDeclaration<'a> {
     search: Option<&'a SearchAccess>,
+    fetch: Option<&'a FetchAccess>,
     tier: crate::web_app::WebTier,
 }
 
@@ -1989,6 +1992,7 @@ fn machine_declarations<'a>(declarations: &'a SessionDeclarations) -> MachineDec
         im: declarations.im.as_ref(),
         web: WebDeclaration {
             search: declarations.search.as_ref(),
+            fetch: declarations.fetch.as_ref(),
             tier: declarations.web,
         },
         terminal: declarations.terminal.as_ref(),
@@ -2059,8 +2063,9 @@ fn assemble_machine(
     // 没有）；`fetch` ⇒ 摆，但「查」不进声明面；`full` ⇒ 两条都在场（出厂以来的样子）。
     // 判据：**"主体能不能出网"是主人的政策**，与 `--terminal` 不给就没有那只手同款。
     // ⚠ 凭据（`search`）只管**能不能执行**，不管在不在场——两者是两件事。
-    if let Some(app) = WebApp::with_tier(
+    if let Some(app) = WebApp::with_sources(
         web.search.cloned(),
+        web.fetch.cloned(),
         web.tier,
         crate::web_app::WebPolicy::production(),
     ) {

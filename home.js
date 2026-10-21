@@ -29,7 +29,7 @@
 const { EXIT } = require('./scripts/home/codes')
 
 const USAGE = [
-  '用法: node home.js <up|status|doors|down|backup|config|issue-home-key|remote-control> [参数]',
+  '用法: node home.js <up|status|doors|down|backup|config|web|issue-home-key|remote-control> [参数]',
   '  up     开机（缺什么补什么；第一次布置整个家）。一个家可以住**多支** Agent（住户）：',
   '         无参数 = 点亮家（世界/页面/家的门）+ **遍历每个住户各起一个宿主**（一支都没有时自建第一支）',
   '          可选： --token 补发 Human token ／ --agent <世界里的 Agent id> = **给这一支安家**',
@@ -39,6 +39,8 @@ const USAGE = [
   '  doors  起**家的门**并常驻：读端面（只读状态口，运行状态页的活源）＋ 写端面（模型配置门，',
   '         模型配置页的写口）—— **一个进程、两个端面**（两个端口、两套准入各判各的）',
   '  config 模型配置（没有 --serve 了：起门那件事现在归 doors 一条路）',
+  '  web    web 源：清单 ＋ 绑定（list / add / use / remove / show）—— 这台机器上有哪些外网凭据、',
+  '         这一支用哪一条（查与取两个能力）；key 只印掩码，永不打印',
   '  issue-home-key 发一把**家钥匙**（跨机照看用；只打印一次，重跑=换新的一把）',
   '  remote-control on|off  **允不允许从别的机器接 Agent 到这台机器上**（缺省 off）。',
   '         家钥匙只回答"能不能进这台机器"；"允许我替你起进程"是另一件事，**只能在这台机器上开**',
@@ -89,6 +91,7 @@ async function main(argv) {
     }
     return require('./scripts/home/status').status()
   }
+  if (first === 'web') return require('./scripts/home/web-sources').cli(argv.slice(1))
   if (first === 'config') {
     // `config --serve` 同款退役（上面那条的理由一字不差）。不带旗标时它没有别的用法 —— 打用法。
     if (argv.slice(1).includes('--serve')) {

@@ -110,3 +110,4 @@ pub mod terminal_held;
 pub mod timer_app;
 pub mod wake;
 pub mod web_app;
+pub mod web_source;

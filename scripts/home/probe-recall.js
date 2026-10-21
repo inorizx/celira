@@ -24,7 +24,7 @@
  * 3. 起世界、建一支 Agent、安在这个临时家上（照 `probe-loop.js` 那条路）；
  * 4. 主人发一条：**"按你手上那份回执的规矩，报一个回执给我。"**
  *    —— 它**不提路径、不提"技能区"**，只提"你手上那份"；**唯一的路**是那一行线索
- *    （`skills: N 项（要翻看用 files_list，路径 skills/）`）⇒ `files_list skills/` ⇒ `files_read`；
+ *    （开场索引 `skills: N 项…` ＋ 名字行 `receipt — …`）⇒ `files_list skills/` ⇒ `files_read`；
  * 5. 等她回；**把房里读到的每一条原样打出来**（不替读数下结论）；
  * 6. 收尾：`down` ＋ 删掉整个临时家（`finally` 里也删）。
  *

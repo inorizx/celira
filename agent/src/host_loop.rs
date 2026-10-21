@@ -555,6 +555,12 @@ pub struct Host<'a> {
     /// 到**这一段开头**。判据（"不漏报"那一侧）与那次实测见 [`next_anchor`]。
     /// 跨进程重启后如实回到 `None`（不编造）。
     since: Option<SystemTime>,
+    /// **合并窗口**（2026-10-19）：头一声铃之后，再等这么久才开段，把同一批动静合成一次。
+    ///
+    /// `ZERO` ＝ **不合并**——[`Host::new`] 的默认值，既有行为一个字节不变，离线用例也不因此变慢。
+    /// 生产入口显式打开它（`bin/agent_host.rs`）：没有它，"默认收到群消息"就等于每条消息一次
+    /// 模型调用。
+    coalesce: std::time::Duration,
 }
 
 impl<'a> Host<'a> {
@@ -563,7 +569,16 @@ impl<'a> Host<'a> {
             options,
             names: RunNamer::new(),
             since: None,
+            coalesce: std::time::Duration::ZERO,
         }
+    }
+
+    /// 打开**合并窗口**：头一声铃之后最多再等这么久，把同一批动静合成一次开段。
+    ///
+    /// 默认关着（见字段文档）：只有常驻入口该打开它。用例给几十毫秒只为把窗口本身量出来。
+    pub fn with_coalesce(mut self, window: std::time::Duration) -> Self {
+        self.coalesce = window;
+        self
     }
 
     /// 换一次**模型那一组声明**：模型名 / 思考强度 / 窗口（`--context-window` 那一件在内）。
@@ -597,7 +612,39 @@ impl<'a> Host<'a> {
     /// **那一段清醒期仍然用旧的**（第二条消息才换）——而页面写着"改完不用重启"。拆开之后，
     /// "**铃已到、还没开跑**"就是那个检查点 ⇒ 改完之后的**下一段清醒期**就用新的。
     pub fn next_wake(&mut self, wake: &impl WakePort) -> Result<Woken, HostFailure> {
-        accept(wake.next())
+        let first = accept(wake.next())?;
+        Ok(self.coalesce_window(first, wake))
+    }
+
+    /// **合并窗口**（2026-10-19）：头一声之后，在窗口内继续收，把同一批动静合成**一次**开段。
+    ///
+    /// 为什么需要它：默认改成"群里有人说话也会叫醒主体"之后，一声一声地开段就等于**一条消息一次
+    /// 模型调用**。窗口买的不是"数铃"，是"**等一小会儿**"——窗口内的动静要么已经在通道里
+    /// （容量 1，多半已被合并），要么已经在世界里（下一次读账看得见）。
+    ///
+    /// 三条不退让的：
+    /// 1. **钟必须赴**：窗口里到了主体自己约的时刻 ⇒ **立刻**开，起源记 `Timer`（不被铃压住）；
+    /// 2. **通道终结立刻报**：`Refused` 不等到窗口结束——那只会让操作者晚知道；
+    /// 3. **起源取最早的**：窗口里又来的铃只说明"还有动静"，不改"是谁叫醒的"。
+    fn coalesce_window(&self, first: Woken, wake: &impl WakePort) -> Woken {
+        let window = self.coalesce;
+        if window.is_zero() || !matches!(first, Woken::Opened | Woken::Changed) {
+            return first;
+        }
+        let deadline = std::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return first;
+            }
+            match wake.next_within(remaining) {
+                None => return first,
+                Some(Woken::Timer) => return Woken::Timer,
+                Some(Woken::Refused(failure)) => return Woken::Refused(failure),
+                // 同一批里的又一声铃：丢掉——"还有动静"这件事已经说过了。
+                Some(Woken::Opened) | Some(Woken::Changed) => {}
+            }
+        }
     }
 
     /// 用**已经到手**的那次唤醒开一段在场（[`Host::next_wake`] 之后调它）。
@@ -711,7 +758,24 @@ impl<'a> Host<'a> {
             reading: options.reading.clone(),
             // **可选的那几格整包交给会话**：模型名（这一段由谁想）、im 访问、身份行、搜索、
             // 终端档位、MCP、用量接线各格的语义在包自己身上——本处只搬运，不解释。
-            declarations: options.declarations.clone(),
+            //
+            // **外部工具的实际面**（2026-10-20）：宿主声明 ＋（**开了终端档时才读**）主体自己的
+            // `<环境根>/mcp.conf`。判据与理由在 [`crate::mcp::declarations_for_run`]：自配 MCP
+            // 不新增权力（有终端档时主体本来就能跑任意命令），没开时它会是绕过终端档的后门。
+            // ⇒ 生效点是**每一段活动**，不是进程重启——主体改自己的清单，下一段就多一台。
+            declarations: {
+                let (mcp, notes) = crate::mcp::declarations_for_run(
+                    &options.declarations.mcp,
+                    options.environment_root,
+                    options.declarations.terminal.is_some(),
+                );
+                for note in notes {
+                    eprintln!("[mcp] {note}");
+                }
+                let mut declarations = options.declarations.clone();
+                declarations.mcp = mcp;
+                declarations
+            },
         };
         // **锚：取钟在读之前。**
         //

@@ -170,6 +170,36 @@ pub fn read_agent_terminal(env_root: &Path) -> Option<String> {
     }
 }
 
+/// 写一支的**终端档声明**：**只动 `terminal=` 这一行**，其余行（`mcp_*` / `max_turns` /
+/// 登记那几行）原样保留。
+///
+/// `Some("full" | "none")` ⇒ 文件里有这一行；`None` ⇒ 删掉它（回到"没写"＝平台缺省）。
+/// 返回"这一次真的写了吗"（内容没变就一字不动 —— mtime 是读数的一部分）。
+pub fn set_agent_terminal(env_root: &Path, value: Option<&str>) -> Result<bool, String> {
+    let file = env_root.join(AGENT_CONF);
+    let current = fs::read_to_string(&file)
+        .map_err(|error| format!("这一支的登记读不出来（{}）：{error}", file.display()))?;
+    let prefix = format!("{KEY_TERMINAL}=");
+    let mut lines: Vec<String> = lines_of(&current)
+        .into_iter()
+        .filter(|line| !line.starts_with(&prefix))
+        .collect();
+    if let Some(value) = value {
+        lines.push(format!("{KEY_TERMINAL}={value}"));
+    }
+    let text = if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    };
+    if text == current {
+        return Ok(false);
+    }
+    fs::write(&file, &text)
+        .map_err(|error| format!("写登记失败（{}）：{error}", file.display()))?;
+    Ok(true)
+}
+
 /// 写一份登记：**内容没变就一个字都不动**（`writeAgentConf` 直译）。
 /// 返回"这一次真的写了吗"。
 pub fn write_agent_conf(env_root: &Path, values: &AgentConf) -> Result<bool, String> {
