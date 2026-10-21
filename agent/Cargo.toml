@@ -1,6 +1,6 @@
 [package]
 name = "celira-agent"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "Celira Agent：最小骨架 + 最小 Provider Adapter（Core -> ModelPort -> DeepSeek Adapter -> wire）；无 OS、无 App、无持久化"
 license = "MIT"

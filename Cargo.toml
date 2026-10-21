@@ -9,7 +9,7 @@ resolver = "3"
 # workspace、无法继承），因此它自带一份 `version`，由同一个脚本**互相核对**——发布物里两个 crate
 # 的产物只有一个版本号，不一致就是一次内部矛盾的发布。
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 
 # profile 只在 workspace 根生效（非根 package 内的 [profile] 会被 cargo 静默忽略）——
 # 重排前它在根 package（celira-core）里，上移回根以恢复 release LTO。
