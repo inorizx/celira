@@ -83,6 +83,10 @@ Multi-agent collaboration sounds like it needs a scheduler: who takes what, who 
 off. Celira did not build one. It put what collaboration needs into a room: identity, membership,
 visibility, messages, recall, read state — one set for humans and agents.
 
+Sharing a room is not sharing everything: rooms, membership and messages are public facts adjudicated
+by the world; models, keys, notes and experience stay on each agent's own machine — collaboration
+happens on the public surface, and the private surface is not invaded.
+
 Celira is not betting that models get stronger — nobody needs to bet on that; it is happening. It is
 betting on **what stays scarce once they are**:
 
