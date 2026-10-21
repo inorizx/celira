@@ -19,14 +19,16 @@
                                home       : celira-home-<version>-win-x64/   (the runtime: agent bins + home.js + the shell)
                                client     : celira-client-<version>-win-x64/ (the page + its server)
       4. zip                : one .zip per package, plus MANIFEST-<part>.txt per package
-      5. publish            : asks the origin who it is first, then either
-                                gh release create <tag> <zip> (origin is github.com) or an honest
-                                refusal (origin is gitee.com: that needs Gitee's OpenAPI, and that
-                                path is deliberately not implemented until it can be verified)
-                              (no gh / no permission / wrong host => the package is kept and the run
-                               reports "not published" with a non-zero exit code; it never pretends)
-                              (private distribution for now: run with -SkipPublish and hand the zip
-                               over; the release channel is not ruled on - PROJECT_SHAPE.md s7 gap 6)
+      5. publish            : one build, one digest, two channels
+                                origin github.com  -> gh release create <tag> <zip> <zip>.sha256
+                                origin gitee.com   -> scripts/publish-gitee.ps1 (OpenAPI v5)
+                                -AlsoGitee <repo>  -> the GitHub path first, then the Gitee mirror
+                              both channels upload the SAME bytes and carry the same `sha256:` line
+                              in the release body (Gitee's API reports no asset digest, so the body
+                              is the machine-readable one)
+                              (no gh / no GITEE_TOKEN / no permission => the package is kept and the
+                               run reports "not published" with a non-zero exit code; it never
+                               pretends. -SkipPublish keeps the old local-only behaviour.)
 
     The split is a PARTITION check, not a copy list: every file of the all-in-one package must be
     claimed by at least one part, and the only files claimed twice are the declared shared pair
@@ -52,7 +54,14 @@ param(
     [string]$Tag,
     [switch]$SkipPublish,
     [switch]$SkipBuild,
-    [string]$Platform = 'win-x64'
+    [string]$Platform = 'win-x64',
+
+    # Publish the SAME bytes to Gitee as well. Empty = do not touch Gitee unless the origin is
+    # Gitee itself (then this is filled from the origin). Needs GITEE_TOKEN in the environment.
+    [string]$GiteeRepo = '',
+
+    # Origin is GitHub: publish to GitHub with gh, then mirror to -GiteeRepo.
+    [switch]$AlsoGitee
 )
 
 $ErrorActionPreference = 'Stop'
@@ -142,6 +151,19 @@ if (-not $version) {
 $agentVersion = Get-CrateVersion (Join-Path $root 'agent\Cargo.toml')
 $expectedTag = 'v' + $version
 if (-not $Tag -or $Tag.Trim() -eq '') { $Tag = $expectedTag }
+
+# Where this build came from: written into VERSION so an unpacked package can say which release
+# channel it belongs to. Until 2026-10-21 the package carried no repo at all, and the updater had
+# to ask git - which a downloaded package does not have. The package must be self-describing.
+$originUrl = (& git -C $root remote get-url origin 2>$null | Select-Object -First 1)
+$originHost = if ($originUrl -match 'gitee\.com') { 'gitee' }
+    elseif ($originUrl -match 'github\.com') { 'github' }
+    elseif ($originUrl) { 'other' } else { 'none' }
+$originSlug = ''
+if ($originUrl -and $originUrl -match '(?:github|gitee)\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$') {
+    $originSlug = '{0}/{1}' -f $Matches[1], $Matches[2]
+}
+if (-not $GiteeRepo -and $originHost -eq 'gitee') { $GiteeRepo = $originSlug }
 
 Write-Host 'celira-release v1'
 Write-Host ("version   = {0}   (root Cargo.toml: [workspace.package].version)" -f $version)
@@ -361,14 +383,19 @@ $versionNote = if ($Platform -eq 'win-x64') {
 } else {
     'note    = unsigned binaries; ordinary users: run celira-app (no Node.js needed); CLI form needs Node.js (node home.js up)'
 }
-Set-Content -Path (Join-Path $packageDir 'VERSION') -Encoding ascii -Value @(
+# The release channel this build belongs to. `repo` is where it is published first; `mirror` is
+# the second copy of the SAME bytes. The updater reads these lines instead of asking git (a
+# downloaded package has no .git). Empty values are omitted, never written as a blank key.
+$channelRows = @()
+if ($originSlug) { $channelRows += ('repo    = {0}' -f $originSlug) }
+if ($GiteeRepo -and $GiteeRepo -ne $originSlug) { $channelRows += ('mirror  = {0}' -f $GiteeRepo) }
+Set-Content -Path (Join-Path $packageDir 'VERSION') -Encoding ascii -Value (@(
     ("version = {0}" -f $version),
     ("git rev = {0}" -f $rev),
     ("built   = {0}" -f $builtAt),
     ("platform = {0}" -f $platformLabel),
-    'package = all-in-one',
-    $versionNote
-)
+    'package = all-in-one'
+) + $channelRows + @($versionNote))
 
 # Package check: code artifacts only (no credentials, no home content, no build cache)
 $leaked = @(Get-ChildItem -Recurse -File $packageDir | Where-Object {
@@ -604,14 +631,13 @@ foreach ($part in $partNames) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
         Copy-Item (Join-Path $packageDir ($f -replace '/', '\')) $dst
     }
-    Set-Content -Path (Join-Path $partDir 'VERSION') -Encoding ascii -Value @(
+    Set-Content -Path (Join-Path $partDir 'VERSION') -Encoding ascii -Value (@(
         ("version = {0}" -f $version),
         ("git rev = {0}" -f $rev),
         ("built   = {0}" -f $builtAt),
         ("platform = {0}" -f $platformLabel),
-        ("package = {0}" -f $part),
-        $versionNote
-    )
+        ("package = {0}" -f $part)
+    ) + $channelRows + @($versionNote))
     # Same credential-leak check as the all-in-one package, per part.
     $leakedPart = @(Get-ChildItem -Recurse -File $partDir | Where-Object {
         $_.Name -match '^(home\.conf|identity\.json|facts\.ndjson|trace\.ndjson)$' -or $_.Name -like '.env*'
@@ -663,10 +689,20 @@ Compress-Archive -Path (Join-Path $packageDir '*') -DestinationPath $zip
 Add-UnixFileModes -ZipPath $zip -SourceDir $packageDir
 $zipBytes = (Get-Item $zip).Length
 
+# The digest is computed ONCE, here, and then used by every channel. A release that is offered
+# by two channels but has two different digests is not a mirror - it is two products with one
+# version number, and an updater that verifies bytes must refuse it.
+$zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+# A sidecar file next to the zip: the name makes it obvious which asset it describes, and the
+# same file is uploaded to both channels so a human can check either one.
+$sumsFile = Join-Path $releaseRoot ($name + '.zip.sha256')
+Set-Content -Path $sumsFile -Encoding ascii -Value ('{0}  {1}' -f $zipHash, (Split-Path -Leaf $zip))
+
 Write-Host ''
 Write-Host '[state]'
 Write-Host ("       package   = {0}" -f $packageDir)
 Write-Host ("       zip       = {0} ({1:N1} MiB)" -f $zip, ($zipBytes / 1MB))
+Write-Host ("       sha256    = {0}" -f $zipHash)
 Write-Host ("       files     = {0}" -f (@(Get-ChildItem -Recurse -File $packageDir).Count))
 Write-Host ("       manifest  = {0}" -f (Join-Path $releaseRoot ('MANIFEST-all-in-one-{0}.txt' -f $version)))
 Write-Host ''
@@ -698,41 +734,18 @@ if ($SkipPublish) {
     exit 0
 }
 
-# Which channel are we publishing to? Ask the origin instead of calling a tool that is guaranteed to
-# fail: the origin decides whether `gh` (GitHub only) is even the right tool here. (PROJECT_SHAPE.md
-# section 7 gap 6 "the release channel is not ruled on" is exactly this question, measured.)
-$originUrl = (& git -C $root remote get-url origin 2>$null | Select-Object -First 1)
-$originHost = if ($originUrl -match 'gitee\.com') { 'gitee' }
-    elseif ($originUrl -match 'github\.com') { 'github' }
-    elseif ($originUrl) { 'other' } else { 'none' }
+# Which channel are we publishing to? The origin decides which one is primary. `-AlsoGitee`
+# mirrors the same bytes to Gitee after GitHub. (PROJECT_SHAPE.md section 7 gap 6 was "the release
+# channel is not ruled on"; the ruling since 2026-10-21 is: GitHub Releases is primary, Gitee is a
+# mirror of the SAME bytes - not a second build.)
 Write-Host ''
 Write-Host ("[publish] origin = {0} ({1})" -f $(if ($originUrl) { $originUrl } else { '(no origin)' }), $originHost)
-
-if ($originHost -eq 'gitee') {
-    Write-Host '[publish] NOT PUBLISHED: the origin is gitee.com; this step only knows how to publish with gh (GitHub CLI)'
-    Write-Host '          Gitee needs its own OpenAPI, in two calls:'
-    Write-Host '            POST /api/v5/repos/<owner>/<repo>/releases          (tag_name + name + body)'
-    Write-Host '            POST /api/v5/repos/<owner>/<repo>/releases/<id>/attach_files   (one per artifact)'
-    Write-Host '          That path is NOT implemented here on purpose: an upload cannot be verified on this'
-    Write-Host '          machine without a token and a reachable repository, and an unverified upload path'
-    Write-Host '          is worse than an honest stop (the artifacts are the product).'
-    Write-Host '          To make it real: a Gitee token with project scope, a public release repository,'
-    Write-Host '          then the two calls above - measured first with scripts/probe-release-channel.mjs.'
-    Write-Host ("          the package is ready at {0}" -f $zip)
-    exit 5
-}
-
-$gh = Get-Command gh -ErrorAction SilentlyContinue
-if (-not $gh) {
-    Write-Host ''
-    Write-Host '[publish] NOT PUBLISHED: the GitHub CLI (gh) was not found on PATH'
-    Write-Host ("          the package is ready at {0}" -f $zip)
-    Write-Host ("          publish it manually once gh is available: gh release create {0} `"{1}`" --notes-file <notes>" -f $Tag, $zip)
-    exit 5
-}
+if ($GiteeRepo) { Write-Host ("[publish] gitee  = {0}" -f $GiteeRepo) }
 
 # Release notes are the changelog: the commit subjects in this version (Conventional Commits
-# lines), so there is no separate CHANGELOG.md to keep in sync.
+# lines), so there is no separate CHANGELOG.md to keep in sync. The digest line is appended here
+# so BOTH channels carry it in their release body - that is what makes the body machine-readable
+# for the updater (the Gitee API reports no asset digest).
 $previous = (& git -C $root describe --tags --abbrev=0 2>$null)
 $range = if ($previous) { '{0}..HEAD' -f $previous } else { 'HEAD' }
 $notes = @((& git -C $root log --pretty=format:%s $range 2>$null) | Where-Object { $_ -match '^\w+(\(.+\))?:' })
@@ -744,15 +757,65 @@ Set-Content -Path $notesFile -Encoding utf8 -Value (@(
     '',
     '## Changes in this release',
     ''
-) + ($notes | ForEach-Object { '- ' + $_ }))
+) + ($notes | ForEach-Object { '- ' + $_ }) + @(
+    '',
+    ('sha256: {0}' -f $zipHash)
+))
+
+function Invoke-GiteePublish {
+    $script = Join-Path $PSScriptRoot 'publish-gitee.ps1'
+    & $script -Tag $Tag -Zip $zip -Repo $GiteeRepo -NotesFile $notesFile `
+        -Title ("Celira {0}" -f $version)
+    return $LASTEXITCODE
+}
+
+if ($originHost -eq 'gitee') {
+    if (-not $GiteeRepo) {
+        Write-Host '[publish] NOT PUBLISHED: origin is gitee.com but no release repository could be read'
+        Write-Host ("          the package is ready at {0}" -f $zip)
+        exit 5
+    }
+    $code = Invoke-GiteePublish
+    if ($code -ne 0) {
+        Write-Host ('[publish] NOT PUBLISHED: publish-gitee.ps1 exited {0}' -f $code)
+        Write-Host ("          the package is ready at {0}" -f $zip)
+        exit 5
+    }
+    Write-Host ("[publish] published on gitee: {0}" -f $Tag)
+    exit 0
+}
+
+$gh = Get-Command gh -ErrorAction SilentlyContinue
+if (-not $gh) {
+    Write-Host ''
+    Write-Host '[publish] NOT PUBLISHED: the GitHub CLI (gh) was not found on PATH'
+    Write-Host ("          the package is ready at {0}" -f $zip)
+    Write-Host ("          publish it manually once gh is available: gh release create {0} `"{1}`" --notes-file <notes>" -f $Tag, $zip)
+    exit 5
+}
 
 Write-Host ''
-Write-Host ("[publish] gh release create {0} ({1} note line(s))" -f $Tag, $notes.Count)
-& gh release create $Tag $zip --title ("Celira {0}" -f $version) --notes-file $notesFile
+Write-Host ("[publish] gh release create {0} ({1} note line(s), zip + sha256)" -f $Tag, $notes.Count)
+& gh release create $Tag $zip $sumsFile --title ("Celira {0}" -f $version) --notes-file $notesFile
 if ($LASTEXITCODE -ne 0) {
     Write-Host '[publish] NOT PUBLISHED: gh refused (no permission, not signed in, or the remote is not GitHub)'
     Write-Host ("          the package is ready at {0}" -f $zip)
     exit 5
 }
-Write-Host ("[publish] published: {0}" -f $Tag)
+Write-Host ("[publish] published on github: {0}" -f $Tag)
+
+if ($AlsoGitee) {
+    if (-not $GiteeRepo) {
+        Write-Host '[publish] GitHub is published, but -AlsoGitee needs -GiteeRepo <owner/name>'
+        Write-Host '[publish] the two channels are now out of step: github has this version, gitee does not'
+        exit 5
+    }
+    $code = Invoke-GiteePublish
+    if ($code -ne 0) {
+        Write-Host ('[publish] GitHub published, Gitee FAILED (exit {0}) -- the two channels are out of step' -f $code)
+        exit 5
+    }
+    Write-Host ("[publish] mirrored on gitee: {0}" -f $Tag)
+}
+
 exit 0

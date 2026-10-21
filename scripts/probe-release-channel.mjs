@@ -101,6 +101,20 @@ function assetOf(release) {
   return { ok: true, name: wanted.name ?? '(无名)', url, size: wanted.size ?? null }
 }
 
+/**
+ * **渠道把哈希写在哪**：GitHub 的附件页印 `sha256:`；Gitee 的 API 不回报附件摘要，
+ * 所以发布说明（body）里那一行 `sha256: <64 hex>` 就是唯一可读的来源。
+ *
+ * 为什么不能"没有哈希也照用"：`update.ps1` 的哈希策略是 fail-closed —— 一个答不出
+ * 「这是哪一份字节」的渠道，只能靠人去核，那就不该被自动更新器当成源。
+ * 两家的发布说明由同一个打包脚本写（`make_release.ps1` 把这一行追加进 RELEASE_NOTES.md），
+ * 所以这条解析对两家是同一套判据，不是两套。
+ */
+export function hashFromBody(text) {
+  const match = /(?:^|[\s(])sha256\s*:\s*([0-9a-fA-F]{64})(?:\s|$)/m.exec(String(text ?? ''))
+  return match ? match[1].toLowerCase() : null
+}
+
 /** 渠道答的三格 —— **纯函数**（用例直接量它，不碰网络）。 */
 export function readChannel(releases) {
   if (!Array.isArray(releases)) return { ok: false, notApplicable: false, why: '渠道回的不是一个列表' }
@@ -109,11 +123,13 @@ export function readChannel(releases) {
   const version = tagVersion(newest)
   if (!version) return { ok: false, notApplicable: false, why: '最新的那一版没有 tag/name，读不出版本号' }
   const asset = assetOf(newest)
+  const hash = hashFromBody(newest.body ?? newest.description ?? '')
   const entry = {
     version,
     tag: newest.tag_name ?? null,
     created: newest.created_at ?? null,
     asset: asset.ok ? { name: asset.name, url: asset.url, size: asset.size } : null,
+    hash,
   }
   if (!asset.ok) {
     return { ok: false, notApplicable: false, why: asset.why, partial: entry }
