@@ -111,7 +111,11 @@ if (-not (Test-Path (Join-Path $root 'Cargo.toml'))) {
 function Get-WorkspaceVersion {
     param([string]$Path)
     $inside = $false
-    foreach ($line in Get-Content $Path) {
+    # -Encoding UTF8 is not decoration: the manifests are UTF-8 without a BOM and carry Chinese
+    # comments, so Windows PowerShell 5.1's default (ANSI / system code page) decodes them wrong and
+    # can swallow line breaks -- `[workspace.package]` then never matches and this script exits 2
+    # with "no [workspace.package] version" on a perfectly good manifest (measured 2026-10-21).
+    foreach ($line in Get-Content $Path -Encoding UTF8) {
         if ($line -match '^\s*\[workspace\.package\]') { $inside = $true; continue }
         if ($inside -and $line -match '^\s*\[') { break }
         if ($inside -and $line -match '^\s*version\s*=\s*"([^"]+)"') { return $Matches[1] }
@@ -122,7 +126,7 @@ function Get-WorkspaceVersion {
 function Get-CrateVersion {
     param([string]$Path)
     $inside = $false
-    foreach ($line in Get-Content $Path) {
+    foreach ($line in Get-Content $Path -Encoding UTF8) {
         if ($line -match '^\s*\[package\]') { $inside = $true; continue }
         if ($inside -and $line -match '^\s*\[') { break }
         if ($inside -and $line -match '^\s*version\s*=\s*"([^"]+)"') { return $Matches[1] }
@@ -688,7 +692,7 @@ if ($SkipPublish) {
 }
 
 # Which channel are we publishing to? Ask the origin instead of calling a tool that is guaranteed to
-# fail: this repository's origin is gitee.com, and `gh` speaks GitHub only. (PROJECT_SHAPE.md
+# fail: the origin decides whether `gh` (GitHub only) is even the right tool here. (PROJECT_SHAPE.md
 # section 7 gap 6 "the release channel is not ruled on" is exactly this question, measured.)
 $originUrl = (& git -C $root remote get-url origin 2>$null | Select-Object -First 1)
 $originHost = if ($originUrl -match 'gitee\.com') { 'gitee' }

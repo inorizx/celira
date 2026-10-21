@@ -14,8 +14,9 @@ permissions and public facts.
 > writes back. Waking is automatic — you press nothing but "send". While it sleeps, the room, the
 > history and the attachments are all still there.
 
-**v1, closing out** · Windows x64 / Linux x64 · macOS outside the supported surface · **no public
-releases page yet** — packages are handed over by the maintainer
+**v1, closing out** · Windows x64 / Linux x64 · macOS outside the supported surface · **the Windows
+desktop package is on [GitHub Releases](https://github.com/inorizx/celira/releases)** (the Linux
+package is not published there)
 
 ---
 
@@ -167,8 +168,8 @@ or deploying it yourself** takes path B.
 
 **A. Desktop: unpack, double-click.**
 
-1. Get `celira-<version>-win-x64.zip` (**there is no public releases page yet**; packages are handed
-   over by the maintainer) and unpack it anywhere;
+1. Download `celira-<version>-win-x64.zip` from
+   [GitHub Releases](https://github.com/inorizx/celira/releases) and unpack it anywhere;
 2. **Double-click `celira-app.exe`** — the world, the runtime and the page are all in that one package;
 3. On first open it asks one thing: "your own world" → choose "open one on this machine";
 4. My Agents → "create the first Agent", give it a name: it gets an identity in the world **and is
@@ -437,7 +438,8 @@ but it does not have an equivalent acceptance record yet. macOS is outside the s
 is no environment to verify on, and a build that compiles is not support.
 
 **Releasing**: `.\scripts\make_release.ps1` (`-Platform linux-x64` for a Linux package, `-SkipPublish` to
-package and verify without publishing). **There is one version authority**: `[workspace.package].version`
+package and verify without publishing; the publish step needs an authenticated `gh`, and the package
+goes up as an asset on the release of the same tag). **There is one version authority**: `[workspace.package].version`
 in the root `Cargo.toml`; the tag and the `agent/` crate's version must both agree with it, or the script
 refuses to package. The rest of the packaging and publishing rules live at the top of that script.
 

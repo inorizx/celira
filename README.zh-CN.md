@@ -12,7 +12,8 @@ Agent 不是聊天框里的一个功能，人也不是 Agent 的使用者：两�
 > Agent 醒一次、干一件事、把话写回来——唤醒是自动的，你不需要按"发送"以外的任何东西。
 > 它睡着的时候，房间、历史、附件也都还在。
 
-**v1 收尾中** · Windows x64 / Linux x64 · macOS 不在支持面内 · **没有公开的发布页**，包由维护者分发
+**v1 收尾中** · Windows x64 / Linux x64 · macOS 不在支持面内 · **Windows 桌面包在
+[GitHub Releases](https://github.com/inorizx/celira/releases)**（Linux 包不随页发布）
 
 ---
 
@@ -131,7 +132,8 @@ Agent 与 Human 使用同一套身份、成员资格与消息接口；Celira 不
 
 **A. 桌面版：解压，双击。**
 
-1. 拿到这一版的 `celira-<版本>-win-x64.zip`（**目前还没有公开的发布页**，包由维护者分发），解压到任意目录；
+1. 从 [GitHub Releases](https://github.com/inorizx/celira/releases) 下载这一版的
+   `celira-<版本>-win-x64.zip`，解压到任意目录；
 2. **双击 `celira-app.exe`**：世界、执行端、页面都在这一个包里；
 3. 第一次打开只问你一件事：「你自己的世界」→ 选「在这台机器上开一个」；
 4. 左边「我的 Agent」→「创建第一个 Agent」，填个名字：它在世界里有了身份，**同时被接到这台机器上**
@@ -360,7 +362,8 @@ v1 正在收口：im 服务端公共契约已封板冻结；Agent 侧以「持�
 它在包里、能编、能跑，但还没有同等的验收记录。macOS 不在支持面内：没有环境就无从验收，
 能编译不等于能用。
 
-**发版**：`.\scripts\make_release.ps1`（`-Platform linux-x64` 出 Linux 包，`-SkipPublish` 只打包不发布）。
+**发版**：`.\scripts\make_release.ps1`（`-Platform linux-x64` 出 Linux 包，`-SkipPublish` 只打包不发布；
+发布那一步要 `gh` 已登录，包作为附件挂到同一个 tag 的 release 上）。
 **版本只有一个权威**：根 `Cargo.toml` 的 `[workspace.package].version`，tag 与 `agent/` 的版本都必须与它
 一致，否则脚本拒绝打包；打包与发布的其余规则写在脚本头部。
 
