@@ -76,7 +76,7 @@ const USAGE: &str = "\
                    [--create-dir <资料根内的单个目录名>]
                    [--context-window <正整数>] [--im-endpoint <URL>]
                    [--identity-agent <core 里的 id> --identity-name <此世界的名字>]
-                   [--search-endpoint <URL>] [--terminal <tier>]
+                   [--search-endpoint <URL>] [--terminal <tier>] [--files <own|full>]
                    [--mcp <声明>]
                    [--model <id>] [--model-endpoint <URL>]
                    [--model-protocol <responses|chat-completions>]
@@ -104,6 +104,11 @@ const USAGE: &str = "\
          （那段文本出现 0 次或多次都明确失败）；两者都不改名、不删除文件、不追加内容。
          笔记不需要任何授权（写在环境根里）：`notes_create` 随时可用，
          笔记正文只存在笔记存储里，不进入事实，也不自动进入下一次活动。
+         --files 声明文件面的档位，只有两个值：`own`（缺省）＝ 只能动自己那一块
+         （资料根读、作品目录写）；`full` ＝ 任意文件夹——`files_*` 的地址一律写成绝对路径
+         （如 D:\\work\\a.txt），读与写都在整台机器，而保留地址（`history/`、`manual.md`、
+         `self_concept`）与作品面照旧按名字用。这一档由主人给，不是 Agent 能申请的；
+         认不出的取值直接拒绝（既不静默当「全开」，也不静默当「只读」）。
          --context-window 声明本次活动的上下文窗口（正整数）：状态行里 `context` 那一段的
          分母，也就是「屏幕有多大」。厂商不回传窗口，因此只能由宿主声明；不给时取适配层当前
          模型档位的公开标称值。`0` 不是合法声明（直接拒绝，不猜）。
