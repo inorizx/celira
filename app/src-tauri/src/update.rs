@@ -317,15 +317,13 @@ async fn fetch_gitee(http: &reqwest::Client, repo: &str) -> Result<Value, String
         .map_err(|error| format!("回信读不懂：{error}"))
 }
 
-/// 壳给页面的那一格：**GitHub 优先，失败退 Gitee**。
-#[tauri::command]
-pub async fn update_check() -> UpdateReadout {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf));
-    let current = app_version::readout_from(exe_dir.as_deref()).version;
+/// 真正的检查：给定"exe 在哪个目录"，问渠道。
+///
+/// 与命令分开一层，是为了能**不经过 UI**验证它（`examples/probe_update.rs`）：
+/// 一条只肯在窗口里跑的网络逻辑，出问题时只能靠猜。
+pub async fn check_from_dir(exe_dir: Option<&Path>) -> UpdateReadout {
+    let current = app_version::readout_from(exe_dir).version;
     let version_text = exe_dir
-        .as_deref()
         .and_then(|dir| std::fs::read_to_string(dir.join("VERSION")).ok())
         .unwrap_or_default();
     let repo = channel_of(&version_text, "repo");
@@ -358,6 +356,15 @@ pub async fn update_check() -> UpdateReadout {
     }
 
     unknown(&current, notes.join("；"))
+}
+
+/// 壳给页面的那一格：**GitHub 优先，失败退 Gitee**。
+#[tauri::command]
+pub async fn update_check() -> UpdateReadout {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    check_from_dir(exe_dir.as_deref()).await
 }
 
 #[cfg(test)]

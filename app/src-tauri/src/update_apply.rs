@@ -143,9 +143,26 @@ pub fn apply_script(install: &str, payload: &str, stamp: &str) -> String {
     )
 }
 
+/// 解压用的 tar：**显式指向 Windows 自带的 bsdtar**。
+///
+/// 为什么不 `Command::new("tar")` 交给 PATH：Git for Windows 的 `usr/bin/tar` 是 GNU tar，
+/// **读不了 zip**（实测：`This does not look like a tar archive`）；PATH 里谁在前面取决于
+/// 用户装了什么。Windows 10 1803+ 的 `System32\tar.exe` 是 bsdtar，读 zip 没问题 —— 用它的
+/// 绝对路径，不猜。
+fn tar_exe() -> PathBuf {
+    if cfg!(windows) {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+        PathBuf::from(root).join("System32").join("tar.exe")
+    } else {
+        PathBuf::from("tar")
+    }
+}
+
 /// 下载、校字节、解压、验版本。**失败不留半个 payload**。
-#[tauri::command]
-pub async fn update_download(
+///
+/// 与命令分开一层：`examples/probe_download.rs` 用它指到任意目录跑真机验证。
+pub async fn download_into(
+    install: &Path,
     version: String,
     url: String,
     sha256: Option<String>,
@@ -161,7 +178,7 @@ pub async fn update_download(
         return Err("这个平台的自动更新还没做（解压依赖 Windows 自带的 tar）".to_string());
     }
 
-    let install = install_dir()?;
+    let install = install.to_path_buf();
     let parent = install
         .parent()
         .ok_or_else(|| "安装目录没有父目录".to_string())?
@@ -201,13 +218,22 @@ pub async fn update_download(
     }
 
     std::fs::create_dir_all(&payload).map_err(|error| format!("建解压目录失败：{error}"))?;
-    let status = std::process::Command::new("tar")
+    let tar = tar_exe();
+    if !tar.is_file() {
+        let _ = std::fs::remove_dir_all(&payload);
+        let _ = std::fs::remove_file(&zip);
+        return Err(format!(
+            "找不到解压工具 {}（Windows 10 1803+ 自带 bsdtar）",
+            tar.display()
+        ));
+    }
+    let status = std::process::Command::new(&tar)
         .arg("-xf")
         .arg(&zip)
         .arg("-C")
         .arg(&payload)
         .status()
-        .map_err(|error| format!("解压失败（找不到 tar？）：{error}"))?;
+        .map_err(|error| format!("解压失败（{}）：{error}", tar.display()))?;
     if !status.success() {
         let _ = std::fs::remove_dir_all(&payload);
         let _ = std::fs::remove_file(&zip);
@@ -225,6 +251,17 @@ pub async fn update_download(
         version,
         install_dir: install.display().to_string(),
     })
+}
+
+/// 壳给页面的那一格：下载并解压到**这个 exe 所在的安装目录**（同级放 payload）。
+#[tauri::command]
+pub async fn update_download(
+    version: String,
+    url: String,
+    sha256: Option<String>,
+) -> Result<PreparedUpdate, String> {
+    let install = install_dir()?;
+    download_into(&install, version, url, sha256).await
 }
 
 /// 写替换脚本、起一个外部 PowerShell、然后壳退出。
@@ -346,5 +383,62 @@ mod tests {
         assert_eq!(base64_utf16("AB"), "QQBCAA==");
         // 非 ASCII（中文）也要能编（不 panic、长度按 UTF-16 码元算）。
         assert!(!base64_utf16("更新").is_empty());
+    }
+
+    /// **生成的脚本真的能换掉两个目录**（不是"文本看起来对"）。
+    ///
+    /// 在一段**含中文**的临时路径里造 `install/`（旧）与 `payload/`（新），把脚本原样送进
+    /// `powershell -EncodedCommand` 跑一遍，再读回来核对：`install` 是新内容、`.old-test`
+    /// 是旧内容。去掉最后那句 `Start-Process`，测试不启动任何东西。
+    ///
+    /// 为什么非要有这一条：`apply_script` 是唯一会动用户磁盘的代码，文本断言证明不了
+    /// "PowerShell 真的能 rename 这两个目录"。
+    #[cfg(windows)]
+    #[test]
+    fn apply_script_actually_swaps_two_directories_in_a_chinese_path() {
+        let root = std::env::temp_dir().join(format!("celira-apply-{}", std::process::id())).join("中文 目录");
+        let _ = std::fs::remove_dir_all(&root);
+        let install = root.join("celira-app");
+        let payload = root.join("celira-app-new-0.1.4");
+        std::fs::create_dir_all(&install).expect("install");
+        std::fs::create_dir_all(&payload).expect("payload");
+        std::fs::write(install.join("celira-app.exe"), b"OLD").expect("old exe");
+        std::fs::write(payload.join("celira-app.exe"), b"NEW").expect("new exe");
+
+        let script = apply_script(
+            &install.display().to_string(),
+            &payload.display().to_string(),
+            "test",
+        )
+        .replace(
+            "Start-Process -FilePath (Join-Path $install 'celira-app.exe')",
+            "",
+        );
+
+        let status = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                &base64_utf16(&script),
+            ])
+            .status()
+            .expect("powershell 该能起");
+        assert!(status.success(), "替换脚本退出 {status}");
+
+        assert_eq!(
+            std::fs::read(install.join("celira-app.exe")).expect("install 还在"),
+            b"NEW",
+            "install 现在应该是新内容"
+        );
+        let old = root.join("celira-app.old-test");
+        assert_eq!(
+            std::fs::read(old.join("celira-app.exe")).expect(".old 该留着"),
+            b"OLD",
+            ".old 应该是旧内容（回滚点）"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
