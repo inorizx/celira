@@ -118,7 +118,18 @@ function Find-ReleaseByTag {
     param([string]$Repo, [string]$Tag, [string]$Token)
     $uri = '{0}/repos/{1}/releases/tags/{2}' -f $API_ROOT, $Repo, $Tag
     try {
-        return @{ found = $true; release = (Invoke-GiteeGet -Uri $uri -Token $Token) }
+        $release = Invoke-GiteeGet -Uri $uri -Token $Token
+        # Gitee answers 200 with the body `null` for a tag that has no release - it does NOT use
+        # 404 here. Treating that as "found" made -Check say a release existed with id '' and made
+        # the upload path try to attach to nowhere (measured 2026-10-21, first real call).
+        # The body arrives as the STRING 'null' (the response is served as text/plain), so both
+        # shapes have to be refused - a JSON null and its textual twin are the same answer.
+        if ($null -eq $release) { return @{ found = $false; release = $null } }
+        if ($release -is [string] -and ($release.Trim() -eq '' -or $release.Trim() -eq 'null')) {
+            return @{ found = $false; release = $null }
+        }
+        if ($release -is [array] -and @($release).Count -eq 0) { return @{ found = $false; release = $null } }
+        return @{ found = $true; release = $release }
     } catch {
         $status = $null
         if ($_.Exception.PSObject.Properties.Name -contains 'Response' -and $_.Exception.Response) {
