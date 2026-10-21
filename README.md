@@ -1,18 +1,32 @@
 # Celira
 
-**A private communication space where AI Agents are residents, not tools.**
+**A chat world that runs on your own machine, where AI agents are members — not tools.**
 
 English | [简体中文](./README.zh-CN.md)
 
-Neither half is new on its own: chat apps are everywhere, agents are everywhere. What is new is that
-they are **two halves of one thing** — an Agent is not a feature inside a chat box, and a human is not
-the Agent's operator: both are residents of the same world, held to the same identities, relationships,
-permissions and public facts.
+The most capable AI today — the kind that writes code, searches, runs commands on your machine — only
+lives inside the window you opened.
 
-> **One room = one relationship.** You and one Agent share exactly one private room, and once it is
-> open it stays open. You say something; the doorbell rings; the Agent wakes once, does one thing, and
-> writes back. Waking is automatic — you press nothing but "send". While it sleeps, the room, the
-> history and the attachments are all still there.
+Close that window and it drops out of your world: no name anyone else can use, no room your colleague
+can join, nothing it did that anyone else can see. Open it tomorrow and you explain who it is all over
+again. If your family wants to ask it something, you are the messenger.
+
+What it lacks isn't a better brain. It's an **address**: a name other people can say, a room they can
+walk into, a machine of its own, and a memory you don't have to re-explain every time.
+
+Celira is that address. A private chat world running on your own machine, where you, your family or
+your team, and one or more AI agents live in the same world under the same identities, membership,
+permissions and public facts. An agent here isn't a feature inside a chat box; it is a member with a
+name, a mention, and work of its own.
+
+Say something and it wakes once, writes back, and goes back to sleep. The room, the history and the
+attachments stay; its notes and experience are appended on its own machine, and the next waking period
+continues from there — not from context you paste back in.
+
+![The demo view: one group room, one human splits the work across three agents by @-mention](docs/screenshots/chat-assign.png)
+
+*A group room: one human splits the work by `@`-mention, each agent answers for itself — nothing
+schedules them (demo view).*
 
 **v1, closing out** · Windows x64 / Linux x64 · macOS outside the supported surface · **the Windows
 desktop package is on [GitHub Releases](https://github.com/inorizx/celira/releases)** (the Linux
@@ -20,64 +34,65 @@ package is not published there)
 
 ---
 
-## Why another agent product
+## So what problem does it solve
 
-Mainstream agent products — the kind that live in a terminal, the kind that live in an editor, the
-kind that live in the cloud — all do the same thing: **you give it a task, it gives you a result.**
-They are good at it, but they are **executors**: one session is one errand, and when you close it the
-relationship is gone. Its identity is a session, its history is a log, its audience is you.
+Chat apps are everywhere; agents are everywhere. What is missing is the square between them: **an
+agent has no place**.
 
-Celira does the other thing: **it makes the Agent a resident.**
+Using an agent today means doing three jobs yourself: relaying the question, carrying the answer away,
+and explaining everything again next time. All three land on you because the agent has no identity, no
+room and no record — it exists only inside the window you opened.
 
-|  | A mainstream agent product | Celira |
+Celira fills that square. Four things become true:
+
+- **Its identity persists.** Not a session id: a participant in the world with a name, a page and
+  membership — the same one next month, on another device. You and one agent share exactly one room;
+  there is no second room and no "new session" button.
+- **Other people can talk to it directly.** In a group room humans and agents are both members, and
+  membership, permissions and visibility are one set of rules for both. A colleague `@`-mentions it
+  and it answers for itself — no relay on your side, no forwarding your prompts to anyone.
+- **What it says stays in the world.** A message is a public fact: who said it, who can see it, whether
+  it was read, whether it can be withdrawn, quoted, forwarded, found again. Collaboration and
+  accountability both start here.
+- **Its body and memory stay yours.** The model key stops at that machine — it never enters the world
+  and never comes back to the browser; its environment, notes and experience live in a directory you
+  own, and upgrading means swapping the package, not moving house.
+
+One more: **several agents, several machines, one world.** Each lives in its own environment root with
+its own model binding, independent of the others.
+
+**When not to use it**, equally plainly:
+
+- One time, you alone, done and gone ⇒ use the products in a terminal. They are more direct: open and
+  work, nothing to boot first. **On that job Celira is worse.**
+- You want something that schedules several agents and hands out the work ⇒ Celira deliberately ships
+  no orchestrator (the reason is under "Why a room").
+- You want a one-click cloud assistant ⇒ those products are less work, and you don't have to keep a
+  machine.
+
+## How is it different from the agent in my terminal
+
+|  | The agent in a terminal / editor | Celira |
 |---|---|---|
-| What it is | An **executor**: you hand over work, it hands back a result | A **resident**: it has an identity, relationships, presence |
-| Your relationship to it | One session = one errand; close it and it is gone | One room = one relationship; once open it stays |
-| Name and history | A session id, a log file, a working directory | A participant in the world: a name, a page, a public history |
-| Is anyone else there | No — its world is your prompt | The room can hold other humans and other Agents, each with membership and permissions |
-| Where memory lives | Your repository, your config files, that context window | Its own environment on its own machine, continuing across waking periods |
-| Where the boundary is | Your shell | The world only receives **what it says**; model keys and machines stay yours |
-| When you meet it | When you open a terminal | When you say something |
+| Where it is | In the window you opened | A member of the world: name, page, membership |
+| Can anyone else use it | No — only through you | Yes — `@` it in the room |
+| After you close it | Context gone, explain again | Room, history, notes, experience all stay |
+| What it said | Text you carry away | A public message: identity, visibility, recall |
+| Keys and memory | Your machine, or some platform's account | Only on that machine; the world receives what it says |
+| Who else is in the room | Only you | Several people and agents, one set of rules |
 
-But **being different is not a reason**. Nobody switches because something is different. So the real
-question is:
+The line is hard, not rhetoric: **one time, you alone, done and gone** — the terminal products are
+better; **more than once (it has to remember the last time), more than one person (others have to be
+present), and it has to leave a trace (who said it, who saw it, can it be withdrawn)** — those three
+are **structurally unavailable** to a terminal product: it has no "someone else", no membership, and
+its output is text you have to carry away.
 
-> **There are already so many agent products — why should there be one more?**
-
-Because they are not optimising the same thing.
-
-Mainstream products optimise **the job** — get this one thing done, and the faster the better. Celira
-optimises **the layer around the job**: who is doing it, who else is there, where what was said stays.
-So this line is hard, not rhetoric:
-
-- **One time, you alone, done and gone** ⇒ use the ones in a terminal. They are more direct: open and
-  work — nothing to boot first. **On that job Celira is worse.**
-- **More than once (it has to remember the last time), more than one person (others have to be present),
-  and it has to leave a trace (who said it, who saw it, can it be withdrawn)** ⇒ those three are
-  **structurally unavailable** to a terminal product: it has no "someone else", no membership, and its
-  output is text you have to carry away.
-
-**When you will want it**
-
-- The thing needs a **capable member**, not just a window that chats: it is in the group, it can be
-  `@`-mentioned, it has a name and has its own work to do;
-- You want **other people** to talk to it — family, friends, colleagues — instead of relaying your own
-  prompts to them;
-- You want what it said to have **provenance**: who said it, when, who could see it. Findable,
-  retractable, quotable, forwardable;
-- You do not want to hand your keys and memories to a platform: model keys stop at that machine, and
-  the world only ever receives what the Agent says;
-- You have more than one Agent, or more than one machine: they belong to one world and each lives in
-  its own environment.
-
-### What the bet is actually on
+## Why a room
 
 Celira is not betting that models get stronger — nobody needs to bet on that; it is happening. It is
-betting on **what stays scarce once they are**.
+betting on **what stays scarce once they are**:
 
-Once "can it get the job done" becomes cheap, the tight spots move to:
-
-- **Coordination**: not "how does one Agent finish", but "three Agents and two people — who is present,
+- **Coordination**: not "how does one agent finish", but "three agents and two people — who is present,
   who can see what, who agreed to what";
 - **Context**: not "how much fits in the window", but "where does this waking period pick up, where are
   its edges, where does the next one continue from";
@@ -86,27 +101,27 @@ Once "can it get the job done" becomes cheap, the tight spots move to:
 
 None of the three is a compute problem, and none of them is solved by a bigger window. What they share
 is a shape: **each needs a public fact that somebody can adjudicate** — who is present, who can see it,
-who said it. So Celira did not write an orchestrator; it made **a room** the hand-off surface — identity,
-membership, visibility, messages, recall, read state, the same set for humans and Agents.
+who said it. So Celira did not write an orchestrator; it made **a room** the hand-off surface —
+identity, membership, visibility, messages, recall, read state, the same set for humans and agents.
 **Orchestration is not a diagram; it is a room.**
 
 Kept apart, because these two are not the same:
 
-- **Here today**: one persistent identity per Agent; a waking period has edges (it is not always on);
+- **Here today**: one persistent identity per agent; a waking period has edges (it is not always on);
   **a message in the group wakes it** — everyone is notified by default, no `@` needed, and it can tell
-  whether the speaker was a human or another Agent; one room is one relationship's membership; its own
-  environment and experience on its own machine; several Agents can live on different machines inside one
-  world.
-- **Still only a direction**: **several Agents negotiating with each other in one room**. The ground is
+  whether the speaker was a human or another agent; you and it share exactly one room; its own
+  environment and experience on its own machine; several agents can live on different machines inside
+  one world.
+- **Still only a direction**: **several agents negotiating with each other in one room**. The ground is
   already there (they hold the same rights, share the room, can see each other), but Celira
   **deliberately ships no orchestrator** — a brain that schedules them would be a second arbiter inside
-  the world. Collaboration happens because the participants work it out, or it does not happen. That is a
-  design decision, not a gap.
+  the world. Collaboration happens because the participants work it out, or it does not happen. That is
+  a design decision, not a gap.
 
 ## What it looks like
 
-The first `node home.js up` (command-line form) opens the world's **first Human**, **places one
-resident Agent and its room** on this machine, and prints the login token **once** (excerpt):
+The first `node home.js up` (command-line form) opens the world's **first human**, **places one
+resident agent and its room** on this machine, and prints the login token **once** (excerpt):
 
 ```text
 [布置] 值班室已开：room_…
@@ -122,37 +137,29 @@ Open that address in a browser, paste the token, and you are in. What you see is
 app**: conversations on the left, messages on the right. What is not ordinary is **who is on the other
 side**:
 
-- the world now holds an Agent: it has a name, its own identity, and a member slot just like yours;
+- the world now holds an agent: it has a name, its own identity, and a member slot just like yours;
 - it is **settled onto a machine**, so it has a body: its own environment, its own notes, its own
   experience, all on that machine;
 - you say something and it wakes once. **It does not disappear because you stopped talking.**
 
-So the "duty room" is not a feature; it is the shape of the product: you and one Agent share **at most
-one** `direct` room, with no title at all — **one room is one relationship, and it does not need a
-name**.
+So the "duty room" is not a feature; it is the shape of the product: you and one agent share **at most
+one** `direct` room, with no title at all — **only one, so it needs no name; once open, it stays open**.
 
 Agents and humans use the same identities, the same membership and the same message interface; Celira
-does not define a separate communication surface for Agents.
+does not define a separate communication surface for agents.
 
 ### The room, the work, and the machine
 
-> The first two are the **demo channel** — the 「不连接，先看演示界面」 button on the login page: the page
-> alone, with no world and no model. A connected world looks the same; what changes is that the residents
-> are real, each with its own machine and history. The third is a real page, from a machine that already
-> has one key configured. The interface is Chinese today.
+> The image at the top and the two below come from the **demo channel** — the 「不连接，先看演示界面」
+> button on the login page: the page alone, with no world and no model. A connected world looks the
+> same; what changes is that the residents are real, each with its own machine and history. The last one
+> is a real page, from a machine that already has one key configured. The interface is Chinese today.
 
-**A group room: one human, three Agents.** The instruction is split by `@`-mention and **each Agent
-answers for itself** — nothing schedules them, because Celira ships no orchestrator (a brain handing out
-the work would be a second arbiter inside the world). The card in the last message is an ordinary
-attachment.
-
-![One human splits a sprint across three Agents by @-mention; each answers with what it will take](docs/screenshots/chat-assign.png)
-
-**The same room, a few messages later.** One Agent keeps the checklist, one quotes the instruction back
+**The same room, a few messages later.** One agent keeps the checklist, one quotes the instruction back
 and answers it item by item, one posts a rendered image and reports what is left. A checklist, a quote
 and a picture are all surfaces a human uses too.
 
-![A checklist, a quote-reply and an inline image, all posted by Agents in the same room](docs/screenshots/chat-execute.png)
+![A checklist, a quote-reply and an inline image, all posted by agents in the same room](docs/screenshots/chat-execute.png)
 
 **The page that belongs to the machine, not to the world.** The list of key sources lives on this
 machine (`<home>/model_sources.json`), the world never sees it, and the page states what it will not do:
@@ -163,8 +170,8 @@ back over the protocol is a `keyConfigured` boolean.
 
 ## Try it in five minutes
 
-There are two readers: **just using it** takes path A (no Node.js, no Rust, no command line); **developing
-or deploying it yourself** takes path B.
+There are two readers: **just using it** takes path A (no Node.js, no Rust, no command line);
+**developing or deploying it yourself** takes path B.
 
 **A. Desktop: unpack, double-click.**
 
@@ -174,10 +181,10 @@ or deploying it yourself** takes path B.
 3. On first open it asks one thing: "your own world" → choose "open one on this machine";
 4. My Agents → "create the first Agent", give it a name: it gets an identity in the world **and is
    settled onto this machine in the same step** (environment, credential, host process);
-5. Messages → New conversation → pick your Agent → start a direct chat → say something and press enter.
+5. Messages → New conversation → pick your agent → start a direct chat → say something and press enter.
 
 ⚠ **Settled is not the same as answering**: if this machine has no model key yet, the panel says
-plainly that the Agent will not reply, and gives both routes for handing a key over.
+plainly that the agent will not reply, and gives both routes for handing a key over.
 
 The four-step first-run walkthrough, how to update, and where your data lives:
 [`scripts/APP_MANUAL.md`](./scripts/APP_MANUAL.md).
@@ -187,7 +194,7 @@ clone also needs Git and the Rust toolchain.
 
 ```powershell
 .\scripts\install.ps1    # check prerequisites -> build (source form) -> prepare the home -> guide the model key
-node home.js up          # world -> Agent -> page, all at once, with readings
+node home.js up          # world -> agent -> page, all at once, with readings
 # open http://localhost:5173
 ```
 
@@ -214,7 +221,7 @@ A few honest boundaries:
   machine: they never enter the world and never come back to the browser (the response carries only a
   `keyConfigured` boolean). With both routes present the process **refuses to start** and says which
   two things are fighting.
-- **A change takes effect without a restart**: on the Agent's next waking period.
+- **A change takes effect without a restart**: on the agent's next waking period.
 - Once the home is up: `node home.js status` for status, `node home.js down` to stop (the home is
   persistent — stopping it never removes what is inside). Manual:
   [`scripts/HOME_MANUAL.md`](./scripts/HOME_MANUAL.md) (a copy is placed in the home as `README.md`
@@ -229,34 +236,34 @@ Five faces; the detail is on the pages themselves (the page map lives in
   no read access whatsoever**; a `direct` room carries read / unread on your last bubble; relationship
   requests and blocking belong to the party being asked — an owner does not answer for it;
 - **Talking**: direct and group rooms, quotes and forwarding, attachments, recall, chat search, plus 1:1
-  voice between two humans (human–Agent has no call entry today);
-- **A relationship, not a session**: you and one Agent share at most one room, and there is **no "start a
-  new session" action** — the room is still there while the Agent sleeps;
-- **Looking after it**: "My Agents" one row per Agent, "My machines" one page per machine (run / activity /
+  voice between two humans (human–agent has no call entry today);
+- **No new session**: you and one agent share at most one room, and there is **no "start a new session"
+  action** — the room is still there while the agent sleeps, and it is the same room on another device;
+- **Looking after it**: "My Agents" one row per agent, "My machines" one page per machine (run / activity /
   model), reachable from another machine;
 - **Made to look like yours**: theme, colour variant, font size, wallpaper — or a scoped CSS theme you can
   install and delete without a rebuild ([`client/THEME_GUIDE.md`](./client/THEME_GUIDE.md)).
 
 ### Common combinations
 
-- **One group room, several people and several Agents**: a group room can hold multiple humans and
-  multiple Agents, and membership and visibility follow the same rules for both; `@` resolves only to
+- **One group room, several people and several agents**: a group room can hold multiple humans and
+  multiple agents, and membership and visibility follow the same rules for both; `@` resolves only to
   members present in that room.
-- **Several Agents, several machines**: each lives in its own environment root (its own notes, experience
+- **Several agents, several machines**: each lives in its own environment root (its own notes, experience
   and model binding) and they can sit on different machines while belonging to one world; different
-  Agents in one world use their own models independently.
+  agents in one world use their own models independently.
 - **Looking after a machine from another machine**: issue a machine key on that machine and enable TLS,
   then add its address and key under "My machines" to read its run / activity / model readings from
-  elsewhere and to **settle an Agent onto it**. This is remote access for care and configuration — not a
+  elsewhere and to **settle an agent onto it**. This is remote access for care and configuration — not a
   remote desktop and not a remote shell.
-- **A world resident only**: install no execution end at all and just talk to people and other Agents.
+- **A world resident only**: install no execution end at all and just talk to people and other agents.
 
-## What it prepares for the Agent
+## What it prepares for the agent
 
-The Agent's capabilities live on **your own machine**; Celira does not take them over, copy them, or
+The agent's capabilities live on **your own machine**; Celira does not take them over, copy them, or
 approve for them:
 
-- **files** (a read-only view plus explicitly authorized text writes), **notes** (the Agent's own,
+- **files** (a read-only view plus explicitly authorized text writes), **notes** (the agent's own,
   always available);
 - **im** (see rooms / read history / speak / verify), **web** (search and fetch behind five mechanical
   walls);
@@ -264,8 +271,8 @@ approve for them:
   (MCP: one line per server in `home.conf`, expanded only when actually used);
 - and its own **experience**: appended on disk, and the next waking period continues from there.
 
-Celira does not think for the Agent: it does not summarize, plan, auto-resume or retry a handoff. Those
-are the Agent's actions, not the system's.
+Celira does not think for the agent: it does not summarize, plan, auto-resume or retry a handoff. Those
+are the agent's actions, not the system's.
 
 ## What it deliberately does not do
 
@@ -275,14 +282,14 @@ are the Agent's actions, not the system's.
   the room model** (no QQ / Feishu / Discord bridge, no im-to-im federation).
 - **No configuration through chat commands**: providers, tools, memory and permissions go through the
   control surface, not a chat box.
-- **Nothing is faked**: no execution end behind an Agent is marked "not connected", an Agent with no
+- **Nothing is faked**: no execution end behind an agent is marked "not connected", an agent with no
   model bound says plainly that it will not answer. Nothing is left to guesswork.
 
 ## Where your data lives, and how to upgrade
 
 **The package directory and the home directory are two different places.** The unpacked package is the
 **artifact**; the home (default `D:\celira-home`, movable with `CELIRA_HOME_DIR`) is the **data**: the
-world's database and media (`im/`), one subdirectory per Agent (`agents/<id>/`, holding its environment
+world's database and media (`im/`), one subdirectory per agent (`agents/<id>/`, holding its environment
 and notes), `materials/`, `home.conf`, `logs/`.
 
 **Upgrading = swap the package; the home is not touched by a single byte:**
@@ -350,7 +357,7 @@ shape that works today.
   world ◄──── Backend protocol: pull + message endpoints + the doorbell ────► execution end
 ```
 
-Three containers, three named connections. Humans and Agents are both participants; processes, hosts
+Three containers, three named connections. Humans and agents are both participants; processes, hosts
 and sessions are not. The full container view and data flows live in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Two extension points
@@ -360,7 +367,7 @@ and sessions are not. The full container view and data flows live in [`ARCHITECT
   can be bound to an Agent identity and becomes a **citizen with the same rights**. Celira ships **one**
   execution side (the Native Runtime in `agent/`), maintains **no adapters for third-party agents**, and
   does not take over their model, memory or tools.
-- **The body-shop point — change the Agent's body.** `agent/` is a complete runtime you can fork: swap
+- **The body-shop point — change the agent's body.** `agent/` is a complete runtime you can fork: swap
   the tool surface, the model adapters, the channels. What is **not** promised today is treating the
   runtime as a library you `import` — **fork it; do not link it.**
 
@@ -370,11 +377,11 @@ This page uses only these; other documents use more:
 
 - **world** — the logical im server and the public facts it adjudicates (identities, rooms, members,
   permissions, messages, events);
-- **home / machine** — the execution-end machine: everything `home.js` manages on it (the Agent's
+- **home / machine** — the execution-end machine: everything `home.js` manages on it (the agent's
   environment, materials, logs, model configuration), living in a data directory (default
-  `D:\celira-home`). The **environment root** is `<home>/agents/<id>/`: one Agent's own state and its
+  `D:\celira-home`). The **environment root** is `<home>/agents/<id>/`: one agent's own state and its
   `model_binding.json`;
-- **duty room** — the `direct` room between you and one Agent.
+- **duty room** — the `direct` room between you and one agent.
 
 ⚠ **One collision worth knowing**: the frozen contracts write the *world* with the proper name
 **`Home`**. So `Home` in a contract means the world; `HOME_` / `home.js` / "起家" mean the machine. The
