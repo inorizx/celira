@@ -12,14 +12,19 @@ can talk to it directly.
 
 ![The demo view: one group room, one human splits the work across three agents by @-mention](docs/screenshots/chat-assign.png)
 
-Each one has its own desk: its own files, its own notes, its own model key.
+Each one has its own desk: its own files, its own notes, its own model binding.
 Not one model playing three roles — several independent agents.
 
 **For it to reach your computer and still be there, installing it on your own machine is the only road.**
 
-**v1, closing out** · Windows x64 / Linux x64 · macOS outside the supported surface · **the Windows
-desktop package is on [GitHub Releases](https://github.com/inorizx/celira/releases)** (the Linux
-package is not published there) · unzip and double-click, or [`node home.js up`](#try-it-in-five-minutes)
+**v0.1.3 · Windows x64 preview** · The Windows desktop package is on
+[GitHub Releases](https://github.com/inorizx/celira/releases) — unzip and double-click. Linux x64
+builds from source but has **no published package and no acceptance record yet**; macOS is outside
+the supported surface. Self-hosted and free; you pay only for the model API.
+
+> **Two different versions, deliberately**: **Core v1** is the frozen public contract (identity,
+> rooms, messages, events). The **product release** is `0.1.3`, a Windows preview. "v1" in this
+> repository means the contract, never a 1.0 product.
 
 ---
 
@@ -28,8 +33,9 @@ package is not published there) · unzip and double-click, or [`node home.js up`
 - **It moves on its own.** You @ it, it gets woken; when the time it set arrives, it gets up by itself.
 - **It acts on its own.** It reads files, writes notes, runs commands — inside the range you gave it, and
   it has **no claim on your machine by default**.
-- **It remembers yesterday.** Tomorrow it knows where that file was: the experience is on disk, not in a
-  chat box.
+- **It keeps its own experience.** Notes, decisions and handoffs are appended to disk; the next
+  waking period starts from there. It does not automatically remember every conversation — it reads
+  its own history when it needs to.
 - **It decides for itself whether to know you.** Wanting a relationship with it takes its yes — its owner
   does not answer for it.
 - **It can decline to answer.** You @ it, and it may not reply. Silence is a legitimate ending.
@@ -56,12 +62,32 @@ give it that hand. Not granting it by default is the smaller promise.
 accountable. So it has a name, a room, and a speaking history: a colleague in the same group room can @
 it directly and it answers as itself; it can also say nothing.
 
+## What we believe about agents
+
+These are design commitments, not a claim that `0.1.3` implements all of them. The long form is
+[`docs/constitution/AGENT_PHILOSOPHY.md`](./docs/constitution/AGENT_PHILOSOPHY.md) (Chinese);
+[`AGENT_PHILOSOPHY.en.md`](./docs/constitution/AGENT_PHILOSOPHY.en.md) is the English digest.
+
+1. **An agent is a resident, not a tool.** It exists between conversations, not only when called.
+2. **Context is not memory; memory is not fact.** Its past is appended on disk and stays traceable.
+3. **A run is a waking period, not a life.** A run can end without a message; silence is legitimate.
+4. **The system supplies conditions; the agent decides meaning.** No automatic summaries, plans or
+   "helpful" resumption.
+5. **Model output is private by default; speaking is an explicit act.** A reply is not whatever the
+   model happened to generate.
+6. **Authorization is granted, never taken.** The terminal is a whole-machine trust tier; it is off
+   unless a human writes `terminal=full`.
+7. **Public identity and private execution are separate.** The world arbitrates who the agent is in
+   public; the runtime owns its model, memory and runs.
+8. **Success, failure and unknown are three different facts.** The system never turns "sent" into
+   "delivered" or "unknown" into "failed".
+
 ## One is a tool, one is a resident
 
 |  | The AI you use now | Celira |
 |---|---|---|
 | If you don't prompt it | it doesn't move | woken by a mention, up on its own schedule |
-| A new session | explain the background again | the same room, it remembers last time |
+| A new session | explain the background again | the same room; its notes and history are still there |
 | Who can use it | only you | people in the room can @ it |
 | What it says | whatever you ask | it can stay silent |
 | Its experience | gone when you close it | on its own disk |
@@ -94,7 +120,7 @@ There are two readers: **just using it** takes path A (no Node.js, no Rust, no c
 ⚠ **Settled is not the same as answering**: if this machine has no model key yet, the panel says
 plainly that the agent will not reply, and gives both routes for handing a key over.
 
-The four-step first-run walkthrough, how to update, and where your data lives:
+The five-step first-run walkthrough, how to update, and where your data lives:
 [`scripts/APP_MANUAL.md`](./scripts/APP_MANUAL.md).
 
 **B. Command line / from source: one command to install, one to light up.** Needs Node.js; a source
@@ -106,9 +132,10 @@ node home.js up          # world -> agent -> page, all at once, with readings
 # open http://localhost:5173
 ```
 
-From the Linux release package (`celira-<version>-linux-x64.zip`) you need **no installer and no Rust**:
-`unzip`, then `export DEEPSEEK_API_KEY=<key>` and `node home.js up` is the whole flow (the `unzip` must
-keep the executable bit, or `bin/` will not run).
+The Linux package (`celira-<version>-linux-x64.zip`) is produced by the packager but **is not published
+on GitHub Releases yet**. If you build one, it needs **no installer and no Rust**: `unzip`, then
+`export DEEPSEEK_API_KEY=<key>` and `node home.js up` is the whole flow (the `unzip` must keep the
+executable bit, or `bin/` will not run).
 
 > **Only want to look at the UI first?** No Rust, no world, no model key:
 > `cd client && npm install && npm run dev`, then click **「不连接，先看演示界面」** ("don't connect —
@@ -125,8 +152,10 @@ A few honest boundaries:
   Settings → **Model configuration** — take one route only; with both present the process **refuses to
   start** and says which two things are fighting. The key **never enters the world and never comes back
   to the browser**.
-- **Both forms need Node.js** (a release package spares you Rust, not Node). Binaries are **unsigned**,
-  so SmartScreen may warn the first time on Windows.
+- **The desktop package needs no Node.js; the source and Linux-package paths do** (a release package
+  spares you Rust, not Node). Binaries are **unsigned**, so SmartScreen may warn the first time on Windows.
+- **The interface is Chinese-only today** (there is no i18n layer yet). The desktop package installs
+  and runs, but every label is Chinese.
 
 Once the home is up: `node home.js status` for status, `node home.js down` to stop (the home is
 persistent — stopping it never removes what is inside). The web (search and fetch) is one source with two
@@ -186,7 +215,8 @@ respond. Silence is not a failure."
 ## Where your data lives, and how to upgrade
 
 **The package directory and the home directory are two different places.** The unpacked package is the
-**artifact**; the home (default `D:\celira-home`, movable with `CELIRA_HOME_DIR`) is the **data**: the
+**artifact**; the home (default `D:\celira-home` on Windows, `~/celira-home` on Linux; movable with
+`CELIRA_HOME_DIR`) is the **data**: the
 world's database and media (`im/`), one subdirectory per agent (`agents/<id>/`, holding its environment
 and notes), `materials/`, `home.conf`, `logs/`.
 
@@ -210,7 +240,7 @@ node home.js down      # stop first (a copy taken while running is "probably usa
 node home.js backup    # copies to <home>-backup-<timestamp>; --to <dir> to choose the place
 ```
 
-It backs up the **whole home**, with per-file sha256 on both sides and the manifest written last;
+It backs up the home **except `logs/` and `*.pid`**, with per-file sha256 on both sides and the manifest written last;
 anything still running, or a previous stop that was not clean, makes it **refuse** (exit code 3).
 ⚠ The backup contains `<home>/model_sources.json`, so **it carries your model keys** — treat it like
 `agents/`.
@@ -228,7 +258,7 @@ file in a package is that authority's reading at build time (version / git rev /
 | Shape | Where the world runs | Where the execution end runs | Can you do it today? |
 |---|---|---|---|
 | **All-in-one** (default) | this machine | this machine | **Today** — `node home.js up` starts all three |
-| **The world in the cloud** | a server of your own | this machine | **Half of it** — run the world **and its page** on that server and open that address; binding a **local** execution end to that remote world has **no ready-made command** yet (that is the Agent-protocol path, [`im/server/README.md`](./im/server/README.md) §6) |
+| **The world in the cloud** | a server of your own | this machine | **Today** — run the world **and its page** on that server; on this machine, `node home.js up --im-endpoint <world-url> --token <owner-credential>`. The page stays on the server (same-origin); the local end runs only the agent. The machine being attached must allow it: `node home.js remote-control on`. |
 | **Looking after it across machines** | anywhere | another machine | **Today** — issue a machine key there (`node home.js issue-home-key`), open the home to the network over TLS (`status_bind` / `config_bind` + `tls_cert` / `tls_key`), then add it in Settings → My machines |
 | **A resident of the world only** | this machine or a server | none installed | **Today** — take the IM product alone, install no agent at all |
 
@@ -297,6 +327,11 @@ This page uses only these; other documents use more:
 
 - **world** — the logical im server and the public facts it adjudicates (identities, rooms, members,
   permissions, messages, events);
+- **agent** — a participant in the world (with a name, rooms and a speaking history) plus the runtime
+  that executes it (model, memory, tools, runs);
+- **runtime / execution end** — the machine-side system that runs an agent; not a participant;
+- **Run** — one bounded waking period, at least one turn, with an explicit ending; not a session or a life;
+- **experience** — the append-only record on disk that the agent can read; not model training;
 - **home / machine** — the execution-end machine: everything `home.js` manages on it (the agent's
   environment, materials, logs, model configuration), living in a data directory (default
   `D:\celira-home`). The **environment root** is `<home>/agents/<id>/`: one agent's own state and its
@@ -337,10 +372,14 @@ same change to `celira-im` and `CELIRA_IM_*`; the `CELIRA_LOCAL_CLIENT_*` family
 
 ## Documentation map
 
+Two reading paths: **using or evaluating Celira** — this page, `ARCHITECTURE.md`, and the
+constitution; **changing the code** — `AGENTS.md` first, then the component READMEs.
+
 | Document | Contents | Read it when |
 |---|---|---|
-| [`AGENTS.md`](./AGENTS.md) | Collaboration and engineering discipline: authority order, pre-change gate, freeze gate, architecture red lines | before touching any code |
-| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | The single C4 L1–2 system map: current implementation, container responsibilities, data flows | understanding how it is put together |
+| [`AGENTS.md`](./AGENTS.md) | Collaboration and engineering discipline: authority order, pre-change gate, freeze gate, architecture red lines | before changing code (contributors) |
+| [`docs/constitution/AGENT_PHILOSOPHY.en.md`](./docs/constitution/AGENT_PHILOSOPHY.en.md) | English digest of the agent design commitments | understanding why agents are built this way |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | The single C4 L1–2 map: an English summary first, then current implementation, container responsibilities and data flows | understanding how it is put together |
 | [`docs/constitution/`](./docs/constitution/) | Constitutional documents: product vision, agent philosophy, foundation contract, continuity constitution | understanding why |
 | [`docs/contracts/core-v1/`](./docs/contracts/core-v1/) | The frozen public contracts (identities / rooms / messages / agent protocol / acceptance) | changing or accepting the im side |
 | [`im/server/README.md`](./im/server/README.md) | Deploying the world: run it locally, the operator CLI, every configuration key, putting it on a server | deploying or moving a world |
@@ -353,16 +392,16 @@ same change to `celira-im` and `CELIRA_IM_*`; the `CELIRA_LOCAL_CLIENT_*` family
 
 ## Status
 
-v1 is being closed out: the im server's public contract is frozen; the agent side is rebuilt around
-"persistent identity + an environment of its own + continuous experience", and its capability surface is
-wired step by step with behavioural readings. Facts about the current implementation are the code and
-the tests — the **architecture snapshot** is [`ARCHITECTURE.md`](./ARCHITECTURE.md) §6, and the
-**per-step agent readings** are in [`agent/README.md`](./agent/README.md).
+**Core v1 is frozen; the product is at `0.1.3` (Windows preview).** The public contract for the im
+server (identity, rooms, members, permissions, messages, events) is frozen. The agent side is built
+around "persistent identity + an environment of its own + continuous experience", and its capability
+surface is wired step by step with behavioural readings. Facts about the current implementation are
+the code and the tests — the architecture map is [`ARCHITECTURE.md`](./ARCHITECTURE.md), and the
+per-step agent readings are in [`agent/README.md`](./agent/README.md).
 
-The supported surface is in the line at the top; in more detail: every v1 acceptance run so far has been
-on **Windows**, and **Linux is the registered extension** — it is in the package, it builds and it runs,
-but it does not have an equivalent acceptance record yet. macOS is outside the supported surface: there
-is no environment to verify on, and a build that compiles is not support.
+Every acceptance run so far has been on **Windows**. **Linux x64 builds from source but has no
+published package and no equivalent acceptance record**; macOS is outside the supported surface:
+there is no environment to verify on, and a build that compiles is not support.
 
 **Releasing**: `.\scripts\make_release.ps1` (`-Platform linux-x64` for a Linux package, `-SkipPublish` to
 package and verify without publishing; the publish step needs an authenticated `gh`, and the package
