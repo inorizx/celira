@@ -34,6 +34,7 @@ import {
 } from '@/api/homeConfig'
 import type { HomeEntry } from '@/api/homes'
 import { useHomeEntryList } from '@/components/celira/use-home-entries'
+import { validateEndpointAddress } from '@/api/endpoint'
 import {
   CUSTOM_PRESET_ID,
   CUSTOM_ROW,
@@ -430,6 +431,17 @@ export function ModelProvidersPage({ onBack }: ModelProvidersPageProps) {
   /** 保存表单里那一条：改它已有的那条（**不动指定**）或给这一家新加一条（**保存即启用**）。 */
   const saveDraft = async () => {
     if (entry === null) return
+    // ★ **地址先过「完整线协议」那一道**（2026-10-23）：base 地址（`…/v1`）存得下来，
+    //   代价却推迟到运行时 —— `POST <base>` 回 404、被归类成 `request-rejected`，
+    //   用户只看到"请求被拒"，看不到"少了最后一段"。能在保存前判的，不留给运行时猜。
+    //   ⚠ 判据在 `api/endpoint.ts`（纯函数，有离线用例）；这里只负责**不往下走**并把那句
+    //   人话摆到现有的失败位（`actionError`：`role="alert"`、在表单最上面）。
+    const addressed = validateEndpointAddress(draft.endpoint, draft.protocol)
+    if (!addressed.ok) {
+      setActionError(addressed.message)
+      setNotice(null)
+      return
+    }
     if (editingEntry !== null) {
       // 带上门当前选中的**是哪一家**：窗口留空且试连也没问到时，门会拿它去随包那份对照表里**限家**查。
       const saved = await run('保存', () =>
