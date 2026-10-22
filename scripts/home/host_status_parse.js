@@ -16,7 +16,8 @@
  *   不取写资格），她正在跑活动时照样读得到账本。这一支保留只为**旧运行时的输出**——
  *   家脚本与运行时在发布形态里可能不是同一版，把旧输出读成"真故障"比多留一支更糟。
  *   （写者那一侧一字未改：环境仍然只有一个写者，`already-open` 仍是写命令的一等结果。）
- * - 不产出任何凭据：这个输出里本来就没有，解析器也不新增字段。
+ * - 不产出任何凭据：这个输出里本来就没有；解析器**只搬运文本里已有的段**（`[handoff]` 的
+ *   三态与摘要也是 CLI 写出来的），不自己造事实。
  */
 
 const HEADER = 'celira-agent-host-status v1'
@@ -115,6 +116,42 @@ function segment(lines, name, index) {
 }
 
 /**
+ * `[handoff]` 那一行（2026-10-22）：Agent 留给下一段自己的交接。
+ *
+ * 三种形状（**逐字**是 CLI 的写出形状）：
+ *
+ * ```text
+ * handoff=absent
+ * handoff=present bytes=64 digest=我干到第三步：正在等对面回话
+ * handoff=unreadable
+ * ```
+ *
+ * 三条纪律：
+ * - **`digest` 是这一行的最后一段**（摘要里的空白已被 CLI 折成单个空格）⇒ 用 `(.*)` 整吃，
+ *   不按空白切；
+ * - **`absent` 只来自 CLI 的那一个字**：这一节**整节缺席**（旧运行时）⇒ `null`（不知道），
+ *   **不冒充**「她没写」；
+ * - `present` 但形状读不懂 ⇒ **整体失败**（`malformed-handoff-line`），与 `[state]` 那条
+ *   「宁可整体失败，也不安静跳过」同一条纪律。
+ *
+ * @returns {{state:string, bytes?:number, digest?:string} | null | 'malformed'}
+ */
+function parseHandoff(lines) {
+  const raw = field(lines, 'handoff')
+  if (raw === null) return null
+  const value = raw.trim()
+  if (value === 'absent') return { state: 'absent' }
+  if (value === 'unreadable') return { state: 'unreadable' }
+  const match = /^present\s+bytes=(\d+)\s+digest=(.*)$/.exec(value)
+  if (!match) return 'malformed'
+  return {
+    state: 'present',
+    bytes: Number.parseInt(match[1], 10),
+    digest: match[2],
+  }
+}
+
+/**
  * @param {string} text `agent_host_status` 的 stdout+stderr 原文
  * @returns {{ok:true, value:object} | {ok:false, reason:string} | {ok:'busy'}}
  */
@@ -122,13 +159,18 @@ function parseHostStatus(text) {
   if (typeof text !== 'string' || text.length === 0) {
     return { ok: false, reason: 'empty' }
   }
-  // Agent 这一轮在跑活动：环境同时只有一个写者，读不到账本。这是一等结果。
-  if (text.includes('already-open')) {
-    return { ok: 'busy' }
-  }
 
   const lines = text.split(/\r?\n/).map((line) => line.trimEnd())
   if (lines[0] !== HEADER) {
+    // 没有版本头 ⇒ 这不是一份报告。唯一的一等非报告结果是"Agent 这一拍在忙"
+    // （`already-open` 打在 stderr 上，stdout 是空的）。
+    //
+    // ⚠ **这个判断必须在版本头之后**（2026-10-22）：报告里有**主体自己写的字**
+    // （`[handoff]` 的摘要、`[next]` 的正文）。里面出现 `already-open` 这几个字母，
+    // 不该把一份正常读数判成"Agent 在忙"——那会让页面在最需要读它的时候说错话。
+    if (text.includes('already-open')) {
+      return { ok: 'busy' }
+    }
     return { ok: false, reason: 'unknown-header' }
   }
 
@@ -181,12 +223,19 @@ function parseHostStatus(text) {
   // 一行三段：`activities-page=32 of=36 scope=latest`。
   const page = segment(head, 'activities-page', 0)
   const of = segment(head, 'activities-page', 1)
+  // 交接那一节：**只搬运**（三态 + 字节数 + 摘要），不解释、不转写。
+  const handoff = parseHandoff(head)
+  if (handoff === 'malformed') {
+    return { ok: false, reason: 'malformed-handoff-line' }
+  }
 
   return {
     ok: true,
     value: {
       environmentRoot: field(head, 'environment-root'),
       agent: field(head, 'agent'),
+      // `null` = 这一段读数里没有交接这一节（旧运行时）——**不是**「她没写」。
+      handoff,
       // **活动总数** —— 界面上的「活动次数 / 活动总数」要的就是它。
       activities:
         of === null || !of.startsWith('of=') ? null : Number.parseInt(of.slice('of='.length), 10),

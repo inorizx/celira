@@ -3,7 +3,8 @@
 //! 它证明的是**呈现**这件事本身：一条命令把已确认事实读成"它是谁 / 现在什么状态 / 我该不该出手"，
 //! 而且**一个字节都不写**。因此这一份用例的重点不是"输出好看"，而是：
 //!
-//! - 三节读数的**内容**与盘上事实逐项对得上（含 TASK_15 的 `failure=<class>`）；
+//! - 三节读数（identity / state / next）的**内容**与盘上事实逐项对得上（含 TASK_15 的
+//!   `failure=<class>`），外加 `[handoff]` 的三态与有界摘要；
 //! - `next` 那一行是**判定类目 × 准入**的机械映射（表驱动 + 反例）；
 //! - 退出码是**读数语义**（0/1/2/3 各是一条结论，不是"成功/失败"）；
 //! - 命令前后：两份存储、身份文件与目录成员**逐字节不变**。
@@ -19,6 +20,7 @@ use celira_agent::core::{HttpStatusDetail, ModelFailureClass, TransportDetail};
 use celira_agent::foundation::{
     AgentId, Outcome, Record, ResultState, RunId, SubjectEnding, SystemEnding,
 };
+use celira_agent::handoff::HANDOFF_FILE;
 use celira_agent::store::TracePayload;
 mod common;
 use common::{binary, create_environment, open_environment};
@@ -1344,4 +1346,131 @@ fn the_report_carries_absolute_time_anchors() {
             "{label} 只能是 unknown 或一个绝对时刻（RFC 3339 UTC）：{value}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// 交接读数（2026-10-22）：`[handoff]` 三态 + 有界摘要，**不给全文**
+// ---------------------------------------------------------------------------
+
+/// **没写过** ⇒ `absent`，而且既有三节一个字节都不动。
+#[test]
+fn a_missing_handoff_reads_as_absent_without_touching_the_other_sections() {
+    let fixture = Fixture::new("handoff-absent");
+    empty_environment(&fixture.env, AGENT);
+
+    let run = status(&fixture.env, &["--agent", AGENT]);
+    assert_eq!(code(&run), 0, "{}", stderr(&run));
+    let report = stdout(&run);
+    assert!(
+        report.contains("[handoff]\nhandoff=absent\n"),
+        "没写过就是 absent（不是空摘要）：{report}"
+    );
+    // 位置契约：`[handoff]` 在 `[state]` 之前，既有两节照旧。
+    assert!(
+        report.find("[handoff]").unwrap() < report.find("[state]").unwrap(),
+        "交接节必须在 [state] 之前：{report}"
+    );
+    assert!(report.contains("admission=ready\n"), "{report}");
+    assert!(report.contains("[next]\n"), "{report}");
+}
+
+/// **写了** ⇒ `present` + 字节数 + 摘要；短的一份摘要就是它的正文（单行化）。
+#[test]
+fn a_written_handoff_reads_as_present_with_bytes_and_digest() {
+    let fixture = Fixture::new("handoff-present");
+    empty_environment(&fixture.env, AGENT);
+    let text = "我干到第三步：正在等对面回话。\n下一段接着问。";
+    std::fs::write(fixture.env.join(HANDOFF_FILE), text).expect("写交接");
+
+    let run = status(&fixture.env, &["--agent", AGENT]);
+    assert_eq!(code(&run), 0, "{}", stderr(&run));
+    let report = stdout(&run);
+    let line = line_starting_with(&report, "handoff=");
+    assert!(
+        line.starts_with(&format!("handoff=present bytes={} digest=", text.len())),
+        "字节数必须是原文的 UTF-8 字节数：{line}"
+    );
+    let digest = line.split_once("digest=").expect("摘要").1;
+    // 空白折成单个空格 ⇒ 单行；内容原样（不概括、不改写）。
+    assert_eq!(digest, "我干到第三步：正在等对面回话。 下一段接着问。");
+}
+
+/// **读不到**（这里用目录顶替那一份）⇒ `unreadable`，**不冒充 absent**。
+#[test]
+fn an_unreadable_handoff_is_reported_as_unreadable_not_as_absent() {
+    let fixture = Fixture::new("handoff-unreadable");
+    empty_environment(&fixture.env, AGENT);
+    std::fs::create_dir(fixture.env.join(HANDOFF_FILE)).expect("用目录顶替那一份");
+
+    let run = status(&fixture.env, &["--agent", AGENT]);
+    assert_eq!(code(&run), 0, "{}", stderr(&run));
+    let report = stdout(&run);
+    assert!(
+        report.contains("[handoff]\nhandoff=unreadable\n"),
+        "读不到要说读不到：{report}"
+    );
+    assert!(
+        !report.contains("handoff=absent"),
+        "读不到不许冒充「她没写」：{report}"
+    );
+}
+
+/// **摘要 ≤160 B、按 UTF-8 字符边界截断，且全文一个字节都不出现**。
+#[test]
+fn a_long_handoff_digest_is_utf8_safe_bounded_and_never_the_full_text() {
+    let fixture = Fixture::new("handoff-long");
+    empty_environment(&fixture.env, AGENT);
+    // 每字 3 B：600 B ⇒ 一定超过 160 B 的上限。
+    let text = "交".repeat(200);
+    std::fs::write(fixture.env.join(HANDOFF_FILE), &text).expect("写交接");
+
+    let run = status(&fixture.env, &["--agent", AGENT]);
+    assert_eq!(code(&run), 0, "{}", stderr(&run));
+    // stdout 必须是**合法 UTF-8**：截断若切在字符中间，这里会失败。
+    let report = std::str::from_utf8(&run.stdout).expect("输出必须是合法 UTF-8");
+    let line = line_starting_with(report, "handoff=");
+    let digest = line.split_once("digest=").expect("摘要").1;
+    assert!(digest.ends_with('…'), "超限要补省略号：{digest}");
+    assert!(digest.len() <= 160, "摘要上限 160 B，实际 {}", digest.len());
+    assert!(
+        !report.contains(&text),
+        "交接全文不许进读数（摘要不是搬运全文）"
+    );
+}
+
+/// **未收尾的活动 ＋ 交接**：两件事同时读得出来，且 `[handoff]` 不挤进 `[state]`。
+#[test]
+fn an_unfinished_run_and_its_handoff_are_both_visible() {
+    let fixture = Fixture::new("handoff-unfinished");
+    empty_environment(&fixture.env, AGENT);
+    add_unfinished_run_without_reply(&fixture.env, AGENT, RUN);
+    std::fs::write(
+        fixture.env.join(HANDOFF_FILE),
+        "上一段写到第三步，下一段接着问。",
+    )
+    .expect("写交接");
+
+    let run = status(&fixture.env, &["--agent", AGENT]);
+    assert_eq!(code(&run), 3, "未收尾 ⇒ 需要用户动作：{}", stderr(&run));
+    let report = stdout(&run);
+    assert!(
+        line_starting_with(&report, "handoff=").contains("handoff=present"),
+        "{report}"
+    );
+    assert!(
+        report.contains("admission=unfinished(run=run-1)\n"),
+        "{report}"
+    );
+    assert!(
+        report.contains(&format!("run={RUN} state=unfinished")),
+        "{report}"
+    );
+    // 位置契约（两个外部解析器按位置找段头）：handoff → state → next。
+    let handoff_at = report.find("[handoff]").expect("[handoff]");
+    let state_at = report.find("[state]").expect("[state]");
+    let next_at = report.find("[next]").expect("[next]");
+    assert!(
+        handoff_at < state_at && state_at < next_at,
+        "段序必须是 [handoff] < [state] < [next]：{report}"
+    );
 }

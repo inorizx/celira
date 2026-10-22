@@ -14,6 +14,8 @@ import {
   agentHealthForClaimedMachine,
   agentHealthFromHomes,
   agentHealthReadout,
+  handoffNote,
+  handoffNoteFromHomes,
   hostStateLabel,
 } from '../src/api/agentHealth.ts'
 import type { HomeStatusView } from '../src/api/homeStatus.ts'
@@ -345,6 +347,48 @@ test('Agent 主页那一段：**只有认到它自己那台**才给这一句（�
   assert.equal(agentHealthForClaimedMachine({ resolution: null }), null, '还在读时也不给')
 })
 
+test('交接三态：present 给摘要、absent 不显示、unreadable 说读不到（不压成两态）', () => {
+  assert.deepEqual(handoffNote({ state: 'present', bytes: 64, digest: '我干到第三步：正在等对面回话' }), {
+    tone: 'muted',
+    text: '它留下了交接：我干到第三步：正在等对面回话',
+  })
+  // 写了才有、不写就没有：absent 一个字都不显示。
+  assert.equal(handoffNote({ state: 'absent' }), null)
+  // 读不到不冒充 absent。
+  assert.equal(handoffNote({ state: 'unreadable' })?.text, '交接读不到')
+  // 整格缺席（旧运行时）与 null 都不显示，也不编一句「没写过」。
+  assert.equal(handoffNote(undefined), null)
+  assert.equal(handoffNote(null), null)
+  // 认不出的取值、present 却没有摘要 ⇒ 都说「读不到」，不猜。
+  assert.equal(handoffNote({ state: 'something-new' })?.text, '交接读不到')
+  assert.equal(handoffNote({ state: 'present', bytes: 3, digest: '   ' })?.text, '交接读不到')
+})
+
+test('交接小字只在「上一次没做完」且读数是这一支的时候出现', () => {
+  const handoff = { state: 'present', bytes: 64, digest: '下一段接着问对面' }
+  const unfinished = view({ agent: { admission: 'unfinished(run=host-1)', handoff } })
+  assert.equal(
+    handoffNoteFromHomes({ resolution: resolution('claimed', unfinished) })?.text,
+    '它留下了交接：下一段接着问对面',
+  )
+  // 没有「上一次没做完」⇒ 不显示（旧交接不许被读成这一段刚写的）。
+  const ready = view({ agent: { admission: 'ready', handoff } })
+  assert.equal(handoffNoteFromHomes({ resolution: resolution('claimed', ready) }), null)
+  // 读到了「没写过」⇒ 不显示。
+  const absent = view({ agent: { admission: 'unfinished(run=host-1)', handoff: { state: 'absent' } } })
+  assert.equal(handoffNoteFromHomes({ resolution: resolution('claimed', absent) }), null)
+  // 第 2 支起：顶层那几格是**第一支**的账本 ⇒ 不拿它算（张冠李戴比留空更坏）。
+  assert.equal(
+    handoffNoteFromHomes({ resolution: resolution('claimed', unfinished, false) }),
+    null,
+  )
+  // 别的机器 / 没读到 / 不知道是谁 / 还在读 ⇒ 不显示（交接正文不许张冠李戴）。
+  for (const kind of ['unknown-id', 'elsewhere', 'unreachable']) {
+    assert.equal(handoffNoteFromHomes({ resolution: resolution(kind, unfinished) }), null, kind)
+  }
+  assert.equal(handoffNoteFromHomes({ resolution: null }), null)
+})
+
 test('每一句都不含内行词（拿 `verify-ui` 那份词表离线扫全矩阵）', () => {
   const views: HomeStatusView[] = [
     view(),
@@ -376,6 +420,9 @@ test('每一句都不含内行词（拿 `verify-ui` 那份词表离线扫全矩�
     agentHealthFromHomes({ resolution: null }).text,
     agentHealthFromHomes({ resolution: resolution('elsewhere') }).text,
     agentHealthFromHomes({ resolution: resolution('unreachable') }).text,
+    // 交接那一句（2026-10-22）：present / unreadable 两档都要过词表。
+    handoffNote({ state: 'present', bytes: 8, digest: '下一段接着问对面' })?.text ?? '',
+    handoffNote({ state: 'unreadable' })?.text ?? '',
   ]
   assert.ok(texts.length >= 28, `矩阵要够宽，现在只有 ${texts.length} 句`)
   for (const text of texts) {

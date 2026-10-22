@@ -23,12 +23,20 @@
 //! | 2 | 环境打不开或不可读（不存在、身份不匹配、结构损坏、已有写者） |
 //! | 3 | 需要用户动作：有活动停在半路，或环境处于未收尾 / 已暂停 |
 //!
-//! 输出三节（行式稳定文本）＋ **一个可选节**（`--actions`，见下）：
+//! 输出四节（行式稳定文本）＋ **一个可选节**（`--actions`，见下）：
 //!
 //! - `identity`：环境根、身份、活动条数（**本页几条**与**一共几条**分开报；本页取自账本的
 //!   **最近**那一头，要翻更早的用 `environment_diagnose --after`）；
+//! - `[handoff]`：Agent 留给**下一段自己**的那一份交接（三态 + 有界摘要，见 [`HandoffReading`]）；
 //! - `state`：`admission=` 一行 + **每个活动一行**（五类判定 + 该类的读数）；
 //! - `next`：**恰好一行**行动建议——判定类目 × 准入 → 文案的纯函数（见 [`next_line`]）。
+//!
+//! ⚠ **[handoff] 只加在 `[state]` 之前**（2026-10-22）：`[state]` 与 `[next]` 有真实外部解析器
+//! （`scripts/home/host_status_parse.js` 与壳的 `parse_host_status` 镜像），两边都按**位置**找
+//! 这两个段头、且**认不出 `[state]` 里的行就整份失败**。把新节放进 `[state]` 会让读数在
+//! 「有未收尾活动」时整体瞎掉；放进 `[next]` 之后会被当成 `next` 正文的一部分。⇒ 它只能待在
+//! `[state]` 之前的头部区域（那两个解析器只按 `key=` 前缀取字段，认不出的头部行不影响它们）。
+//! `[handoff]` 不改变 `identity` / `state` / `next` 三个既有节的任何一个字节。
 //!
 //! ⚠ **2026-09-26 起 `unfinished` 那一档的 `next` 不再指向"接着跑它"**：跨进程恢复
 //! （`agent_run resume`）已退役——承载活动的进程没了就是两个 Run，
@@ -52,12 +60,19 @@ use celira_agent::diagnostics::{
     ACTIVITY_PAGE_LIMIT, EnvironmentDiagnosis, diagnose_latest_activities,
 };
 use celira_agent::foundation::{AgentId, Outcome, RunId, SystemEnding};
+use celira_agent::handoff::{self, Handoff};
 use celira_agent::manual_entry::escape_field;
 use celira_agent::recovery;
 use celira_agent::store::{Admission, EnvironmentReader, TracePayload, outcome_label};
 
 const HEADER: &str = "celira-agent-host-status v1";
 const USAGE: &str = "用法: agent_host_status <环境根> --agent <AgentId> [--actions]";
+
+/// 摘要的**字节上限**：够认出「它交接的是哪件事」，不够把交接全文搬到日志里。
+///
+/// 判据与 handoff 的 2 KiB 上限同族、方向相反：那一边量「主体能写多少」，这一边量
+/// 「操作者的一行能看多少」。160 B ≈ 50 个汉字 —— 一屏之内，且**绝不**等于全文。
+const HANDOFF_DIGEST_BYTES: usize = 160;
 
 const EXIT_OK: i32 = 0;
 const EXIT_USAGE: i32 = 1;
@@ -142,6 +157,9 @@ fn run(arguments: Vec<String>) -> i32 {
         }
     };
     let times = ActivityTimes::of(&trace);
+    // **交接读数**（2026-10-22）：<环境根>/handoff 是主体写给下一段自己的那一篇。
+    // 只读这个文件、只解释三态；不进账、不写任何东西（零新事实、零新写者）。
+    let handoff = HandoffReading::of(&handoff::read(Path::new(&invocation.root)));
     // **动作面读数**（`--actions`）：从这一页活动的账里数出来，零新事实、零新写者、不进主体视野。
     let actions = if invocation.actions {
         Some(ActionTally::read(&trace, &activities))
@@ -157,6 +175,7 @@ fn run(arguments: Vec<String>) -> i32 {
             &activities,
             &report,
             &times,
+            &handoff,
             actions.as_ref()
         )
     );
@@ -273,6 +292,91 @@ impl ActivityLine {
     }
 }
 
+/// **交接那一节**：Agent 留给下一次开场的自己那一篇的读数。
+///
+/// 三态与 [`Handoff`] **逐态对应**，一个都不合并：
+///
+/// - `absent` ⇒ 没写过（或只是一个空文件）——**写了才有、不写就没有**；
+/// - `unreadable` ⇒ 这一次没读到（权限 / 坏数据）——**不冒充 absent**；
+/// - `present` ⇒ 有那一份，给出**字节数**与 **≤160 B 的摘要**；**绝不给全文**。
+///
+/// 为什么不给全文：这一节会进日志、进状态口、进页面。交接是**主体写给自己的**，2 KiB 全文
+/// 没有理由离开它的环境根；操作者需要的只是「有没有、大概说了什么」。
+///
+/// 摘要只做两件机械的事（**不概括、不改写**）：把空白折成一个空格（保证单行），再按
+/// **UTF-8 字符边界**截到 [`HANDOFF_DIGEST_BYTES`] 以内，超出补 `…`。字节数照报原文长度。
+#[derive(Default)]
+enum HandoffReading {
+    /// 没有那一份。
+    #[default]
+    Absent,
+    /// 读到了：原文 **UTF-8 字节数** + 有界摘要。
+    Present { bytes: usize, digest: String },
+    /// 这一次没读到。
+    Unreadable,
+}
+
+impl HandoffReading {
+    fn of(handoff: &Handoff) -> Self {
+        match handoff {
+            // 空文件已被 `handoff::read` 读成 `Absent`：这里不再做第二次判断。
+            Handoff::Absent => HandoffReading::Absent,
+            Handoff::Unreadable => HandoffReading::Unreadable,
+            Handoff::Present(text) => HandoffReading::Present {
+                bytes: text.len(),
+                digest: handoff_digest(text),
+            },
+        }
+    }
+
+    /// 行式稳定文本：**一节两行**（段头 + 一行读数），三态各自固定。
+    fn render(&self) -> String {
+        match self {
+            HandoffReading::Absent => "[handoff]\nhandoff=absent\n".to_string(),
+            HandoffReading::Unreadable => "[handoff]\nhandoff=unreadable\n".to_string(),
+            HandoffReading::Present { bytes, digest } => {
+                format!("[handoff]\nhandoff=present bytes={bytes} digest={digest}\n")
+            }
+        }
+    }
+}
+
+/// 交接的**单行摘要**：空白折叠、控制字符剔除、按字符边界截到 160 B（超出补 `…`）。
+///
+/// ⚠ **不转义空格**（与 [`escape_field`] 不同）：那是给「一个字段一个值」的机器字段用的；
+/// 这一格本来就是给**人**读的一句开头，转义会把它变成 `我\s干到…` 这种不可读的形状。
+/// 单行由「空白折叠」保证，不需要转义；它也不会与同一行其它字段混淆（`digest=` 是最后一个键）。
+fn handoff_digest(text: &str) -> String {
+    let mut normalized = String::new();
+    let mut pending_space = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            // 行首空白不落、连续空白只留一个（单行稳定 + 人不看见换行）。
+            pending_space = !normalized.is_empty();
+            continue;
+        }
+        if ch.is_control() {
+            continue;
+        }
+        if pending_space {
+            normalized.push(' ');
+            pending_space = false;
+        }
+        normalized.push(ch);
+    }
+    let normalized = normalized.trim_end();
+
+    if normalized.len() <= HANDOFF_DIGEST_BYTES {
+        return normalized.to_string();
+    }
+    // 给 `…`（3 B）留位置，再往回退到最近的字符边界 —— 绝不切出半个 UTF-8 字符。
+    let mut end = HANDOFF_DIGEST_BYTES - '…'.len_utf8();
+    while end > 0 && !normalized.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", normalized[..end].trim_end())
+}
+
 /// 该出手的是哪一个活动：**按列出顺序的第一个"还没有收场"的活动**；全收场就用第一个。
 ///
 /// 规则是机械的，不需要判断：活动顺序来自既有的只读诊断（事实侧追加顺序在前，只在经历侧出现的
@@ -284,13 +388,14 @@ fn attention_of(lines: &[ActivityLine]) -> Option<&ActivityLine> {
         .or_else(|| lines.first())
 }
 
-/// 渲染三节。
+/// 渲染四节。
 fn render(
     invocation: &Invocation,
     admission: &Admission,
     activities: &[ActivityLine],
     report: &EnvironmentDiagnosis,
     times: &ActivityTimes,
+    handoff: &HandoffReading,
     actions: Option<&ActionTally>,
 ) -> String {
     let mut out = String::new();
@@ -330,6 +435,11 @@ fn render(
         out.push('\n');
         out.push_str(&tally.render());
     }
+
+    // ⚠ **`[handoff]` 必须在 `[state]` 之前**（见模块头那条位置契约）：两个外部解析器按位置找
+    // `[state]` / `[next]`，且认不出 `[state]` 里的行就整份失败。这一段只搬三态与有界摘要。
+    out.push('\n');
+    out.push_str(&handoff.render());
 
     out.push('\n');
     out.push_str("[state]\n");

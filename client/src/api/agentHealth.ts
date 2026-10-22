@@ -45,7 +45,12 @@
  * 判据就得有人跑。
  */
 
-import { hostStateOf, type HomeStatusHost, type HomeStatusView } from './homeStatus.ts'
+import {
+  hostStateOf,
+  type HomeStatusHandoff,
+  type HomeStatusHost,
+  type HomeStatusView,
+} from './homeStatus.ts'
 import { type AgentHomeResolution } from './homes.ts'
 import { resultLabel, runStateLabel, stateLabel } from '../lib/plain-language.ts'
 
@@ -53,6 +58,12 @@ import { resultLabel, runStateLabel, stateLabel } from '../lib/plain-language.ts
 export type AgentHealthTone = 'ok' | 'warn' | 'bad' | 'muted'
 
 export interface AgentHealth {
+  tone: AgentHealthTone
+  text: string
+}
+
+/** 交接那一句小字：与健康那一句**同形**（色标 + 一句话），但**不是**健康判定。 */
+export interface AgentHandoffNote {
   tone: AgentHealthTone
   text: string
 }
@@ -140,6 +151,57 @@ export function agentHealthForClaimedMachine(input: {
   // ⚠ 2026-10-20：这一句的**正文**与列表那一行逐字相同 ⇒ 那一句里点了哪台机器的名，
   // 这一页也得点同一台（否则同一句话在两个页面上说两个机器）。
   return agentHealthReadout(resolution.view, { machine: machineOf(resolution.entry) })
+}
+
+/**
+ * 交接那一句话（**三态各说各的**，不许压成两态）。
+ *
+ * - `present` ⇒ `它留下了交接：<摘要>`（摘要来自口子，≤160 B，**不是全文**）；
+ * - `absent` ⇒ `null`：**不显示**（写了才有、不写就没有）；
+ * - `unreadable` ⇒ `交接读不到`（**不冒充 absent**）；
+ * - 整格缺席 / `null` ⇒ `null`（不知道，不显示）；认不出的取值 ⇒ `交接读不到`。
+ *
+ * ⚠ 这一层**不拼**「上一次没做完」那个前提：那是 [`handoffNoteFromHomes`] 的活。
+ * 这样三态可以单独测，页面也只剩一个入口。
+ *
+ * ⚠ 说「读不到」而不是「没有」：`present` 但摘要空 / 取值认不出，都是**没读到**这一档，
+ * 不是「它没写」——把不知道说成没有，比留空更坏（与 `agentHealthReadout` 同一条纪律）。
+ */
+export function handoffNote(
+  handoff: HomeStatusHandoff | null | undefined,
+): AgentHandoffNote | null {
+  if (!handoff) return null
+  if (handoff.state === 'absent') return null
+  if (handoff.state === 'present') {
+    const digest = typeof handoff.digest === 'string' ? handoff.digest.trim() : ''
+    if (digest === '') return { tone: 'muted', text: '交接读不到' }
+    return { tone: 'muted', text: `它留下了交接：${digest}` }
+  }
+  // `unreadable` 与认不出的取值同档：**如实说读不到**，不猜、也不当成没有。
+  return { tone: 'muted', text: '交接读不到' }
+}
+
+/**
+ * Agent 列表行里那一句小字：**只有「上一次没做完」＋ 这一份读数确实是它的** 才给。
+ *
+ * 两个前提都不是装饰：
+ * - **「上一次没做完」**（`admission=unfinished`）正是「新的一段接着上一段」这句话成立的
+ *   那一刻；别的时候摆一份旧交接，读起来像这一段刚写的。
+ * - **归属**：只有 `claimed` 且 `ownReadings === true` 才说。第 2 支起（认领靠住户清单）时
+ *   顶层那几格是**第一支**的账本；`unknown-id` 时那台机器**没报它是谁** —— 这两种情况拿它
+ *   算，就是把别人的交接正文摆在它名下。健康那种统计量尚可含糊，**主体写的字不行**。
+ *
+ * 判据一句话：**宁可这一行不出现，也不把别人的话算成它留下的。**
+ */
+export function handoffNoteFromHomes(input: {
+  resolution: AgentHomeResolution<HomeStatusView> | null
+}): AgentHandoffNote | null {
+  const { resolution } = input
+  if (resolution === null || resolution.kind !== 'claimed' || !resolution.ownReadings) return null
+  // 准入那一格的人话由 `plain-language` 那一处解释（与 `ledgerPart` 同一个判据）：
+  // 这里不再自己拼 `startsWith('unfinished(')`，免得同一个字段有两个读法。
+  if (stateLabel(resolution.view.agent.admission) !== '上一次没做完') return null
+  return handoffNote(resolution.view.agent.handoff)
 }
 
 /**

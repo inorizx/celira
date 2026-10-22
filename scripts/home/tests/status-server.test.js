@@ -315,6 +315,83 @@ statusCase('段序仍是判据的一部分：`stopped=` 跑到 `unresolved=` 前
   assert.equal(parsed.reason, 'malformed-run-line')
 })
 
+// —— 交接（2026-10-22）：新的一节只搬运三态 + 有界摘要 ——
+
+/** 一份**真实形状**的读数：`[handoff]` 在 `[state]` 之前（CLI 的位置契约）。 */
+const GOOD_WITH_HANDOFF = [
+  'celira-agent-host-status v1',
+  'environment-root=D:/celira-home/env',
+  'agent=agent-1',
+  'activities-page=2 of=2 scope=latest',
+  '',
+  '[handoff]',
+  'handoff=present bytes=64 digest=我干到第三步：正在等对面回话 下一段接着问',
+  '',
+  '[state]',
+  'admission=unfinished(run=host-1-2-2)',
+  'run=host-1-1-1 state=ended outcome=subject:silent',
+  'run=host-1-2-2 state=unfinished',
+  '',
+  '[next]',
+  '有未收尾活动（host-1-2-2）：活动停在半路——不接着跑它：重启宿主即可',
+  '',
+].join('\n')
+
+statusCase('交接 present：三样都读出来（三态 / 字节数 / 摘要），且不影响活动读数', () => {
+  const parsed = parseHostStatus(GOOD_WITH_HANDOFF)
+  assert.equal(parsed.ok, true)
+  assert.deepEqual(parsed.value.handoff, {
+    state: 'present',
+    bytes: 64,
+    digest: '我干到第三步：正在等对面回话 下一段接着问',
+  })
+  // 新节在 `[state]` 之前 ⇒ 既有两节一个字都没变。
+  assert.equal(parsed.value.admission, 'unfinished(run=host-1-2-2)')
+  assert.equal(parsed.value.runs.length, 2)
+})
+
+statusCase('交接 absent / unreadable：各是一个字，不许压成两态', () => {
+  const absent = parseHostStatus(GOOD_WITH_HANDOFF.replace(
+    'handoff=present bytes=64 digest=我干到第三步：正在等对面回话 下一段接着问',
+    'handoff=absent',
+  ))
+  assert.equal(absent.ok, true)
+  assert.deepEqual(absent.value.handoff, { state: 'absent' })
+
+  const unreadable = parseHostStatus(GOOD_WITH_HANDOFF.replace(
+    'handoff=present bytes=64 digest=我干到第三步：正在等对面回话 下一段接着问',
+    'handoff=unreadable',
+  ))
+  assert.equal(unreadable.ok, true)
+  assert.deepEqual(unreadable.value.handoff, { state: 'unreadable' })
+})
+
+statusCase('交接摘要里出现 already-open 不算 Agent 在忙（版本头才是报告的判据）', () => {
+  const parsed = parseHostStatus(
+    GOOD_WITH_HANDOFF.replace(
+      '我干到第三步：正在等对面回话 下一段接着问',
+      '上一次那个文件 already-open，下一段别抢',
+    ),
+  )
+  assert.equal(parsed.ok, true, '主体写的字里出现 already-open 不许把读数判成忙')
+  assert.equal(parsed.value.handoff.state, 'present')
+})
+
+statusCase('交接整节缺席（旧运行时）⇒ null（不知道），不冒充「她没写」', () => {
+  const parsed = parseHostStatus(GOOD)
+  assert.equal(parsed.ok, true)
+  assert.equal(parsed.value.handoff, null)
+})
+
+statusCase('交接 present 但形状读不懂 ⇒ 整份失败（与 [state] 同一条纪律）', () => {
+  const malformed = parseHostStatus(GOOD_WITH_HANDOFF.replace(
+    'handoff=present bytes=64 digest=我干到第三步：正在等对面回话 下一段接着问',
+    'handoff=present digest=没有字节数',
+  ))
+  assert.equal(malformed.ok, false)
+  assert.equal(malformed.reason, 'malformed-handoff-line')
+})
+
 statusCase('Agent 正忙（already-open）是一等结果，不是失败', () => {
   const parsed = parseHostStatus('something already-open something')
   assert.equal(parsed.ok, 'busy', 'Agent 是"这一拍在忙"，不是"读不出来"')
@@ -392,6 +469,28 @@ statusCase('readAgentStatus 把解析结果原样抬上来（用假 spawn，不�
   assert.equal(agent.admission, 'ready')
   assert.equal(agent.runsTotal, 2) // runs 只给最近几条，总数单独给
   assert.ok(agent.next.includes('活动已收场'))
+})
+
+statusCase('readAgentStatus 把交接那一格原样抬上来（只搬运，不改语义）', async () => {
+  const agent = await readAgentStatus({
+    statusExe: 'ignored.exe',
+    envDir: 'env',
+    agentId: 'agent-1',
+    spawn: () => fakeSpawn(GOOD_WITH_HANDOFF),
+  })
+  assert.deepEqual(agent.handoff, {
+    state: 'present',
+    bytes: 64,
+    digest: '我干到第三步：正在等对面回话 下一段接着问',
+  })
+  // 旧运行时（没有这一节）⇒ null：页面不显示，**不冒充**「她没写」。
+  const old = await readAgentStatus({
+    statusExe: 'ignored.exe',
+    envDir: 'env',
+    agentId: 'agent-1',
+    spawn: () => fakeSpawn(GOOD),
+  })
+  assert.equal(old.handoff, null)
 })
 
 statusCase('readAgentStatus：二进制缺 / 输出畸形 各自成态（不混成一个"读不到"）', async () => {

@@ -20,6 +20,11 @@
  * spawn 子进程时用**白名单 env**，家的凭据（`DEEPSEEK_API_KEY` / `CELIRA_IM_BACKEND_AUTH` /
  * token）**一个字节都不经过它**。
  *
+ * ⚠ 2026-10-22 起多一节 `[handoff]`：它是**主体写给下一次开场的自己**的那一篇，输出里只带
+ * **≤160 B 的摘要 ＋ 字节数**（`agent_host_status` 负责截断，**全文不出环境根**）。它仍只走
+ * 本机口（loopback，或模式二的 TLS ＋ 家钥匙），不进 im / Core。⚠ `EXPERIENCE_FIELDS` 那份
+ * 白名单管的是 trace 投影，与这一格无关 —— 别把两者当成同一张名单。
+ *
  * **默认仍然是 loopback、免钥匙**（`status_bind` 缺省 `127.0.0.1`）——那份论证在模式一下
  * 原样成立，一个字没松。家口远程访问刀加的**模式二**（绑非 loopback）是另一档：
  * 物理不可达这层防护没有了 ⇒ 进门要带**家钥匙**（`Authorization: Bearer`）+ TLS，
@@ -374,6 +379,9 @@ async function readAgentStatus({ statusExe, envDir, agentId, spawn: spawnFn = sp
   return {
     state: 'loaded',
     admission: value.admission,
+    // 交接（2026-10-22）：**只搬运解析器读出来的那一格**（三态 / 字节数 / 摘要）。
+    // `null` = 旧运行时没有这一节（**不是**「她没写」）；客户端据此不显示。
+    handoff: value.handoff,
     // 「活动次数」= **总数**。此前这里放的是**本页条数**（读数的名字叫 `activities`，
     // 读者自然当成总数）：账本一旦超过一页，界面上的活动次数就冻在 32 上不动
     // （真机实测 36 条报 32），而明细还永远停在最早那一页。

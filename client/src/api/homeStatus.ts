@@ -202,6 +202,28 @@ export interface ExperienceView {
 }
 
 
+/**
+ * **交接**：Agent 在上一次活动里写给**下一次开场的自己**的那一篇（`<环境根>/handoff`）。
+ *
+ * 口子只搬三态 + 有界摘要 —— **不是全文**（全文只在它自己的环境根里，开场时会摆给它自己）。
+ *
+ * - `present`：有那一份；`bytes` 是原文 UTF-8 字节数，`digest` 是 ≤160 B 的单行摘要；
+ * - `absent`：没写过（**写了才有、不写就没有**）；
+ * - `unreadable`：这一次没读到（**不冒充 absent**）。
+ *
+ * ⚠ **整格缺席**（`undefined`）与 `absent` **不是一回事**：前者是旧运行时没有这一节
+ * （不知道），后者是读到了「没有那一份」。两者在页面上的处置不同（都不显示，但一句是
+ * 「不知道」、一句是「确定没有」）。
+ */
+export interface HomeStatusHandoff {
+  /** 稳定取值（CLI 的三态）；认不出的取值由 `handoffNote` 读作「读不到」，不猜。 */
+  state: string
+  /** `present` 时有：原文的 UTF-8 字节数。 */
+  bytes?: number
+  /** `present` 时有：≤160 B 的单行摘要（**不是全文**）。 */
+  digest?: string
+}
+
 export interface HomeStatusRun {
   id: string
   state: string
@@ -260,6 +282,11 @@ export interface HomeStatusView {
     runs?: HomeStatusRun[]
     runsTotal?: number
     next?: string
+    /**
+     * 交接（可选）：`null` = 口子读到了这一节、但里面没有交接读数（旧运行时 / 这一面没给）；
+     * `undefined` = 这份载荷整个没有这一格。两者都**不显示**，但都不许读成「确定没写过」。
+     */
+    handoff?: HomeStatusHandoff | null
     /** `unreadable` 的原因（解析器给的稳定分类）。 */
     reason?: string
     /** `busy` 的说明。 */
@@ -370,6 +397,21 @@ function isExperienceRow(value: unknown): value is ExperienceRow {
   return true
 }
 
+/**
+ * 交接那一格的形状守卫：`state` 必须是字符串（取值不在这里判 —— 认不出由 `handoffNote`
+ * 走「读不到」那条诚实的兜底）；`bytes` / `digest` 给了就必须是对的类型。
+ *
+ * ⚠ 不校验「present 必须带 digest」：那是业务判据，归 `handoffNote`；这里只管形状。
+ */
+function isHandoffView(value: unknown): value is HomeStatusHandoff {
+  if (typeof value !== 'object' || value === null) return false
+  const handoff = value as Record<string, unknown>
+  if (typeof handoff['state'] !== 'string' || handoff['state'] === '') return false
+  if (handoff['bytes'] !== undefined && typeof handoff['bytes'] !== 'number') return false
+  if (handoff['digest'] !== undefined && typeof handoff['digest'] !== 'string') return false
+  return true
+}
+
 function isExperienceView(value: unknown): value is ExperienceView {
   if (typeof value !== 'object' || value === null) return false
   const view = value as Record<string, unknown>
@@ -411,6 +453,9 @@ export function isHomeStatusView(value: unknown): value is HomeStatusView {
   if (typeof agentRecord['state'] !== 'string' || !AGENT_STATES.includes(agentRecord['state'])) return false
   const runs = agentRecord['runs']
   if (runs !== undefined && (!Array.isArray(runs) || !runs.every(isRun))) return false
+  // 交接可选；`null` 是合法读数（口子这一面没有），给了对象就必须合形状。
+  const handoff = agentRecord['handoff']
+  if (handoff !== undefined && handoff !== null && !isHandoffView(handoff)) return false
   const lastWake = view['lastWake']
   if (lastWake !== null && typeof lastWake !== 'string') return false
   // 宿主那一格可选；给了就必须认得出形状（**取值不在封闭表里不算形状坏** —— 见 `hostStateOf`）。

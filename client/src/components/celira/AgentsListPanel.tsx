@@ -9,7 +9,7 @@ import type { OwnedAgent } from '@/api/domain'
 import { useAppStore } from '@/api/store'
 import { agentCreateErrorText } from '@/api/contractErrors'
 import { agentRowStatusFromHomes, rowSameCauseLine } from '@/api/agentRowStatus'
-import { agentHealthFromHomes } from '@/api/agentHealth'
+import { agentHealthFromHomes, handoffNoteFromHomes } from '@/api/agentHealth'
 import { shouldOfferAttach } from '@/api/agentMachine'
 import {
   LOCAL_HOME_ID,
@@ -231,6 +231,10 @@ export function AgentsListPanel({
             // 与三格用**同一份认领裁决**（`agentHealthFromHomes` 内部照 `resolution.kind` 分派），
             // 判据与文案在 `api/agentHealth.ts`（纯函数 ＋ 用例）。
             const health = agentHealthFromHomes({ resolution })
+            // 「它留下了交接：…」那一句小字（2026-10-22）：只在「上一次没做完」且这一份读数
+            // 确实是它的、handoff 是 `present` 时出现。判据与文案都在 `api/agentHealth.ts`，
+            // 页面只渲染 `text`（两处各写一套话就是两个答案）。
+            const handoffNote = handoffNoteFromHomes({ resolution })
             // ★ **四格同因 ⇒ 收成一句**（2026-10-20 T2 ④）：一份读数都没读回来时，
             // 不再并列四个"不知道"（判据与出口在 `api/agentRowStatus.ts` 的 `rowSameCauseLine`）。
             const sameCause = rowSameCauseLine({ resolution, config: mind?.view ?? null })
@@ -275,7 +279,8 @@ export function AgentsListPanel({
                     ) : sameCause !== null ? (
                       <div className="mt-0.5 text-caption text-muted-foreground">{sameCause.text}</div>
                     ) : (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
+                      <>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
                         {/* 机器侧那一句在最前：它是"现在正常吗"的直接答案（其余三格是细节）。
                             颜色只映 tone，文字由 `api/agentHealth.ts` 原样给（两处各写一套话就是两个答案）。
                             ★ **一行只许一个状态点**（2026-10-20 T2 ③），且它只跟这一句的色档走
@@ -291,7 +296,16 @@ export function AgentsListPanel({
                         <span>{status.onlineLabel}</span>
                         <span>{status.modelLabel}</span>
                         <span>{status.activityLabel}</span>
-                      </div>
+                        </div>
+                        {/* 交接那一句小字（2026-10-22）：在四格**下面**单独一行，不占格、
+                            不挤布局；只在「上一次没做完」且交接有话可说（present / unreadable）时出现。
+                            `handoffNote` 为 `null`（没写 / 整格缺席 / 不是这一支的读数）时一个字都不渲染。 */}
+                        {handoffNote && (
+                          <div className={cn('mt-0.5 text-caption', READOUT_TONE_TEXT[handoffNote.tone])}>
+                            {handoffNote.text}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
