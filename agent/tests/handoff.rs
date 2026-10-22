@@ -35,6 +35,7 @@ const AGENT: &str = "agent-handoff";
 const RUN_ONE: &str = "run-handoff-1";
 const RUN_TWO: &str = "run-handoff-2";
 const RUN_THREE: &str = "run-handoff-3";
+const RUN_FOUR: &str = "run-handoff-4";
 
 /// 一块注入内容：标签 + 正文。
 type Block = (String, String);
@@ -344,6 +345,19 @@ fn a_handoff_written_in_one_activity_is_shown_once_at_the_next_opening() {
             "那一格照旧在场（不是整格消失）: {openings:#?}"
         );
     }
+
+    // **第四段**：**「交付过」不是「上一段摆过」**——第三段没摆是因为已交付，不是因为
+    // 这一份又变成了新的一份。判据若只看紧邻上一次活动，交付就会**隔一段重播一次**，
+    // 而「此后不再摆」是这一块的契约（`src/handoff.rs` 的「一次播放」）。
+    {
+        let mut session = open(&dir, &mut environment, RUN_FOUR);
+        drive_once(&mut session);
+        let openings = injections(&session);
+        assert!(
+            handoff_blocks(opening_blocks(&openings)).is_empty(),
+            "交付过就不再摆（隔一段也不重播）: {openings:#?}"
+        );
+    }
 }
 
 /// **再写 ⇒ 新的那一份下一次开场照样摆**（B4.1 的「再写」那一支）。
@@ -420,26 +434,27 @@ fn the_delivery_judgement_reads_the_ledger_and_writes_nothing_new() {
         text.to_string()
     };
 
-    // **开场读数**：上一次活动的开场摆了哪几块 —— 那就是账里那条注入原样带回来的。
+    // **开场读数**：想过的那几段各自开场摆了哪几块 —— 那就是账里那几条注入原样带回来的。
+    // 最后一段就是刚跑完的第一段（它想过 ⇒ 在读数里）。
     let readings = environment.opening_readings().expect("开场读数");
-    let found: Vec<&Block> = readings
-        .last_opening_blocks
+    let first_opening = readings
+        .openings_that_thought
+        .last()
+        .expect("第一段想过 ⇒ 它的开场块在读数里");
+    let found: Vec<&Block> = first_opening
         .iter()
         .filter(|(label, _)| label == HANDOFF_LABEL)
         .collect();
     assert!(
         found.is_empty(),
-        "上一段（第一段）开场没摆过交接: {:?}",
-        readings.last_opening_blocks
+        "上一段（第一段）开场没摆过交接: {first_opening:?}"
     );
     // 账里那一批块与"主体那一侧看到的"是同一份事实（标签逐字节相同）。
     assert!(
-        readings
-            .last_opening_blocks
+        first_opening
             .iter()
             .any(|(label, _)| label == PINS_BOARD_LABEL),
-        "开场那一批块就是账里那一条: {:?}",
-        readings.last_opening_blocks
+        "开场那一批块就是账里那一条: {first_opening:?}"
     );
 
     // 第二段：开场摆出它 ⇒ 这一次**该**被认成"交付过"。
@@ -489,8 +504,11 @@ fn the_delivery_judgement_reads_the_ledger_and_writes_nothing_new() {
 
     // 交付判据要的那一格现在**就在账里**：上一段开场摆过的那一份，原文逐字节在。
     let readings = environment.opening_readings().expect("开场读数");
-    let found: Vec<&Block> = readings
-        .last_opening_blocks
+    let last_opening = readings
+        .openings_that_thought
+        .last()
+        .expect("第二段想过 ⇒ 它的开场块在读数里");
+    let found: Vec<&Block> = last_opening
         .iter()
         .filter(|(label, _)| label == HANDOFF_LABEL)
         .collect();

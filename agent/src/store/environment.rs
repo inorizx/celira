@@ -1150,32 +1150,29 @@ pub struct OpeningReadings {
     pub admission: Admission,
     /// 历史上最后一次存储故障（从来没有过 ⇒ `None`）。
     pub last_storage_failure: Option<StorageFailure>,
-    /// **紧邻上一次活动的开场摆了哪几块**（标签 ＋ 正文，逐字节原样，按摆出的顺序）。
+    /// **想过的那几段活动**各自开场摆过哪几块（标签 ＋ 正文，逐字节原样，按摆出的顺序；
+    /// 按记录先后排好）。
     ///
     /// 它就是账里**已经有**的那条事实（`stage=run-start` 的注入，正文在 `blocks[].text`）：
     /// 本件只把它带回来，**不落任何新事实、不新开读取点**。
     ///
-    /// ⚠ **它为什么在这里**：交接（`handoff`）的交付判据是「**交付过 ⟺ 紧邻上一次活动的开场里
-    /// 摆过它**」。那一格要按**身份**（正文）比，不能只看"上一次摆过一块交接"——交接是能被
-    /// 重写的（B4.1「再写 → 新 handoff 成为最新」），一个布尔会把重写后的新的一份读成"已经交付
-    /// 过" ⇒ 那一份**永远不摆**。本件**不认识任何显示区的标签**（`handoff` 是显示区自己的词）
+    /// ⚠ **它为什么在这里**：交接（`handoff`）的交付判据是「**交付过 ⟺ 之前某一段活动
+    /// 的开场里摆过它，而且那一段真的想过**」。那一格要按**身份**（正文）比，不能只看
+    /// "摆过一块交接没有"——交接是能被重写的（B4.1「再写 → 新 handoff 成为最新」），
+    /// 一个布尔会把重写后的新的一份读成"已经交付过" ⇒ 那一份**永远不摆**。
+    /// 本件**不认识任何显示区的标签**（`handoff` 是显示区自己的词）
     /// ⇒ 它交回**整批**，由装配层去认自己关心的那一块。
     ///
-    /// ⚠ **看不见就是空**：活动段封口（1 MiB 一次）之后，上一次活动的开场可能落在上一卷里，
+    /// ⚠ **为什么是「那几段」而不是「紧邻上一次」**（2026-10-23）：只看紧邻上一次活动，
+    /// 会漏掉**再上一段**摆过的那一份——一次交付之后的那一段（正确地）不再摆，于是它的
+    /// **下一段**又把同一份读成"没交付过" ⇒ 同一份交接**隔一段重播一次**，而"此后不再摆"
+    /// 是这一块的契约（`handoff` 的「一次播放」）。因此这里收的是"想过的那几段"的全部开场块，
+    /// 按正文认出那一份是不是已经进过它的视野。
+    ///
+    /// ⚠ **看不见就是空**：活动段封口（1 MiB 一次）之后，早先几段的活动可能落在上一卷里，
     /// 而本件只读活动段 ⇒ 这一格为空 ⇒ 装配层读作"没交付过" ⇒ 至多**重播一次**。方向就是设计
     /// 定的那一条（B4.2：**丢失不可接受、重复可容忍**）——**绝不静默跳过**。
-    pub last_opening_blocks: Vec<(String, String)>,
-    /// **紧邻上一次活动想过没有**（账里有它的 `model-response` 记录 ⇒ `true`）。
-    ///
-    /// ⚠ **它为什么在这里**：交付判据要的不是"注入落过账"，而是"**那一段真的想过**"——
-    /// 开场那条注入落账与第一次模型调用之间有一个窄窗口：**注入已落账、而这一段一个回合都没想成**
-    /// （进程没了，或那一次调用失败收场）⇒ **主体没有拿到**那一份。少了这一格，交付判据会在那个窗口里
-    /// 读作"交付过"、把那一份**沉底**——那是**丢失**方向，而设计定的方向是"丢失不可接受、
-    /// 重复可容忍"（B4.2）。
-    ///
-    /// ⚠ 与 [`Self::last_opening_blocks`] **同一条读法**：都取"紧邻上一次活动"（序号最大的那一段），
-    /// 都从**同一次解析**里算出来，**不新开读取点、不落新事实**。
-    pub last_activity_thought: bool,
+    pub openings_that_thought: Vec<Vec<(String, String)>>,
 }
 
 /// 开场读数（**一次解析**，见 [`OpeningReadings`]）。
@@ -1188,56 +1185,48 @@ fn opening_readings_at(root: &Path, tail: TailPolicy) -> Result<OpeningReadings,
         admission: admission_from(&parts, &records)?,
         last_storage_failure: last_storage_failure_of(&records)?
             .or_else(|| previous.and_then(|part| part.paused.clone())),
-        last_opening_blocks: last_opening_blocks_of(&records),
-        last_activity_thought: last_activity_thought_of(&records),
+        openings_that_thought: openings_that_thought_of(&records),
     })
 }
 
-/// **紧邻上一次活动**（记录里序号最大的那一段）——在开场这一刻它就是"上一次"：
-/// 本段活动这时还没有任何记录。
+/// **想过的那几段活动**（记录里出现过的每一段，按先后）——每一段自己的开场那一批块，
+/// **只收真的想过的那几段**（账里有它的 `model-response`）。
 ///
-/// ⚠ **不按活动 id 取最大**：`run-12` 按 id 排在 `run-4` **前面**，那不是先后（与"最近那一段"
-/// 同一条判据）。两条开场读数（`last_opening_blocks` / `last_activity_thought`）都从它算起，
-/// 因此"上一次"只有一个定义。
-fn last_run_of(records: &[TraceRecord]) -> Option<RunId> {
-    records.last().map(|record| record.run().clone())
-}
-
-/// **紧邻上一次活动的开场那一批块**（见 [`OpeningReadings::last_opening_blocks`]）。
+/// ⚠ **不收"紧邻上一次"**（2026-10-23 修）：那样会漏掉再上一段摆过的那一份 ⇒ 同一份交接
+/// 隔一段重播一次（见 [`OpeningReadings::openings_that_thought`]）。
 ///
-/// **紧邻上一次活动的开场那一批块**（见 [`OpeningReadings::last_opening_blocks`]）。
+/// ⚠ **不按活动 id 取次序**：`run-12` 按 id 排在 `run-4` **前面**，那不是先后——这里按
+/// **记录出现的先后**认段（与"最近那一段"同一条判据）。
 ///
-/// 一段活动只有**一条** Run 级注入（`is_started` 那条机械事实保证恰好一次）⇒ 这里照旧
-/// **只留最后一条**，与"最后一条存储故障"同一条读法（不重写前面那些）。
-fn last_opening_blocks_of(records: &[TraceRecord]) -> Vec<(String, String)> {
-    let Some(last_run) = last_run_of(records) else {
-        return Vec::new();
-    };
-    let mut found: Vec<(String, String)> = Vec::new();
+/// 一段活动只有**一条** Run 级注入（`is_started` 那条机械事实保证恰好一次）⇒ 每段最多一批块，
+/// 后见的覆盖先见的（同一条"只留最后一条"读法，不重写前面那些）。
+fn openings_that_thought_of(records: &[TraceRecord]) -> Vec<Vec<(String, String)>> {
+    // 段的先后就是它第一次出现的先后；每一格：开场块 ＋ 想过没有。
+    let mut order: Vec<RunId> = Vec::new();
+    let mut openings: Vec<(Vec<(String, String)>, bool)> = Vec::new();
     for record in records {
-        if record.run() != &last_run {
-            continue;
-        }
-        if let TracePayload::Injection { stage, blocks, .. } = record.entry()
-            && stage == RUN_START_STAGE
-        {
-            found = blocks.clone();
+        let run = record.run();
+        let index = match order.iter().position(|seen| seen == run) {
+            Some(index) => index,
+            None => {
+                order.push(run.clone());
+                openings.push((Vec::new(), false));
+                openings.len() - 1
+            }
+        };
+        match record.entry() {
+            TracePayload::Injection { stage, blocks, .. } if stage == RUN_START_STAGE => {
+                openings[index].0 = blocks.clone();
+            }
+            TracePayload::ModelResponse { .. } => openings[index].1 = true,
+            _ => {}
         }
     }
-    found
-}
-
-/// **紧邻上一次活动想过没有**（见 [`OpeningReadings::last_activity_thought`]）。
-///
-/// 判据是账里的机械事实：那一段活动有没有一条 `model-response` 记录。**有一条就算想过**——
-/// 开场那批内容随第一次模型调用进了主体的视野，此后哪一轮想成都算（那一份确实进过视野）。
-fn last_activity_thought_of(records: &[TraceRecord]) -> bool {
-    let Some(last_run) = last_run_of(records) else {
-        return false;
-    };
-    records.iter().any(|record| {
-        record.run() == &last_run && matches!(record.entry(), TracePayload::ModelResponse { .. })
-    })
+    openings
+        .into_iter()
+        .filter(|(blocks, thought)| *thought && !blocks.is_empty())
+        .map(|(blocks, _)| blocks)
+        .collect()
 }
 
 /// 历史上最后一次存储故障（从已经解析过的记录算）。
