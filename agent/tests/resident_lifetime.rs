@@ -27,22 +27,32 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 use celira_agent::resident_lifetime::CONTAINED;
 
+// ⚠ 下面六个标识符**只被 `#[cfg(windows)]` 的夹具用** ⇒ 同一个 `cfg` 也跟着它们：
+// 否则 Linux 上它们是死代码，`cargo clippy --all-targets -- -D warnings`（CI 那一行）
+// 会红在"never used"上，而 `cargo test` 照样全绿——正是本仓记过的那个形状。
+
 /// 夹具模式（本 exe 换一个身份跑）。
+#[cfg(windows)]
 const HELPER_ENV: &str = "CELIRA_RESIDENT_LIFETIME_HELPER";
 /// 夹具这一跑要不要收容（`0` ⇒ 负对照那一档）。
+#[cfg(windows)]
 const ADOPT_ENV: &str = "CELIRA_RESIDENT_LIFETIME_ADOPT";
 /// 后代 pid 写到哪个文件。
+#[cfg(windows)]
 const PID_FILE_ENV: &str = "CELIRA_RESIDENT_LIFETIME_PID_FILE";
 /// 后代模式（睡够再走）。
+#[cfg(windows)]
 const DESCENDANT_ENV: &str = "CELIRA_RESIDENT_LIFETIME_DESCENDANT";
 /// 夹具把**收容读数**写到哪个文件（与 pid 同目录）。
 ///
 /// ⚠ 为什么不从 stdout 读：子进程**会继承父进程管道的副本**（本仓 2026-10-11 那个
 /// "攥着管道"的真机形状就是它），于是"等它打印完"会变成"等它的后代也退出"——第一版
 /// 就是这么写的，一条本该 1 秒的用例被拖了 30 秒。落文件不碰管道，读数一样拿得到。
+#[cfg(windows)]
 const READING_FILE_ENV: &str = "CELIRA_RESIDENT_LIFETIME_READING_FILE";
 
 /// 宿主那一行读数的形状（与 `agent_host` 打的那一行逐字同形）。
+#[cfg(windows)]
 const READING_LINE: &str = "[resident] processes = ";
 
 /// 后代活多久（够长：判据是"它随住户一起消失"，不是"它自然老死"）。
