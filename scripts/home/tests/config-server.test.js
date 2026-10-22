@@ -70,9 +70,10 @@ function listFile(homeDir) {
 function bindingFile(homeDir) {
   return modelSources.bindingPath(path.join(homeDir, 'env'))
 }
-/** 直接读清单（判"落盘的是什么"时用），读成数组。 */
+/** 直接读清单（判"落盘的是什么"时用），读成数组（新形状 `{next, entries}` / 老数组都认）。 */
 function readList(homeDir) {
-  return JSON.parse(fs.readFileSync(listFile(homeDir), 'utf8'))
+  const parsed = JSON.parse(fs.readFileSync(listFile(homeDir), 'utf8'))
+  return Array.isArray(parsed) ? parsed : parsed.entries
 }
 /** 直接读绑定（判"绑到哪一条"时用）。 */
 function readBinding(homeDir) {
@@ -705,6 +706,71 @@ configCase('DELETE 带 id：删清单条目；**被绑定挡住就拒**（409 + 
       assert.equal(missing.status, 404)
       assert.equal(missing.json.error, ERRORS.ENTRY_NOT_FOUND)
     }, { homeDir: root })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * ★ **两支住户各绑一条：删哪一条都被拒**（2026-10-23：模块层从前只看第一支）。
+ *
+ * 走**真实的 HTTP 路由**（不是直接调模块）：判据是"门传给模块的是不是**每一支**的
+ * 环境根"。用一份固定的住户表注入（`ctx.residents`），第二支故意是**唯一**绑着 `ms-2` 的
+ * 那一支 —— 只看第一支的实现会在这里把 `ms-2` 删掉，而那一支下次开机就报"模型源已被删除"。
+ */
+configCase('★ DELETE：两支住户各绑一条 ⇒ 删**任何一条**都被拒（问的是每一支）', async () => {
+  const root = scratch('delete-across-residents')
+  const first = path.join(root, 'agents', 'a-1')
+  const second = path.join(root, 'agents', 'b-2')
+  try {
+    fs.mkdirSync(first, { recursive: true })
+    fs.mkdirSync(second, { recursive: true })
+    fs.writeFileSync(path.join(first, 'identity.json'), '{"agent":"a-1"}')
+    fs.writeFileSync(path.join(second, 'identity.json'), '{"agent":"b-2"}')
+    modelSources.writeList(
+      root,
+      [
+        { id: 'ms-1', name: '主钥匙', endpoint: 'https://a.invalid/v1/chat/completions', api_key: 'k1', model: 'm1', context_window: 8192 },
+        { id: 'ms-2', name: '备用', endpoint: 'https://b.invalid/v1/chat/completions', api_key: 'k2', model: 'm2', context_window: 4096 },
+        { id: 'ms-3', name: '没人用', endpoint: 'https://c.invalid/v1/chat/completions', api_key: 'k3', model: 'm3', context_window: 2048 },
+      ],
+      4,
+    )
+    modelSources.writeBinding(first, 'ms-1')
+    modelSources.writeBinding(second, 'ms-2')
+    await withServer(
+      async ({ port }) => {
+        // 第一支绑着 ms-1 ⇒ 拒（老行为，照旧）。
+        const one = await request(port, 'DELETE', '/home-config?id=ms-1')
+        assert.equal(one.status, 409, one.text)
+        assert.equal(one.json.error, ERRORS.ENTRY_BOUND)
+        assert.equal(one.json.boundTo, 'ms-1')
+        // **只有第二支**绑着 ms-2 ⇒ 也拒（这一条从前会漏）。
+        const two = await request(port, 'DELETE', '/home-config?id=ms-2')
+        assert.equal(two.status, 409, two.text)
+        assert.equal(two.json.error, ERRORS.ENTRY_BOUND)
+        assert.equal(two.json.boundTo, 'ms-2')
+        assert.deepEqual(
+          readList(root).map((entry) => entry.id),
+          ['ms-1', 'ms-2', 'ms-3'],
+          '被拒的两次一个字节都不动',
+        )
+        // 没人绑的那条 ⇒ 删得掉（挡板不是"一律拒"）。
+        const free = await request(port, 'DELETE', '/home-config?id=ms-3')
+        assert.equal(free.status, 200, free.text)
+        assert.deepEqual(
+          readList(root).map((entry) => entry.id),
+          ['ms-1', 'ms-2'],
+        )
+      },
+      {
+        homeDir: root,
+        residents: () => [
+          { agentId: 'a-1', envDir: first },
+          { agentId: 'b-2', envDir: second },
+        ],
+      },
+    )
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }

@@ -365,6 +365,67 @@ fn a_binding_resolves_the_four_pieces_from_the_list() {
     assert_eq!(source.origin(), "file");
 }
 
+/// 写一份**新形状**的清单：`{ "next": N, "entries": [...] }`（2026-10-23 的持久计数器形状）。
+///
+/// `next` 是**分配计数器**（写侧的事）：读侧必须**忽略**它 —— 本模块从不分配 id，
+/// 只按绑定给的 id 找那一条。带上一个"看起来会误导"的值（`7`，而清单里只有 `ms-1`），
+/// 正是为了钉住这条：读数不许被计数器带跑。
+fn write_counted_list(home: &Path, next: u32) -> PathBuf {
+    let file = home.join("model_sources.json");
+    let text = format!(
+        "{{\n  \"next\": {next},\n  \"entries\": [\n    {{\n      \"id\": \"ms-1\",\n      \
+         \"name\": \"默认\",\n      \"endpoint\": \"https://counted.invalid/v1/chat\",\n      \
+         \"api_key\": \"sk-counted\",\n      \"model\": \"counted-model\",\n      \
+         \"context_window\": 32768\n    }}\n  ]\n}}\n"
+    );
+    fs::write(&file, text).expect("写新形状清单");
+    file
+}
+
+/// ★ **新形状清单可读**（2026-10-23）：`{ next, entries }` 与老数组给同一份四件套。
+///
+/// 为什么单独立一条：清单形状升级了，而**运行时的读侧是唯一的解析者**（本模块不缓存、不派生
+/// 第三份）。它认不得新形状 ⇒ 每一次开机都报"清单读不出来"，而文件本身分毫未坏。
+#[test]
+fn a_counted_list_shape_resolves_the_same_four_pieces() {
+    let home = scratch("counted-home");
+    let root = scratch("counted-env");
+    let list = write_counted_list(&home, 7);
+    write_binding(&root, "ms-1");
+
+    let source = model_source::decide(&root, Some(&list), &no_flags(), &[]).expect("新形状要读得成");
+    let Source::File(file) = &source else {
+        panic!("绑定了清单里的一条就该以文件为源");
+    };
+    assert_eq!(file.entry_id.as_deref(), Some("ms-1"));
+    assert_eq!(file.endpoint, "https://counted.invalid/v1/chat");
+    assert_eq!(file.credential, "sk-counted");
+    assert_eq!(file.model, "counted-model");
+    assert_eq!(file.context_window, 32768);
+
+    // 悬空绑定那条判据在新形状里**一字不变**（`next` 不是"这条存在"的证据）。
+    write_binding(&root, "ms-2");
+    let error = model_source::decide(&root, Some(&list), &no_flags(), &[])
+        .expect_err("清单里没有 ms-2 ⇒ 悬空绑定该拒绝");
+    assert!(error.contains("绑定的模型源已被删除"), "{error}");
+    assert!(error.contains("ms-2"), "{error}");
+}
+
+/// ★ **形状不对仍然 fail-closed，而且话里点名两种合法形状**（2026-10-23）。
+///
+/// 老消息说"最外层是一个数组"——形状升级之后那句话会把**一份合法的新清单**说成坏的，
+/// 于是人去"修"一份本来没错的文件。判据：错误里两种形状都点出来。
+#[test]
+fn a_list_with_an_unknown_shape_names_both_legal_shapes() {
+    let home = scratch("unknown-shape");
+    let file = home.join("model_sources.json");
+    fs::write(&file, "{ \"entries\": 5 }\n").expect("写坏清单");
+
+    let error = model_source::read_entry(&file, "ms-1").expect_err("形状不对就该拒绝");
+    assert!(error.contains("数组"), "{error}");
+    assert!(error.contains("entries"), "{error}");
+}
+
 /// 判据 7：绑定与**老的单份配置**同时在场 ⇒ **双权威**，拒绝，而且两个文件都点出来。
 #[test]
 fn a_binding_plus_the_legacy_file_is_refused_as_two_authorities() {

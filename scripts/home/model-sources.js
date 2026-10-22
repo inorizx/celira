@@ -9,7 +9,7 @@
  *
  * | 文件 | 归属 | 形状 |
  * |---|---|---|
- * | `<家>/model_sources.json` | **机器** | `[{ id, name, endpoint, api_key, model, context_window, protocol?, reasoning_effort?, vision? }]` |
+ * | `<家>/model_sources.json` | **机器** | `{ "next": <下一个可用序号>, "entries": [{ id, name, endpoint, api_key, model, context_window, protocol?, reasoning_effort?, vision? }] }`（**老数组形状仍可读**） |
  * | `<环境根>/model_binding.json` | **Agent** | `{ "source": "<清单条目 id>" }` |
  *
  * 三条纪律：
@@ -119,9 +119,53 @@ function normalizeEntries(raw) {
   return out
 }
 
+/** 条目 id 里的序号（认不出 ⇒ 0）。 */
+function seqOf(id) {
+  const n = Number.parseInt(String(id).slice('ms-'.length), 10)
+  return Number.isInteger(n) && n > 0 ? n : 0
+}
+
+/** 一组条目里最大的序号（空 ⇒ 0）。 */
+function maxSeq(entries) {
+  let max = 0
+  for (const entry of entries) {
+    const n = seqOf(entry?.id)
+    if (n > max) max = n
+  }
+  return max
+}
+
+/**
+ * **下一个可用序号**：`next` 是**分配计数器**（不是事实）⇒ 坏 / 偏小 / 缺席都**不拒绝整份清单**，
+ * 取 `max(现有 id 序号) + 1`（至少 1）。这样坏掉的那一格最坏只是"退回按现存条目算"，
+ * 而**不会**把整份清单读成 unreadable（那会让人以为清单没了、去重配一份）。
+ */
+function nextSeqOf(entries, declared) {
+  const declaredOk = Number.isInteger(declared) && declared > 0 ? declared : 0
+  return Math.max(declaredOk, maxSeq(entries) + 1)
+}
+
+/** 盘上已有的 `next`（只用来防"写者忘了带这一格 ⇒ 计数器倒退"；读不懂 ⇒ 0）。 */
+function storedNext(homeDir) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(listPath(homeDir), 'utf8'))
+    if (parsed && !Array.isArray(parsed) && Number.isInteger(parsed.next) && parsed.next > 0) {
+      return parsed.next
+    }
+  } catch {
+    // 文件不在 / 读不懂 ⇒ 没有可守的计数器（`max+1` 那条兜底照旧生效）
+  }
+  return 0
+}
+
 /**
  * 读清单。**三种处境分开说**（`absent` / `unreadable` / `loaded`）——
  * "没配"与"配了但读不出来"是两件事，混成一个"没配"会让人去重配一份本来在的文件。
+ *
+ * **两种形状都读**：新对象 `{ "next": N, "entries": [...] }` 与老数组 `[...]`。
+ * 返回 `{ state, entries, next }` —— `next` 是**下一个可用序号**（正整数），
+ * 老数组按 `max(现有 id 序号) + 1` 算；新对象取 `next`，但**必须至少 max+1**（偏小取 max+1）。
+ * 别的形状 fail-closed（`not_array`）。
  */
 function readList(homeDir) {
   const file = listPath(homeDir)
@@ -129,26 +173,58 @@ function readList(homeDir) {
   try {
     text = fs.readFileSync(file, 'utf8')
   } catch {
-    return { state: 'absent', entries: [] }
+    return { state: 'absent', entries: [], next: 1 }
   }
   let parsed
   try {
     parsed = JSON.parse(text)
   } catch {
-    return { state: 'unreadable', entries: [], reason: 'not_json' }
+    return { state: 'unreadable', entries: [], next: 1, reason: 'not_json' }
   }
-  if (!Array.isArray(parsed)) return { state: 'unreadable', entries: [], reason: 'not_array' }
-  const entries = normalizeEntries(parsed)
+  let raw
+  let declared = null
+  if (Array.isArray(parsed)) {
+    raw = parsed
+  } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.entries)) {
+    raw = parsed.entries
+    declared = parsed.next
+  } else {
+    return { state: 'unreadable', entries: [], next: 1, reason: 'not_array' }
+  }
+  const entries = normalizeEntries(raw)
   // 解析后一条都不剩、而原文非空 ⇒ 形状全不认识（如实说，不假装"空清单"）。
-  if (entries.length === 0 && parsed.length > 0) {
-    return { state: 'unreadable', entries: [], reason: 'no_valid_entry' }
+  if (entries.length === 0 && raw.length > 0) {
+    return { state: 'unreadable', entries: [], next: 1, reason: 'no_valid_entry' }
   }
-  return { state: 'loaded', entries }
+  return { state: 'loaded', entries, next: nextSeqOf(entries, declared) }
 }
 
-/** 写清单（原子）。**只写规范形状**（调用方给的条目一律先过 `normalizeEntries`）。 */
-function writeList(homeDir, entries) {
-  const document = normalizeEntries(entries).map((entry) => {
+/**
+ * 从**任意路径**读一份清单的条目（探针用：`--model-sources <路径>` 指的是别处的清单，
+ * 不一定叫 `<家>/model_sources.json`）。
+ *
+ * 形状口径与 [`readList`] **同一处**：老数组 `[...]` 与 `{ next, entries }` 都认。
+ * 读不出来 / 形状不对 ⇒ **抛**（探针的处境是"这里必须读得出来"，不是"没配"）。
+ */
+function readEntriesAt(file) {
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const raw = Array.isArray(parsed) ? parsed : parsed?.entries
+  if (!Array.isArray(raw)) {
+    throw new Error(`模型源清单的最外层是数组或 {next, entries} 对象：${file}`)
+  }
+  return normalizeEntries(raw)
+}
+
+/**
+ * 写清单（原子）。**只写新形状**（`{ next, entries }`；老数组形状不再产出）。
+ *
+ * `next` = **下一个可用序号**（调用方给：新增条目时是旧 `next + 1`，其余场景原样）。
+ * 三条兜底，全在**这一个写点**上（任何调用方漏带这一格都不许让计数器倒退）：
+ * 不低于 `max(现有 id 序号) + 1`、不低于调用方给的 `next`、不低于**盘上已有的 `next`**。
+ */
+function writeList(homeDir, entries, next) {
+  const normalized = normalizeEntries(entries)
+  const document = normalized.map((entry) => {
     const out = {
       id: entry.id,
       name: entry.name,
@@ -165,17 +241,27 @@ function writeList(homeDir, entries) {
     if (entry.protocol) out.protocol = entry.protocol
     return out
   })
-  writeAtomic(listPath(homeDir), `${JSON.stringify(document, null, 2)}\n`)
+  const declared = Number.isInteger(next) && next > 0 ? next : 0
+  const safeNext = Math.max(declared, maxSeq(normalized) + 1, storedNext(homeDir))
+  writeAtomic(
+    listPath(homeDir),
+    `${JSON.stringify({ next: safeNext, entries: document }, null, 2)}\n`,
+  )
+  return safeNext
 }
 
-/** 下一个可用 id（`ms-<最大序号+1>`）——**单调**，删条目后不回收（回收会撞历史绑定）。 */
-function nextId(entries) {
-  let max = 0
-  for (const entry of entries) {
-    const n = Number.parseInt(entry.id.slice('ms-'.length), 10)
-    if (Number.isInteger(n) && n > max) max = n
-  }
-  return `ms-${max + 1}`
+/**
+ * 下一个可用 id（`ms-<next>`）——**单调，永不回收**。
+ *
+ * 序号从**清单的 `next` 计数器**来（不是"现存条目最大序号 + 1"）：清单被删空之后，
+ * 计数器仍记得走到哪儿了 ⇒ 下一条不会又是 `ms-1`、把历史绑定悄悄指到一条**新**条目上。
+ * 老数组形状（没有持久计数器）按现存条目算——那是它的最好答案。
+ *
+ * 接受 [`readList`] 的读数（`{ entries, next }`）；也兼容老调用点直接传条目数组。
+ */
+function nextId(list) {
+  const entries = Array.isArray(list) ? list : Array.isArray(list?.entries) ? list.entries : []
+  return `ms-${nextSeqOf(entries, Array.isArray(list) ? null : list?.next)}`
 }
 
 /**
@@ -203,10 +289,13 @@ function upsertEntry(homeDir, entry) {
   const normalized = normalizeEntries([merged])[0]
   if (!normalized) return { ok: false, reason: 'invalid_entry' }
   const entries = list.entries
-  const next = entries.some((each) => each.id === normalized.id)
+  const existing = entries.some((each) => each.id === normalized.id)
+  const next = existing
     ? entries.map((each) => (each.id === normalized.id ? normalized : each))
     : [...entries, normalized]
-  writeList(homeDir, next)
+  // **新增 ⇒ 计数器前进一格；更新 ⇒ 原样**（更新不该消耗一个序号：id 没变，历史绑定照旧）。
+  // 清单刚被删空时 `list.next` 正是那个"历史走到哪儿了"的答案 ⇒ 下一条不是 `ms-1`。
+  writeList(homeDir, next, existing ? list.next : list.next + 1)
   return { ok: true, entries: next }
 }
 
@@ -441,7 +530,8 @@ function migrateIfNeeded(homeDir, envDir) {
     return { action: 'migrated', detail: '清单第一条已在，补上绑定与留档', entry: existing }
   }
   const entry = { ...single, id: 'ms-1', name: single.name || single.model || '默认' }
-  writeList(homeDir, [entry, ...entries])
+  // `next` **至少 2**：`ms-1` 这一条已经占掉 1 号（计数器从此只会前进）。
+  writeList(homeDir, [entry, ...entries], Math.max(list.next, 2))
   writeBinding(envDir, entry.id)
   archiveLegacy(legacy)
   return { action: 'migrated', detail: '四件套已迁为清单第一条，绑定指向它', entry }
@@ -462,20 +552,32 @@ function archiveLegacy(legacy) {
 /**
  * 删除清单条目。**被绑定挡住就拒绝**（"有 Agent 正绑定这一条"）——
  * 与"删除配置"同一条纪律：后果、原因、怎么恢复三件事都要说得清。
- * 返回 `{ ok: true }` 或 `{ ok: false, reason: 'not_found' | 'bound', boundTo }`。
+ *
+ * ⚠ **绑定归 Agent，一个家住 N 支就有 N 份**（`<环境根>/model_binding.json`）⇒ 这里必须问
+ * **每一支**：只看一支会漏掉"第二支正绑着这条"的处境，删掉它的后果是那一支下次开机报
+ * "绑定的模型源已被删除"。`envDirs` 收环境根数组（也兼容单个字符串，旧调用点不破）。
+ *
+ * 返回 `{ ok: true }` 或 `{ ok: false, reason: 'unreadable' | 'not_found' | 'bound', boundTo }`
+ * —— `boundTo` 是**绑着它的那几个环境根**（数组；调用方要报"被谁绑着"时自己映射成 agent id）。
  */
-function removeEntry(homeDir, envDir, id) {
+function removeEntry(homeDir, envDirs, id) {
   const list = readList(homeDir)
   if (list.state === 'unreadable') return { ok: false, reason: 'unreadable', detail: list.reason }
   const entries = list.entries
   if (!entries.some((entry) => entry.id === id)) return { ok: false, reason: 'not_found' }
-  const binding = readBinding(envDir)
-  if (binding.state === 'bound' && binding.source === id) {
-    return { ok: false, reason: 'bound', boundTo: binding.source }
-  }
+  const dirs = (Array.isArray(envDirs) ? envDirs : [envDirs]).filter(
+    (dir) => typeof dir === 'string' && dir !== '',
+  )
+  const boundTo = dirs.filter((dir) => {
+    const binding = readBinding(dir)
+    return binding.state === 'bound' && binding.source === id
+  })
+  if (boundTo.length > 0) return { ok: false, reason: 'bound', boundTo }
+  // **`next` 原样带走**：删条目是释放 id 的**反面**——序号照样往前，绝不回收。
   writeList(
     homeDir,
     entries.filter((entry) => entry.id !== id),
+    list.next,
   )
   return { ok: true }
 }
@@ -491,6 +593,7 @@ module.exports = {
   legacyPath,
   normalizeEntries,
   readList,
+  readEntriesAt,
   writeList,
   upsertEntry,
   nextId,

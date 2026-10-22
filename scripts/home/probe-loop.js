@@ -262,14 +262,14 @@ async function main() {
   const listFile = options.modelSources || modelSources.listPath(paths.homeDir())
   let chosen = null
   if (fs.existsSync(listFile)) {
-    let parsed
+    let entries
     try {
-      parsed = JSON.parse(fs.readFileSync(listFile, 'utf8'))
+      entries = modelSources.readEntriesAt(listFile)
     } catch (error) {
       console.error(`[probe-loop] 清单读不出来（${listFile}）：${error.message}`)
       return 2
     }
-    const picked = chooseModelSource(modelSources.normalizeEntries(parsed), options.modelSourceId)
+    const picked = chooseModelSource(entries, options.modelSourceId)
     if (!picked.ok) {
       console.error(`[probe-loop] ${picked.reason}`)
       console.error(`[probe-loop] 清单：${listFile}`)

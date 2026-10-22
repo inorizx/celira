@@ -42,7 +42,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::local_residents;
 use crate::local_world::LocalFacts;
@@ -145,7 +145,7 @@ pub fn ensure_status_door(facts: &LocalFacts) -> DoorOutcome {
         Err(error) => {
             return DoorOutcome::Failed {
                 detail: format!("状态口绑不上 127.0.0.1:{port}（{error}）"),
-            }
+            };
         }
     };
     let home_dir = facts.home_dir.clone();
@@ -219,7 +219,7 @@ pub fn ensure_config_door(facts: &LocalFacts) -> DoorOutcome {
         Err(error) => {
             return DoorOutcome::Failed {
                 detail: format!("配置门绑不上 127.0.0.1:{port}（{error}）"),
-            }
+            };
         }
     };
     let home_dir = facts.home_dir.clone();
@@ -400,8 +400,8 @@ fn env_roots_with_ids(home_dir: &Path) -> Vec<(Option<String>, std::path::PathBu
 /// 三层各说各的话：**清单**（机器级）／**绑定**（各支）／**由绑定算出来的派生字段**。
 /// ⚠ `api_key` **一个字节都不在这个载荷里**（只有 `keyConfigured` 布尔）。
 pub fn config_snapshot(facts: &LocalFacts) -> Value {
-    use crate::home_facts::{read_model_binding, ModelBinding};
-    use crate::model_sources::{read_list, EntryPayload, ListState};
+    use crate::home_facts::{ModelBinding, read_model_binding};
+    use crate::model_sources::{EntryPayload, ListState, read_list};
 
     let home_dir = &facts.home_dir;
     let list = read_list(home_dir);
@@ -821,11 +821,12 @@ struct PickedEntry {
 
 fn pick_entry_id(
     body: &Value,
-    entries: &[crate::model_sources::ModelSourceEntry],
+    list: &crate::model_sources::ListState,
     bound: Option<&str>,
     create: bool,
 ) -> Result<PickedEntry, &'static str> {
     use crate::model_sources::{is_entry_id, next_entry_id};
+    let entries = list.entries();
     let raw = body
         .get("id")
         .and_then(|value| value.as_str())
@@ -838,7 +839,8 @@ fn pick_entry_id(
             return Err("bad_request");
         }
         return Ok(PickedEntry {
-            id: next_entry_id(entries),
+            // ⚠ 从清单的 `next` **计数器**取（不是 max+1）：清单被删空之后也不许又是 `ms-1`。
+            id: next_entry_id(list),
             previous: None,
             creating: true,
         });
@@ -863,7 +865,7 @@ fn pick_entry_id(
     } else if let Some(bound) = bound {
         bound.to_string()
     } else {
-        next_entry_id(entries)
+        next_entry_id(list)
     };
     let target = previous
         .clone()
@@ -986,21 +988,23 @@ fn clear_binding_to(facts: &LocalFacts, env_roots: &[std::path::PathBuf]) -> Res
 
 /// `POST` 新建 / `PUT` 更新（照 `config-server.js` 的那一段，**顺序与判据一字不动**）。
 fn config_write(facts: &LocalFacts, method: &str, body_text: &str) -> (u16, Value) {
-    use crate::model_sources::{upsert_entry, ModelSourceEntry};
+    use crate::model_sources::{ModelSourceEntry, upsert_entry};
     let creating = method == "POST";
     let body = match parse_body(body_text) {
         Ok(body) => body,
         Err(error) => return (400, error),
     };
     let before = config_snapshot(facts);
-    if before["sourcesState"] == "unreadable" {
+    // **保留整份读数**（不是只取 entries）：新建时 id 从清单的 `next` 计数器取，
+    // 只拿 entries 会把计数器丢了 ⇒ 删空之后又回到 `ms-1`。
+    let list = crate::model_sources::read_list(&facts.home_dir);
+    // 判的是**这份读数自己**（不是快照里那一格）：`pick_entry_id` 会问它的 `next`，
+    // 而读不出来的清单没有可用的计数器 —— 不许据此分配 id。
+    if list.kind() == "unreadable" {
         return (500, json!({ "error": "read_failed" }));
     }
-    let entries = crate::model_sources::read_list(&facts.home_dir)
-        .entries()
-        .to_vec();
     let bound = before["bound"].as_str().map(|value| value.to_string());
-    let picked = match pick_entry_id(&body, &entries, bound.as_deref(), creating) {
+    let picked = match pick_entry_id(&body, &list, bound.as_deref(), creating) {
         Ok(picked) => picked,
         Err(error) => {
             let status = if error == "entry_not_found" { 404 } else { 400 };
@@ -2406,6 +2410,11 @@ mod tests {
             api_key: key.to_string(),
         };
         let entries = vec![entry("ms-1", "sk-old")];
+        // 计数器指着 2（`entries` 里的 max+1 也是 2）—— 这一层要的是"id 从计数器来"这条契约。
+        let list = crate::model_sources::ListState::Loaded {
+            entries: entries.clone(),
+            next: 2,
+        };
 
         // ① 地址：空 / 不是 http(s) / 只有协议头 / 没有协议 ⇒ 都是 `invalid_endpoint`。
         for bad in ["", "ftp://x/y", "http://", "api.deepseek.com"] {
@@ -2523,35 +2532,47 @@ mod tests {
 
         // ⑧ `pickEntryId`：新建不给 id（给了就拒）；更新点名必须**在场**；不给 id 用当前绑定的那条。
         assert_eq!(
-            pick_entry_id(&json!({ "id": "ms-9" }), &entries, None, true).err(),
+            pick_entry_id(&json!({ "id": "ms-9" }), &list, None, true).err(),
             Some("bad_request"),
             "新建是指定 id ⇒ 拒绝（那是新建，不是覆盖）"
         );
         assert_eq!(
-            pick_entry_id(&json!({}), &entries, None, true)
+            pick_entry_id(&json!({}), &list, None, true)
                 .expect("新建（不给 id）")
                 .id,
             "ms-2",
             "id 由门给，单调不回收"
         );
+        // ★ **新建的 id 从计数器来**：清单里只有 `ms-1`，而 `next` 指着 9 ⇒ 新的是 `ms-9`
+        //   （不是 max+1 的 `ms-2`）—— 删空之后也照这条走，历史绑定才不会指错。
+        let advanced = crate::model_sources::ListState::Loaded {
+            entries: entries.clone(),
+            next: 9,
+        };
         assert_eq!(
-            pick_entry_id(&json!({ "id": "nope" }), &entries, None, false).err(),
+            pick_entry_id(&json!({}), &advanced, None, true)
+                .expect("新建（计数器已走到 9）")
+                .id,
+            "ms-9",
+            "id 从清单的 next 取（**不是** max+1）"
+        );
+        assert_eq!(
+            pick_entry_id(&json!({ "id": "nope" }), &list, None, false).err(),
             Some("invalid_id")
         );
         assert_eq!(
-            pick_entry_id(&json!({ "id": "ms-9" }), &entries, None, false).err(),
+            pick_entry_id(&json!({ "id": "ms-9" }), &list, None, false).err(),
             Some("entry_not_found"),
             "点名一条不在场的 ⇒ 绝不悄悄新建一条"
         );
-        let picked =
-            pick_entry_id(&json!({}), &entries, Some("ms-1"), false).expect("用绑定的那条");
+        let picked = pick_entry_id(&json!({}), &list, Some("ms-1"), false).expect("用绑定的那条");
         assert_eq!(picked.id, "ms-1");
         assert!(!picked.creating);
         assert_eq!(
             picked.previous.map(|each| each.api_key),
             Some("sk-old".to_string())
         );
-        let fresh = pick_entry_id(&json!({}), &entries, None, false).expect("没绑定 ⇒ 新建");
+        let fresh = pick_entry_id(&json!({}), &list, None, false).expect("没绑定 ⇒ 新建");
         assert_eq!(fresh.id, "ms-2");
         assert!(fresh.creating);
     }
@@ -2824,7 +2845,7 @@ mod tests {
                 api_key: "k".to_string(),
             })
             .collect();
-        crate::model_sources::write_list(&home, &entries).unwrap();
+        crate::model_sources::write_list(&home, &entries, 3).unwrap();
         let binding_text = |dir: &std::path::Path| {
             std::fs::read_to_string(dir.join("model_binding.json")).unwrap()
         };
@@ -2968,7 +2989,7 @@ mod tests {
                 api_key: "k".to_string(),
             })
             .collect();
-        crate::model_sources::write_list(&home, &entries).unwrap();
+        crate::model_sources::write_list(&home, &entries, 3).unwrap();
         let binding_text = || std::fs::read_to_string(first.join("model_binding.json")).unwrap();
         let facts = LocalFacts::load(Some(&home), Some(&home));
 
@@ -3092,7 +3113,7 @@ mod tests {
             })
             .collect();
         // ⚠ 这两笔是**直接写文件**（不是门写的）⇒ 见证那一层此刻应当是 `no-witness`。
-        crate::model_sources::write_list(&home, &entries).unwrap();
+        crate::model_sources::write_list(&home, &entries, 3).unwrap();
         let facts = LocalFacts::load(Some(&home), Some(&home));
         let list_path = crate::model_sources::list_path(&home);
         let binding_path = first.join(crate::model_sources::BINDING_FILE);
@@ -3210,6 +3231,7 @@ mod tests {
                 vision: false,
                 api_key: "k".to_string(),
             }],
+            2,
         )
         .unwrap();
         let facts = LocalFacts::load(Some(&home), Some(&home));
@@ -3269,7 +3291,7 @@ mod tests {
             vision: false,
             api_key: canary.to_string(),
         }];
-        crate::model_sources::write_list(&home, &entries).unwrap();
+        crate::model_sources::write_list(&home, &entries, 2).unwrap();
         let list_before = std::fs::read_to_string(crate::model_sources::list_path(&home)).unwrap();
         let binding_before = std::fs::read_to_string(first.join("model_binding.json")).unwrap();
         let facts = LocalFacts::load(Some(&home), Some(&home));
@@ -3428,5 +3450,152 @@ mod tests {
         assert_eq!(payload.get("legacyHome"), Some(&json!(true)));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ★ **多住户删除保护**：一个家住 N 支就有 N 份绑定 —— **第二支**绑着也不许删。
+    ///
+    /// 为什么单独立一条：删条目的挡板是 [`bound_anywhere`]（查**每一支**）。只看一支会漏掉
+    /// "第二支正绑着这条"，而删掉它的后果是那一支下次开机报"绑定的模型源已被删除"。
+    /// 同时钉住两件事：**被拒的删除一个字节都不动**；删成功时 `next` **不倒退**。
+    #[test]
+    fn deleting_a_source_is_blocked_by_any_resident_still_bound_to_it() {
+        let root =
+            std::env::temp_dir().join(format!("celira-door-multi-del-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let home = root.join("home");
+        let first = home.join("agents").join("a-1");
+        let second = home.join("agents").join("b-2");
+        for (dir, id) in [(&first, "a-1"), (&second, "b-2")] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("identity.json"), format!(r#"{{"agent":"{id}"}}"#)).unwrap();
+        }
+        // 只有**第二支**绑着 `ms-2`（第一支绑 `ms-1`）—— 这就是"只看一支会漏"的那个处境。
+        crate::model_sources::write_binding(&first, "ms-1").unwrap();
+        crate::model_sources::write_binding(&second, "ms-2").unwrap();
+        let entries: Vec<crate::model_sources::ModelSourceEntry> = ["ms-1", "ms-2"]
+            .iter()
+            .map(|id| crate::model_sources::ModelSourceEntry {
+                id: (*id).to_string(),
+                name: format!("钥匙 {id}"),
+                endpoint: "https://x.invalid/v1/chat/completions".to_string(),
+                model: "m".to_string(),
+                context_window: 8192,
+                protocol: None,
+                reasoning_effort: None,
+                vision: false,
+                api_key: "k".to_string(),
+            })
+            .collect();
+        // `next` 已经走到 7（比两条都大）—— 删条目之后它必须还在 7。
+        crate::model_sources::write_list(&home, &entries, 7).unwrap();
+        let file = crate::model_sources::list_path(&home);
+        let before = std::fs::read_to_string(&file).unwrap();
+        let facts = LocalFacts::load(Some(&home), Some(&home));
+
+        // ① 第二支绑着 `ms-2` ⇒ 409，文件一个字节都不动。
+        let (status, body) = config_delete(&facts, Some("ms-2"));
+        assert_eq!(status, 409, "第二支绑着它 ⇒ 不许删：{body}");
+        assert_eq!(body["error"], "entry_bound");
+        assert_eq!(body["boundTo"], "ms-2");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            before,
+            "被拒的删除一个字节都不动"
+        );
+
+        // ② 第一支也改绑 `ms-2`（两支都绑着）⇒ 仍然 409。
+        crate::model_sources::write_binding(&first, "ms-2").unwrap();
+        assert_eq!(config_delete(&facts, Some("ms-2")).0, 409);
+
+        // ③ 两支都放掉 ⇒ 删得掉；`next` 不许倒退（盘上的 7 还在）。
+        crate::model_sources::clear_binding(&first).unwrap();
+        crate::model_sources::clear_binding(&second).unwrap();
+        let (status, body) = config_delete(&facts, Some("ms-2"));
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            body["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|each| each["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["ms-1"]
+        );
+        let parsed: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(
+            parsed.get("next").and_then(Value::as_u64),
+            Some(7),
+            "删条目不许让 next 倒退"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ★ **壳读得动 Node 门写的新形状，写一次仍是新形状且 `next` 不倒退**（2026-10-23）。
+    ///
+    /// 这是跨容器契约的验收面：文件是**同一个** `<家>/model_sources.json`，两套实现各写一份
+    /// 形状就是分叉。这一条从门的公开入口（快照 + 新建）走一遍，钉住"读 ⇒ 写 ⇒ 再读"。
+    #[test]
+    fn the_door_reads_and_writes_the_node_shape() {
+        let home = std::env::temp_dir().join(format!("celira-door-shape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        // Node 门写出来的那份新形状（`next` 已经走到 5）。
+        std::fs::write(
+            crate::model_sources::list_path(&home),
+            r#"{
+  "next": 5,
+  "entries": [
+    {
+      "id": "ms-2",
+      "name": "深度求索",
+      "endpoint": "https://x.invalid/v1/chat/completions",
+      "api_key": "sk-secret",
+      "model": "m",
+      "context_window": 8192,
+      "reasoning_effort": null,
+      "vision": false
+    }
+  ]
+}
+"#,
+        )
+        .unwrap();
+        let facts = LocalFacts::load(Some(&home), Some(&home));
+
+        // ① 读：快照里 entries 正确（旧实现会把新形状读成 unreadable）。
+        let snapshot = config_snapshot(&facts);
+        assert_eq!(snapshot["sourcesState"], "loaded", "{snapshot}");
+        assert_eq!(snapshot["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(snapshot["entries"][0]["id"], "ms-2");
+        assert!(
+            !snapshot.to_string().contains("sk-secret"),
+            "钥匙不许进载荷"
+        );
+
+        // ② 写：删掉唯一那一条 ⇒ 落盘仍是对象形状，`next` 还在 5（不倒退）。
+        let (status, _body) = config_delete(&facts, Some("ms-2"));
+        assert_eq!(status, 200);
+        let text = std::fs::read_to_string(crate::model_sources::list_path(&home)).unwrap();
+        assert!(
+            !text.trim_start().starts_with('['),
+            "写一次就该是新形状：{text}"
+        );
+        assert!(text.starts_with("{\n  \"next\": 5,"), "{text}");
+
+        // ③ 删空之后再新建：id **不是** `ms-1`（计数器记得历史）。
+        //    地址指向一个几乎必然没人听的端口 ⇒ 试连是确定性的，且不碰外网。
+        let (status, body) = config_write(
+            &facts,
+            "POST",
+            r#"{"endpoint":"http://127.0.0.1:9/v1/chat/completions","model":"m","apiKey":"k","contextWindow":"8192","bind":false}"#,
+        );
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["entryId"], "ms-5", "删空之后新增不许又是 ms-1：{body}");
+        let parsed: Value = serde_json::from_str(
+            &std::fs::read_to_string(crate::model_sources::list_path(&home)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(parsed.get("next").and_then(Value::as_u64), Some(6));
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

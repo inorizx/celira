@@ -1149,7 +1149,7 @@ fn choose_entry_if_unbound(
     env_root: &Path,
 ) -> Result<Option<ChosenBinding>, BindingRefusal> {
     let entries = match model_sources::read_list(home_dir) {
-        ListState::Loaded { entries } => entries,
+        ListState::Loaded { entries, .. } => entries,
         ListState::Unreadable { reason } => {
             return Err((
                 RefusalReason::ModelBindingUnreadable,

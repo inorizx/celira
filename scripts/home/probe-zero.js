@@ -292,7 +292,7 @@ async function main() {
   let entry
   try {
     const picked = chooseModelSource(
-      modelSources.normalizeEntries(JSON.parse(fs.readFileSync(listFile, 'utf8'))),
+      modelSources.readEntriesAt(listFile),
       options.modelSourceId,
     )
     if (!picked.ok) {
@@ -432,9 +432,12 @@ async function main() {
 
     const listPath = path.join(homeDir, 'model_sources.json')
     const bindingPath = path.join(homeDir, 'agents', agentId, 'model_binding.json')
-    const savedList = fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, 'utf8')) : null
+    // 清单**两种形状都认**（2026-10-23：新形状 `{ next, entries }`；老数组仍可读）。
+    const savedDocument = fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, 'utf8')) : null
+    const savedList =
+      savedDocument === null ? null : Array.isArray(savedDocument) ? savedDocument : savedDocument.entries
     const savedBinding = fs.existsSync(bindingPath) ? JSON.parse(fs.readFileSync(bindingPath, 'utf8')) : null
-    say(`落盘：清单 ${savedList ? `${savedList.length} 条（${savedList[0].id}）` : '**没有**'} ｜ 绑定 ${savedBinding ? savedBinding.source : '**没有**'}`)
+    say(`落盘：清单 ${savedList ? `${savedList.length} 条（${savedList[0]?.id ?? '空'}）` : '**没有**'} ｜ 绑定 ${savedBinding ? savedBinding.source : '**没有**'}`)
     if (!savedList || !savedBinding) {
       console.error('[probe-zero] 页面保存**没有落盘** ⇒ 这一格没验成（门或页面那条路）—— 如实报')
       return 3
@@ -442,7 +445,9 @@ async function main() {
     // 思考强度：页面上没有那一格（门的写接口也不认它）⇒ 手写清单，如实说
     if (options.effort) {
       savedList[0].reasoning_effort = options.effort
-      fs.writeFileSync(listPath, `${JSON.stringify(savedList, null, 2)}\n`)
+      // ⚠ 手写也要**保留原来的形状**（新形状那一格 `next` 不能丢：丢了计数器会退回 max+1）。
+      const document = Array.isArray(savedDocument) ? savedDocument : { ...savedDocument, entries: savedList }
+      fs.writeFileSync(listPath, `${JSON.stringify(document, null, 2)}\n`)
       say(`思考强度 = ${options.effort}（**手写清单**：页面上没有那一格、门的写接口也不认它）`)
     }
 

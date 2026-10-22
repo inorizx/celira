@@ -440,9 +440,14 @@ fn apply_binding_overrides(file: &mut FileSource, binding: &Binding) {
  * 在**清单**里按 id 解析出四件套（刀2b）。
  *
  * 三种失败分开说，**都不静默**：
- * - 清单文件读不出来 / 不是 JSON / 不是数组 ⇒ 如实报路径与原因；
+ * - 清单文件读不出来 / 不是 JSON / 形状不对（既不是数组，也不是 `{ next, entries }` 对象）
+ *   ⇒ 如实报路径与原因；
  * - 清单里**没有那个 id** ⇒ 明说"绑定的模型源已被删除"（这是悬空绑定，`decide` 会拒绝启动）；
  * - 那一条本身缺件 / 窗口不是正整数 ⇒ 点名是哪一件。
+ *
+ * ⚠ **两种形状都认**（2026-10-23）：老数组 `[...]` 与带计数器的
+ * `{ "next": N, "entries": [...] }`。`next` 是**分配计数器**（写侧的事），读侧**忽略**它 ——
+ * 本模块从不分配 id，只按绑定给的 id 找那一条。
  */
 pub fn read_entry(list_path: &Path, id: &str) -> Result<FileSource, String> {
     let text = std::fs::read_to_string(list_path).map_err(|error| {
@@ -458,12 +463,16 @@ pub fn read_entry(list_path: &Path, id: &str) -> Result<FileSource, String> {
             list_path.display()
         )
     })?;
-    let entries = value.as_array().ok_or_else(|| {
-        format!(
-            "模型源清单的最外层是一个数组：{}（读到的不是）。",
-            list_path.display()
-        )
-    })?;
+    let entries = match value.as_array() {
+        Some(items) => items,
+        // 新形状：`{ "next": N, "entries": [...] }`（`next` 对读侧无意义）。
+        None => value.get("entries").and_then(|it| it.as_array()).ok_or_else(|| {
+            format!(
+                "模型源清单的最外层是数组或 {{next, entries}} 对象：{}（读到的不是）。",
+                list_path.display()
+            )
+        })?,
+    };
     let entry = entries
         .iter()
         .find(|each| each.get("id").and_then(|it| it.as_str()) == Some(id))

@@ -803,23 +803,24 @@ function validateProbe(body) {
 /**
  * 这一条存的是**哪一格**（刀2b）：`body.id` **只在这一处被读**。
  *
- * - **`POST`（新建）**：id 由**门**给（`nextId`，单调不回收）；调用方指定 id 一律拒绝
- *   ——那是新建，不是覆盖。
+ * - **`POST`（新建）**：id 由**门**给（`nextId`，读清单的 `next` 计数器 ⇒ **单调、永不回收**）；
+ *   调用方指定 id 一律拒绝 ——那是新建，不是覆盖。
  * - **`PUT` 给了 id**：那一条必须**在场**（不在场 = `entry_not_found`，绝不悄悄新建一条）。
  * - **`PUT` 没给 id**：**当前绑定的那一条**（老页面那个"保存"就是它）；连绑定都没有 ⇒ 新建。
  *
  * 返回 `{ ok: true, id, previous, creating }` 或 `{ ok: false, error }`。
  */
-function pickEntryId(body, { entries, bound, create }) {
+function pickEntryId(body, { list, bound, create }) {
+  const entries = list.entries
   const raw = typeof body.id === 'string' ? body.id.trim() : ''
   if (create) {
     if (raw) return { ok: false, error: ERRORS.BAD_REQUEST }
-    return { ok: true, id: modelSources.nextId(entries), previous: null, creating: true }
+    return { ok: true, id: modelSources.nextId(list), previous: null, creating: true }
   }
   if (raw && !modelSources.ID_SHAPE.test(raw)) return { ok: false, error: ERRORS.INVALID_ID }
   const previous = raw ? (entries.find((entry) => entry.id === raw) ?? null) : null
   if (raw && previous === null) return { ok: false, error: ERRORS.ENTRY_NOT_FOUND }
-  const id = raw || bound || modelSources.nextId(entries)
+  const id = raw || bound || modelSources.nextId(list)
   const target = previous ?? entries.find((entry) => entry.id === id) ?? null
   return { ok: true, id, previous: target, creating: target === null }
 }
@@ -1220,12 +1221,13 @@ function createConfigServer(ctx, options = {}) {
         respond(res, 409, { error: ERRORS.ENTRY_BOUND, boundTo: id })
         return
       }
-      // ⚠ 住户化之后要问**每一支**（一支绑着这条就不许删）—— 上面那道 `boundAnywhere` 才是
-      // 真正的挡板；`removeEntry` 自己那次复核只看**第一支**的环境根（历史形状，先有它后有住户化）。
-      const removed = modelSources.removeEntry(homeDir, residentEnvsOf()[0].envDir, id)
+      // ⚠ 住户化之后要问**每一支**（一支绑着这条就不许删）—— 上面那道 `boundAnywhere` 是
+      // 第一道挡板；模块层 `removeEntry` 自己也问**每一支**（2026-10-23：从前它只看第一支，
+      // 而"第一支"在没有住户时会直接炸）。两处传的是**同一份住户表**（`envDirsOf()`）。
+      const removed = modelSources.removeEntry(homeDir, envDirsOf(), id)
       if (!removed.ok) {
         if (removed.reason === 'bound') {
-          respond(res, 409, { error: ERRORS.ENTRY_BOUND, boundTo: removed.boundTo })
+          respond(res, 409, { error: ERRORS.ENTRY_BOUND, boundTo: id })
           return
         }
         if (removed.reason === 'not_found') {
@@ -1454,7 +1456,7 @@ function createConfigServer(ctx, options = {}) {
         return
       }
       const picked = pickEntryId(parsedBody, {
-        entries: before.list.entries,
+        list: before.list,
         bound: before.payload.bound,
         create: creating,
       })

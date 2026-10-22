@@ -392,7 +392,7 @@ async function main() {
     return 2
   }
   const chosen = chooseModelSource(
-    modelSources.normalizeEntries(JSON.parse(fs.readFileSync(listFile, 'utf8'))),
+    modelSources.readEntriesAt(listFile),
     options.sourceId,
   )
   if (!chosen.ok) {

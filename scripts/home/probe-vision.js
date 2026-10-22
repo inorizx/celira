@@ -389,14 +389,14 @@ async function main() {
     console.error('[probe-vision] 这一轮**不适用**（不是失败）。去「模型配置」页加一条再来。')
     return 2
   }
-  let parsedList
+  let entries
   try {
-    parsedList = JSON.parse(fs.readFileSync(realList, 'utf8'))
+    entries = modelSources.readEntriesAt(realList)
   } catch (error) {
     console.error(`[probe-vision] 真家那份清单读不出来（${realList}）：${error.message}`)
     return 2
   }
-  const picked = chooseModelSource(modelSources.normalizeEntries(parsedList), options.modelSourceId)
+  const picked = chooseModelSource(entries, options.modelSourceId)
   if (!picked.ok) {
     console.error(`[probe-vision] ${picked.reason}`)
     return 2
