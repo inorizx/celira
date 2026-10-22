@@ -41,7 +41,10 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FINISH = {"tool": "finish_run", "arguments": {"ending": "completed"}}
+# 结束类工具（`finish_run` / `hold_run`）**不带参数**（2026-10-10 裁决；见
+# `provider_adapter::finish_schema`）⇒ 脚本用尽时默认那一条也必须空参，否则每一次
+# "脚本用完" 都会落成 `system:model-failed / contract-violation`，把干净的收场伪造成失败。
+FINISH = {"tool": "finish_run", "arguments": {}}
 
 
 class Script:
