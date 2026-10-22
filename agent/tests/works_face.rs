@@ -11,6 +11,8 @@
 //! 3. **两个面互不串**：资料面的 `files_*` 看不见她的作品，作品面的 `projects_*` 看不见资料；
 //!    同名文件各在各的目录里，谁也不动谁；
 //! 4. **出不去**：`..`、盘符、绝对路径、带分隔符的名字一律 `invalid-path`（与资料面同一套墙）；
+//!    ⚠ 分隔符是**平台形状**：`\` 在 Linux 上是普通字节 ⇒ `..\agent.conf` 是她目录内的一个名字
+//!    （缺了 `not-found`，写了读得回），与 `file_app::a_backslash_name_is_a_name_and_not_an_escape` 同判据；
 //! 5. **三态不许压成两态**：那个名字底下打不开（是文件 / 链接）⇒ **在场但打不开**（如实报分类），
 //!    不是"这个地址不在"；而**没有环境根**的装配里，她那几件动词连声明都不出现。
 
@@ -396,12 +398,19 @@ fn paths_cannot_escape_her_own_directory() {
     let mut expansion = RunExpansion::new(Fixture::agent(), RunId::new("run-a"));
     let mut scope = expanded_scope(&mut os, &mut expansion, &agent, &run);
 
-    for escape in [
+    // 平台参数化（与 `file_app::paths_outside_the_sandbox_are_refused` 同规）：
+    // Windows 上 `..\agent.conf` 是「父目录 ＋ 名字」⇒ 越界；Linux 上 `\` 是**普通字节**
+    // ⇒ 那是她目录内的一个**文件名**，归下面那一格正例（缺了 `not-found`，写了读得回）。
+    #[cfg(windows)]
+    let escapes = [
         "../agent.conf",
         "..\\agent.conf",
         "C:/Windows/win.ini",
         "/etc/passwd",
-    ] {
+    ];
+    #[cfg(not(windows))]
+    let escapes = ["../agent.conf", "..", "C:/Windows/win.ini", "/etc/passwd"];
+    for escape in escapes {
         let outcome = scope.execute(
             &agent,
             &operation("run-a"),
@@ -411,6 +420,52 @@ fn paths_cannot_escape_her_own_directory() {
             failure_of(&outcome),
             "invalid-path",
             "越界路径必须拒绝：{escape}"
+        );
+    }
+
+    // Linux：反斜杠名字是**她目录内的普通名字**——它读不到隔壁，也不许把环境根那份配置
+    // 带进来；写同名文件落的是她自己目录里的真文件。这一格与
+    // `file_app::a_backslash_name_is_a_name_and_not_an_escape` 同一判据的两面：
+    // 墙拒的是 `..` 这个**组件**，不是反斜杠这个字节。
+    #[cfg(not(windows))]
+    {
+        let outcome = scope.execute(
+            &agent,
+            &operation("run-a"),
+            &action(READ, ActionParams::none().with("path", "..\\agent.conf")),
+        );
+        assert_eq!(
+            failure_of(&outcome),
+            "not-found",
+            "反斜杠名字缺了就是没找到——不是路径拒绝"
+        );
+
+        let marker = "terminal=full\n";
+        let outcome = scope.execute(
+            &agent,
+            &operation("run-a"),
+            &action(
+                CREATE,
+                ActionParams::none()
+                    .with("name", "..\\agent.conf")
+                    .with("text", marker),
+            ),
+        );
+        assert_eq!(
+            outcome.state(),
+            ResultState::Success,
+            "她目录内的反斜杠名字是一个普通名字：{}",
+            text_of(&outcome)
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.works().join("..\\agent.conf")).expect("盘上那一份"),
+            marker,
+            "落的是她自己目录里的真文件"
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.environment_root().join("agent.conf")).expect("环境根那份"),
+            "terminal=none\n",
+            "环境根那份配置一个字节都不许动"
         );
     }
     let outcome = scope.execute(
