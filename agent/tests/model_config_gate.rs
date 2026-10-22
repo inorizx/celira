@@ -393,7 +393,8 @@ fn a_counted_list_shape_resolves_the_same_four_pieces() {
     let list = write_counted_list(&home, 7);
     write_binding(&root, "ms-1");
 
-    let source = model_source::decide(&root, Some(&list), &no_flags(), &[]).expect("新形状要读得成");
+    let source =
+        model_source::decide(&root, Some(&list), &no_flags(), &[]).expect("新形状要读得成");
     let Source::File(file) = &source else {
         panic!("绑定了清单里的一条就该以文件为源");
     };

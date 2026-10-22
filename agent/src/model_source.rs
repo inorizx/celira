@@ -466,12 +466,15 @@ pub fn read_entry(list_path: &Path, id: &str) -> Result<FileSource, String> {
     let entries = match value.as_array() {
         Some(items) => items,
         // 新形状：`{ "next": N, "entries": [...] }`（`next` 对读侧无意义）。
-        None => value.get("entries").and_then(|it| it.as_array()).ok_or_else(|| {
-            format!(
-                "模型源清单的最外层是数组或 {{next, entries}} 对象：{}（读到的不是）。",
-                list_path.display()
-            )
-        })?,
+        None => value
+            .get("entries")
+            .and_then(|it| it.as_array())
+            .ok_or_else(|| {
+                format!(
+                    "模型源清单的最外层是数组或 {{next, entries}} 对象：{}（读到的不是）。",
+                    list_path.display()
+                )
+            })?,
     };
     let entry = entries
         .iter()
