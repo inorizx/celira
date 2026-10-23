@@ -784,58 +784,69 @@ fn a_reserved_name_inside_invoke_is_one_calls_problem_too() {
         "读数要点着内层那个名字：{reading}"
     );
 }
-/// **契约层**的失败：分类如实带出来，而且**不会被重采**（一条请求就够）。
+/// **不可用的回执**：分类如实带出来；"采样本身的毛病"先再采一次，"对方按规矩拒了"不重采。
 ///
-/// ⚠ 名字与声称自 TASK_60 裁决 5 起**收窄**了：原来叫"永不重试"，那在**传输层瞬时族**上
-/// 已经不成立（那一族现在会被立刻再采一次，见下一条用例）。这一条守的是**另一半**：
-/// 这些失败都是"响应到手了但不合契约 / 对方按规矩拒了"——**再采一次不会变**，
-/// 所以 `model-calls == 1` 这条判据一个字没改，只是它管的范围从"全部失败"收窄成"契约类失败"。
+/// ⚠ 名与声称自 **2026-10-23** 起改了：原先这一整族一条都不重采；现在按**失败属于谁的毛病**分：
+/// - **再采一次**（`model-calls == 2`）：空回执（`empty-response`）、读不懂（`unparsable-response`）、
+///   形状不符（`contract-violation`）——再采一次可能就说话了，而模型调用没有外部副作用；
+/// - **不重采**（`model-calls == 1`）：对方按规矩拒了（HTTP）、生成被截断、协议载荷缺件——
+///   再问一遍答案一样，只是多一次计费。
 #[test]
-fn contract_failures_keep_their_class_and_are_not_re_sampled() {
-    // 每一行是一种失败 + 它**应当带出来的分类**：HTTP 非成功、响应不可解析、生成被截断、
-    // 空响应、两个结束调用、非法工具名、参数不是 JSON、参数里多一个字段、结束取值不在封闭表里、
-    // 工具调用没有标识（协议载荷缺件）。
+fn unusable_receipts_are_sampled_once_more_and_keep_their_class() {
+    // 每一行是一种失败 + 它**应当带出来的分类** + 它**该不该再采一次**。
     //
     // 第四列写的是**落盘的完整形状**——`<分类>` 或 `<分类>:<细分>`：HTTP 与传输这两类是外部形状，
     // 细分档由适配层折叠出来（500 系 ⇒ `server-side`），因此这里逐字节要求细分在场，
     // 不许只判前缀（只判前缀就分不出"细分丢了"和"细分对了"）。
-    let cases: Vec<(&str, u16, String, &str)> = vec![
+    let cases: Vec<(&str, u16, String, &str, bool)> = vec![
         (
             "http-status",
             500,
             "{\"error\":{\"message\":\"x\"}}".to_string(),
             "http-status-failure:server-side",
+            false,
         ),
         (
             "unparsable",
             200,
             "LeakMarkerNotJson".to_string(),
             "unparsable-response",
+            true,
         ),
         (
             "stopped-generation",
             200,
             text_body("LeakMarkerStopped", "length"),
             "stopped-generation",
+            false,
         ),
         (
             "empty-reply",
             200,
             text_body("", "stop"),
-            "contract-violation",
+            "empty-response",
+            true,
         ),
-        ("two-calls", 200, two_calls_body(), "contract-violation"),
+        (
+            "two-calls",
+            200,
+            two_calls_body(),
+            "contract-violation",
+            true,
+        ),
         (
             "arguments-not-json",
             200,
             tool_call_body("call-1", "finish_run", "not-json"),
             "contract-violation",
+            true,
         ),
         (
             "arguments-extra-field",
             200,
             tool_call_body("call-1", "finish_run", "{\"note\":\"LeakMarkerExtra\"}"),
             "contract-violation",
+            true,
         ),
         (
             // 从前这条叫 `unknown-ending`：那时结束工具**带一个枚举参数**。现在它不带参数
@@ -844,21 +855,30 @@ fn contract_failures_keep_their_class_and_are_not_re_sampled() {
             200,
             tool_call_body("call-1", "finish_run", "{\"ending\":\"ended\"}"),
             "contract-violation",
+            true,
         ),
         (
+            // 缺调用标识：回执缺件 ⇒ 这一次采样不可用，再采一次（补上标识就可能正常）。
             "call-without-id",
             200,
             tool_call_body("", "files_list", "{}"),
             "protocol-payload",
+            true,
         ),
     ];
 
-    for (name, status, body, expected_failure) in cases {
+    for (name, status, body, expected_failure, resampled) in cases {
         let temp = TempDir::new(&format!("wire-{name}"));
         let env_root = temp.env("agent-wire");
         let materials = temp.materials();
 
-        let (endpoint, requests, extra) = spawn_wire_server(vec![(status, body)]);
+        // 该重采的那几行备两份同样的回执：第二次仍失败 ⇒ 分类不变、仍然收场。
+        let replies = if resampled {
+            vec![(status, body.clone()), (status, body)]
+        } else {
+            vec![(status, body)]
+        };
+        let (endpoint, requests, extra) = spawn_wire_server(replies);
         let run = Fixture::new(&env_root, "agent-wire", &materials, "run-1", &endpoint).run();
 
         // 失败被 Core 如实收成"模型这一层终止"，不是主体收场，也不是行动结果。
@@ -875,8 +895,13 @@ fn contract_failures_keep_their_class_and_are_not_re_sampled() {
             "system:model-failed",
             "{name}: {report}"
         );
-        // 零自动重试：适配层只被调用一次、也只发出一次请求。
-        assert_eq!(fixture_field(&report, "model-calls"), "1", "{name}");
+        // 采几次由"谁的毛病"决定：采样本身的毛病恰好再采一次，其余一次都不多采。
+        let expected_calls = if resampled { "2" } else { "1" };
+        assert_eq!(
+            fixture_field(&report, "model-calls"),
+            expected_calls,
+            "{name}: 采样次数不对"
+        );
         assert_eq!(
             extra
                 .recv_timeout(std::time::Duration::from_secs(5))

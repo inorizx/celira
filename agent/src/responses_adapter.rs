@@ -726,7 +726,8 @@ fn translate_response(response: WireResponse) -> Result<ModelOutput, ProviderFai
 
     let decision = if calls.is_empty() {
         if text.trim().is_empty() {
-            return Err(ProviderFailure::ContractViolation);
+            // 同 Chat wire：空回执是**一次失败的采样**，不是主体的意愿 ⇒ 自己的词，进重试族。
+            return Err(ProviderFailure::EmptyResponse);
         }
         Decision::Yield
     } else {
@@ -942,9 +943,10 @@ mod tests {
             Err(ProviderFailure::StoppedGeneration)
         );
         // 缺席是容忍的（有些兼容实现不回），因此它走的是"没有条目"那条判断。
+        // 空条目 = 这一次什么都没说 ⇒ 自己的词（上层会再采一次），不是"读不懂"。
         assert_eq!(
             translated("{\"output\":[]}"),
-            Err(ProviderFailure::ContractViolation)
+            Err(ProviderFailure::EmptyResponse)
         );
     }
 
@@ -977,16 +979,17 @@ mod tests {
         assert!(output.protocol().is_none(), "没有可续接的东西就不写载荷");
 
         // 空响应既没说做什么、也没说结束 —— 明确失败，绝不冒充"正常等待"。
+        // 它有**自己的词**：空不是主体的意愿，是一次失败的采样（上层会再采一次）。
         assert_eq!(
             translated("{\"status\":\"completed\",\"output\":[]}"),
-            Err(ProviderFailure::ContractViolation)
+            Err(ProviderFailure::EmptyResponse)
         );
         assert_eq!(
             translated(
                 "{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\
                  \"content\":[{\"type\":\"output_text\",\"text\":\"   \"}]}]}"
             ),
-            Err(ProviderFailure::ContractViolation)
+            Err(ProviderFailure::EmptyResponse)
         );
     }
 

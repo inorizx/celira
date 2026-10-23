@@ -15,8 +15,11 @@
 //!    （见 [`ModelRetry`]：记录随这一次驱动的结果交回调用方，由**宿主**打印，
 //!    见 `host_loop` → 宿主那行；本模块**自己不打任何字**——库不打印）。
 //!
-//! 触发判据（[`is_transient_failure`]）：**看行动句**——凡是"下一步 = 先立即重采一次"的档才触发。
-//! 今天那是 `Transport` 的**四个细分档**（`dns` / `refused` / `timeout` / `io`，见 `core.rs` 上各档的行动句）；
+//! 触发判据（[`is_transient_failure`]）：**看这一次失败属于谁的毛病**。
+//! 属于"采样本身"的四档才触发：`Transport` 的四个细分档（`dns` / `refused` / `timeout` / `io`）
+//! 与"这一份回执不可用"的三档（`empty-response` / `contract-violation` / `unparsable-response`）。
+//! 它们再采一次都可能变，而且**模型调用没有外部副作用**，重采是安全的。
+//!
 //! **`Transport(None)`（未细分）不在族里**：认不出可能是有持久原因的那一类（证书／TLS 刻意没发布，
 //! 它正落在这里），那种东西重采一次不会变 ⇒ 先取证（形态指纹那一行），量出形状再议。
 //! `HttpStatus` 那几档也不在这里：它们的行动句是"等一会儿 / 换钥匙 / 改请求 / 上报"
@@ -29,16 +32,35 @@ pub const TRANSIENT_RETRY_ATTEMPTS: u32 = 1;
 
 /// 这一档失败**值不值得立刻再采一次**？（纯函数 ⇒ 可判错）
 ///
-/// 判据是**这一族对应的下一步行动**，而 `Transport` 全族的行动是"够不着 ⇒ 先立刻再试"：
-/// 五个价（`dns` / `refused` / `timeout` / `io` / 未细分）都可能只是**窗口内的瞬时**。
-/// 其余八档都不在这里：它们是"响应到手了但不合契约"或"对方按规矩拒了"，**再采一次不会变**。
+/// 判据不是"是不是网络问题"，而是**这一次失败属于谁的毛病**：
+///
+/// - **采样本身的毛病** ⇒ 再采一次有意义。`Transport` 的四个细分档（够不着）、
+///   以及"这一份回执不可用"的三档：`empty-response`（什么都没说）、`contract-violation`
+///   （形状读不懂）、`unparsable-response`（读不出约定的结构）。再采一次是安全的——
+///   **模型调用没有外部副作用**，最坏只是多花一次调用；而一次空回执就把整段判死，
+///   等于系统替主体把嘴闭上了。
+/// - **对方按规矩拒了** ⇒ 再采一次不会变。`4xx` / `429` / 截断 / 名字不合法 / 历史配不上，
+///   答案一样，重采只是多一次计费。
+///
+/// `Transport(None)`（未细分）**仍不在族里**：认不出可能正是"有持久原因"的那一类
+/// （证书／TLS 握手），先取证（形态指纹）再决定。
 pub fn is_transient_failure(class: ModelFailureClass) -> bool {
     // **只看带细分的那些档**：`Transport(None)`（未细分）**不在族里**。
     // 为什么：认不出可能正是"有持久原因"的那一类（证书／TLS 刻意没发布，它落在这里），
     // 而对有持久原因的东西重采一次不会变。⇒ 那一档先靠**形态指纹**取证（TASK_60 §6），
     // 量出稳定形状之后再决定并进族里。**代价写在案上**：主体至今观测到的失败全是未细分
     // ⇒ 收窄之后那些拍**不会**被重试，直到指纹把形状叫出来。
-    matches!(class, ModelFailureClass::Transport(Some(_)))
+    matches!(
+        class,
+        ModelFailureClass::Transport(Some(_))
+            | ModelFailureClass::EmptyResponse
+            | ModelFailureClass::ContractViolation
+            | ModelFailureClass::UnparsableResponse
+            // 缺调用标识（回执缺件）也是**这一次采样**的问题，再采一次可能就带上了。
+            // ⚠ 这一档同时承载"我们自己的续接载荷坏了"——那种重采不会变，但重采也无害
+            // （只是多一次调用），而缺件那一半值得再问一次。
+            | ModelFailureClass::ProtocolPayload
+    )
 }
 
 /// 记一次"采了第二次"——**诊断面**，不是事实（见模块头第 3 条）。
@@ -274,10 +296,7 @@ mod tests {
             ModelFailureClass::HttpStatus(Some(HttpStatusDetail::ServerSide)),
             ModelFailureClass::HttpStatus(Some(HttpStatusDetail::Credential)),
             ModelFailureClass::HttpStatus(None),
-            ModelFailureClass::ContractViolation,
-            ModelFailureClass::UnparsableResponse,
             ModelFailureClass::StoppedGeneration,
-            ModelFailureClass::ProtocolPayload,
             ModelFailureClass::UnpairedHistory,
             ModelFailureClass::UnsupportedToolName,
             ModelFailureClass::ReservedToolName,
@@ -291,16 +310,48 @@ mod tests {
     }
 
     #[test]
-    fn the_transient_family_is_exactly_the_four_detailed_transport_classes() {
-        // 触发判据本身可判错：**四个细分档**为真；**未细分（`None`）为假**——
-        // 收窄的判据就在这里（认不出可能是有持久原因的那一类，先取证再议）。
+    fn an_empty_response_is_sampled_once_more_and_can_recover() {
+        // **2026-10-23**：空回执从前是 `contract-violation` ⇒ 一次抖动就把整段抛下。
+        // 现在它是**一次失败的采样**：同样的视野再采一次，第二次说了话就照常往下走。
+        let mut inner = Scripted::once_then(Err(ModelFailureClass::EmptyResponse), Ok(()));
+        let (outcome, report) = drive_once(&mut inner, TRANSIENT_RETRY_ATTEMPTS);
+        assert_eq!(outcome, Ok(()), "第二次开口了 ⇒ 这次调用当成成功");
+        assert_eq!(inner.calls, 2, "恰好再采一次");
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].reason, ModelFailureClass::EmptyResponse);
+        assert_eq!(report[0].outcome, Ok(()));
+    }
+
+    #[test]
+    fn an_unreadable_receipt_is_also_worth_one_more_sample() {
+        // 与空回执同族：回执读不懂（契约/结构）也先再采一次——它同样是"这一次采样"的毛病。
+        for class in [
+            ModelFailureClass::ContractViolation,
+            ModelFailureClass::UnparsableResponse,
+        ] {
+            let mut inner = Scripted::once_then(Err(class), Ok(()));
+            let (outcome, report) = drive_once(&mut inner, TRANSIENT_RETRY_ATTEMPTS);
+            assert_eq!(outcome, Ok(()), "{class:?} 再采一次后应当成功");
+            assert_eq!(inner.calls, 2, "{class:?} 恰好再采一次");
+            assert_eq!(report[0].reason, class);
+        }
+    }
+
+    #[test]
+    fn the_retry_family_is_exactly_the_sampling_faults() {
+        // 触发判据本身可判错：族里 = "这一次采样不可用"（够不着的四个细分档 + 空/读不懂/形状不符）；
+        // 族外 = "对方按规矩拒了"与"认不出但可能有持久原因"。
         for class in [
             ModelFailureClass::Transport(Some(TransportDetail::Dns)),
             ModelFailureClass::Transport(Some(TransportDetail::Refused)),
             ModelFailureClass::Transport(Some(TransportDetail::Timeout)),
             ModelFailureClass::Transport(Some(TransportDetail::Io)),
+            ModelFailureClass::EmptyResponse,
+            ModelFailureClass::ContractViolation,
+            ModelFailureClass::UnparsableResponse,
+            ModelFailureClass::ProtocolPayload,
         ] {
-            assert!(is_transient_failure(class), "{class:?} 属于瞬时候选族");
+            assert!(is_transient_failure(class), "{class:?} 属于可再采一次的族");
         }
         assert!(
             !is_transient_failure(ModelFailureClass::Transport(None)),
@@ -312,13 +363,10 @@ mod tests {
             ModelFailureClass::HttpStatus(Some(HttpStatusDetail::RateLimited)),
             ModelFailureClass::HttpStatus(Some(HttpStatusDetail::ServerSide)),
             ModelFailureClass::HttpStatus(Some(HttpStatusDetail::RequestRejected)),
-            ModelFailureClass::UnparsableResponse,
-            ModelFailureClass::ContractViolation,
             ModelFailureClass::StoppedGeneration,
             ModelFailureClass::UnsupportedToolName,
             ModelFailureClass::ReservedToolName,
             ModelFailureClass::UnpairedHistory,
-            ModelFailureClass::ProtocolPayload,
         ] {
             assert!(!is_transient_failure(class), "{class:?} 不在瞬时候选族里");
         }

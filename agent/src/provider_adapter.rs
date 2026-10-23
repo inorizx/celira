@@ -597,8 +597,11 @@ pub(crate) enum ProviderFailure {
     HttpStatus(Option<HttpStatusDetail>),
     /// 2xx，但响应结构不是我们需要的形状（非 JSON、缺 choices）。
     Unparsable,
-    /// 响应可解析，但不符合决策契约：空响应、多个工具调用、参数不是字符串、收尾取值不认识。
+    /// 响应可解析，但不符合决策契约：多个工具调用、参数不是字符串、收尾取值不认识。
     ContractViolation,
+    /// 响应合法，但**这一次采样什么都没说**：没有正文，也没有任何调用。
+    /// 与 `ContractViolation` 分开，因为它的下一步是"再采一次"，不是"把这一次当坏回执扔掉"。
+    EmptyResponse,
     /// 供应商说这次生成**不是正常收尾**（截断、内容策略中止或别的未知原因）。
     /// 这种响应**不**被当成一次正常决定：截断过的参数看起来像完整的参数。
     StoppedGeneration,
@@ -634,6 +637,7 @@ impl ProviderFailure {
             ProviderFailure::HttpStatus(detail) => ModelFailureClass::HttpStatus(detail),
             ProviderFailure::Unparsable => ModelFailureClass::UnparsableResponse,
             ProviderFailure::ContractViolation => ModelFailureClass::ContractViolation,
+            ProviderFailure::EmptyResponse => ModelFailureClass::EmptyResponse,
             ProviderFailure::StoppedGeneration => ModelFailureClass::StoppedGeneration,
             ProviderFailure::UnsupportedToolName => ModelFailureClass::UnsupportedToolName,
             ProviderFailure::ReservedToolName => ModelFailureClass::ReservedToolName,
@@ -2111,8 +2115,9 @@ fn translate_response(response: WireResponse) -> Result<ModelOutput, ProviderFai
 
     let decision = if calls.is_empty() {
         if content.trim().is_empty() {
-            // 空响应：既没有正文，也没有行动或结束意图。它不是一次等待，是一次失败。
-            return Err(ProviderFailure::ContractViolation);
+            // 空响应：既没有正文，也没有行动或结束意图。**它不是主体的意愿**——是一次失败的采样。
+            // 给它自己的词，让重试族能认出它（`model_retry`）；仍失败时才以 `empty-response` 收场。
+            return Err(ProviderFailure::EmptyResponse);
         }
         Decision::Yield
     } else {
@@ -3935,6 +3940,8 @@ mod tests {
         assert_eq!(output.content(), sneaky);
 
         // 空响应：既没有正文、也没有行动或结束意图——明确失败，绝不冒充"正常等待"。
+        // **2026-10-23**：它现在有自己的词（`EmptyResponse`）——空不是主体的意愿，是一次失败的采样，
+        // 上层会先再采一次（`model_retry`），仍空才收场。
         for message in [
             text_message("", None),
             text_message("   \n\t ", None),
@@ -3942,7 +3949,7 @@ mod tests {
         ] {
             assert_eq!(
                 translated_with_finish(message, "stop").err(),
-                Some(ProviderFailure::ContractViolation),
+                Some(ProviderFailure::EmptyResponse),
                 "空响应必须明确失败"
             );
         }

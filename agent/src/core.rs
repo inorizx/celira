@@ -1667,8 +1667,15 @@ pub enum ModelFailureClass {
     /// 响应不是我们需要的形状（读不出约定的结构）。
     UnparsableResponse,
     /// 形状不符：取值不是字符串、参数不是对象、类型不是函数调用、结束取值不在封闭表里、
-    /// 结束参数多一个字段、空响应。
+    /// 结束参数多一个字段。
     ContractViolation,
+    /// **这一次采样什么都没说**：既没有正文，也没有任何调用。
+    ///
+    /// 它与 [`ContractViolation`](Self::ContractViolation) 分开，判据只有一条：
+    /// 前者是"这份回执读不懂"，它是"这份回执里空无一物"——而**空不等于主体的意愿**。
+    /// 它进重试族（`model_retry::is_transient_failure`）：同样的视野再采一次是安全的
+    /// （模型调用没有外部副作用），而一次空回执就把整段活动判死，等于系统替主体把嘴闭上了。
+    EmptyResponse,
     /// 生成被截断或中止。
     StoppedGeneration,
     /// 一个能力标识无法作为工具名表达。
@@ -1716,6 +1723,7 @@ impl ModelFailureClass {
             }
             ModelFailureClass::UnparsableResponse => "unparsable-response",
             ModelFailureClass::ContractViolation => "contract-violation",
+            ModelFailureClass::EmptyResponse => "empty-response",
             ModelFailureClass::StoppedGeneration => "stopped-generation",
             ModelFailureClass::UnsupportedToolName => "unsupported-tool-name",
             ModelFailureClass::ReservedToolName => "reserved-tool-name",
@@ -1760,6 +1768,7 @@ impl ModelFailureClass {
             }
             "unparsable-response" => ModelFailureClass::UnparsableResponse,
             "contract-violation" => ModelFailureClass::ContractViolation,
+            "empty-response" => ModelFailureClass::EmptyResponse,
             "stopped-generation" => ModelFailureClass::StoppedGeneration,
             "unsupported-tool-name" => ModelFailureClass::UnsupportedToolName,
             "reserved-tool-name" => ModelFailureClass::ReservedToolName,

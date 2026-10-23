@@ -16,7 +16,7 @@ use celira_agent::core::{HttpStatusDetail, ModelFailureClass, TransportDetail};
 /// ⚠ **为什么没有 `transport-failure:tls`**：TLS 握手失败的签名**不稳定**（经代理给
 /// `InvalidData`、绕代理给 `Other`，两种都实测到过）⇒ 按"只认能机械判定的档"不发布它，
 /// 那种情况归"未细分"（`transport-failure`）。
-const WORDLIST: [(ModelFailureClass, &str); 17] = [
+const WORDLIST: [(ModelFailureClass, &str); 18] = [
     // `Transport`：一档"已知未细分" ＋ 四个细分档
     (ModelFailureClass::Transport(None), "transport-failure"),
     (
@@ -53,9 +53,10 @@ const WORDLIST: [(ModelFailureClass, &str); 17] = [
         ModelFailureClass::HttpStatus(Some(HttpStatusDetail::RequestRejected)),
         "http-status-failure:request-rejected",
     ),
-    // 其余七档：没有细分，保持原样
+    // 其余八档：没有细分，保持原样
     (ModelFailureClass::UnparsableResponse, "unparsable-response"),
     (ModelFailureClass::ContractViolation, "contract-violation"),
+    (ModelFailureClass::EmptyResponse, "empty-response"),
     (ModelFailureClass::StoppedGeneration, "stopped-generation"),
     (
         ModelFailureClass::UnsupportedToolName,
@@ -140,7 +141,7 @@ fn unknown_marks_are_rejected_fail_closed() {
 #[test]
 fn wordlist_covers_as_many_marks_as_it_declares() {
     // 门禁不许空跑：这张表的规模本身是被断言的——少一行就是少一个取值。
-    assert_eq!(WORDLIST.len(), 17);
+    assert_eq!(WORDLIST.len(), 18);
     // 细分档的总数（Transport 4 ＋ HttpStatus 4）：少了说明有一档只写在枚举里、没进词表。
     let detailed = WORDLIST
         .iter()
