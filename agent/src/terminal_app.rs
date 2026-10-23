@@ -1107,10 +1107,20 @@ fn render_body(reading: &OutputReading, limit: usize) -> OutputBody {
     };
     match cut {
         None => {
+            // 没超上限时两个窗口会**重叠**：`kept` 是前 `head_limit` 字节，`tail` 是后
+            // `tail_limit` 字节。短输出整段同时落在两个窗口里（真机读数：`stdout = 16 bytes`，
+            // 正文却印了两遍 16 字节）；16–32 KiB 的输出则会在接缝处重复 12 KiB。
+            // 按**真总数**把重叠那一截剪掉，拼接才是文档说的"就是全部输出"。
+            // （`closed = false` 那条路 `total` 还没给 ⇒ 这里按 0 算，`tail` 本来也空。）
+            let overlap = reading
+                .kept
+                .len()
+                .saturating_add(reading.tail.len())
+                .saturating_sub(reading.total);
             let joined: Vec<u8> = reading
                 .kept
                 .iter()
-                .chain(reading.tail.iter())
+                .chain(reading.tail.iter().skip(overlap))
                 .copied()
                 .collect();
             let (text, encoding) = decode_bytes(&joined);

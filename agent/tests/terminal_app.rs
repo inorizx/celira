@@ -533,6 +533,31 @@ fn a_stream_within_the_budget_is_whole_even_when_it_crosses_the_head_window() {
 
 #[cfg(any(windows, target_os = "linux"))]
 #[test]
+fn a_stream_is_printed_once_and_the_overlapping_windows_do_not_repeat_it() {
+    // 短输出：整段同时落在头部窗口与尾部窗口里 ⇒ 拼接时重叠的那一截必须剪掉。
+    let mut app = TerminalApp::new(full(vec![]), &test_root());
+    let short = call(&mut app, command(cmds::PLAIN_ASCII));
+    let receipt = text_of(&short);
+    assert_eq!(
+        receipt.matches("plain-ascii").count(),
+        1,
+        "同一段输出只许出现一次（读数说的是 stdout 的真字节数）：{receipt}"
+    );
+
+    // 没超上限但跨过头部窗口：两段窗口重叠 12 KiB ⇒ 中间的记号只许出现一次。
+    let within = call(&mut app, command(cmds::MARKS_WITHIN_LIMIT));
+    let receipt = text_of(&within);
+    for mark in ["HEAD-MARK", "MID-MARK", "TAIL-MARK"] {
+        assert_eq!(
+            receipt.matches(mark).count(),
+            1,
+            "{mark} 只许出现一次（重叠窗口不许把接缝印两遍）：{receipt}"
+        );
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
 fn the_exit_code_and_both_streams_are_readings_not_failures() {
     let mut app = TerminalApp::new(full(vec![]), &test_root());
 
