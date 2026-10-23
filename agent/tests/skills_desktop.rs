@@ -207,7 +207,10 @@ fn the_listing_is_bounded_and_counts_what_it_did_not_show() {
 #[test]
 fn long_names_and_triggers_are_cut_on_a_character_boundary_and_marked() {
     let root = sandbox("long");
-    let long_dir = "名".repeat(100);
+    // 80 个汉字 = 240 字节：**超过 `MAX_NAME_BYTES`（64）以触发截断，又不越过
+    // 文件系统的 `NAME_MAX`（255 字节）**——100 个汉字是 300 字节，目录根本建不出来，
+    // 这条用例会在 `create_dir_all` 上先失败（2026-10-23 真机踩到）。
+    let long_dir = "名".repeat(80);
     fs::create_dir_all(root.join("skills").join(&long_dir)).expect("建长名字目录");
     write_skill(
         &root,

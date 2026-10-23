@@ -1937,7 +1937,7 @@ const CORE_SOURCES: [&str; 2] = ["core.rs", "foundation.rs"];
 /// [`every_module_is_accounted_for_in_the_layering_ledger`] 机械检查——新模块会自动要一个说法，
 /// 账本里留着一个不存在的模块也会红。**代价的来历**：这份名单手抄了两次都漏项
 /// （2026-10-10 一次补 11 项；2026-10-11 落的两件又漏了），缺的从来不是记性。
-const BOUNDARY_MODULES: [&str; 48] = [
+const BOUNDARY_MODULES: [&str; 51] = [
     "provider_adapter",
     "file_app",
     "file_view",
@@ -1991,6 +1991,17 @@ const BOUNDARY_MODULES: [&str; 48] = [
     // 怎么拼命令行、怎么击杀进程树、凭据怎么洗。Core / Foundation 一样不许认识它——
     // "这一份构建里编进了哪些臂、进程怎么拼"是装配与执行基础设施，不是执行语义。
     "platform",
+    // **子进程的系统调用过滤器**那一刀（2026-10-23）：identity 沙箱后端的断网与 fd 纪律
+    // 都是它（seccomp ＋ `close_range`，手写裸系统调用、零新依赖）。Core / Foundation 一样
+    // 不许认识它——"这一条命令用什么系统调用面执行"是执行基础设施，不是执行语义
+    // （Core 只认识"有一条命令、有一个结果"）。按「新模块就得跟着进名单」那条纪律显式列入。
+    "seccomp",
+    "landlock",
+    // **沙箱后端端口**那一刀（2026-10-23）：`terminal=sandbox` 的「用哪只手执行」——
+    // bwrap（以及将来的容器 / 微虚拟机）在这里声明保证集、探针与命令行。Core / Foundation
+    // 一样不许认识它：**用什么机制隔离**是装配与执行基础设施，不是执行语义
+    // （Core 只认识"有一条命令、有一个结果"）。
+    "sandbox_backend",
     // **2026-10-02 im 拆包**：im 从"整包"分成三个包（通信 `im_app` / 社交 `im_social_app` /
     // 资料 `im_profile_app`），共用的通道机制落在中立层 `im_channel`。四个都是 App 层／中立层的
     // 模块，Core / Foundation 一样不许认识——"哪几条动词归哪个包、怎么发请求"是 App 与装配事实，
@@ -2148,7 +2159,7 @@ const SERDE_JSON_SOURCES: [&str; 23] = [
 /// **唯一**允许碰文件系统的模块"——那句话从第二个 App 起就不成立了（拥有自己存储的 App
 /// 自己碰文件系统），而它和这张表只隔一行，正是"描述句与事实打架"的典型形状。
 /// 表里每一行各自带理由，判据只认这张表。
-const FILE_SYSTEM_SOURCES: [&str; 21] = [
+const FILE_SYSTEM_SOURCES: [&str; 22] = [
     "file_app.rs",
     "file_view.rs",
     "composition.rs",
@@ -2208,6 +2219,11 @@ const FILE_SYSTEM_SOURCES: [&str; 21] = [
     // 读回由装配做（与自识同款），而**写**只在创建那一次（`orientation::place`，从显式初始化
     // 调过来）。它读的是自己的地盘、不需要授权，因此照样进这条封闭名单。
     "orientation.rs",
+    // 2026-10-23：**沙箱后端端口**（`terminal=sandbox` 的第一支实现是 bwrap）。它读两样东西：
+    // 自己的命名空间标识（`/proc/self/ns/*`，证明新命名空间真的建了）与 `cwd` 的
+    // canonicalize（判"在不在环境根里"）。它**不写**任何东西、不碰环境根。判据与上面每一条
+    // 相同：**谁要碰文件系统，就得在这里被人看见**。
+    "sandbox_backend.rs",
     // **机器处境**那一刀：这一件读的**不是环境根、也不是主体的自持物**，而是**机器自己的报告**
     // （Linux 内核在 procfs 里自报操作系统名那个文件）——"这台机器是什么"的真理源在机器上，
     // 不在我们的地盘里。它**只读一个文件、不写任何东西、不读目录**；"能看见什么"仍然是边界事实，
@@ -2235,11 +2251,18 @@ const FILE_SYSTEM_MARKERS: [&str; 6] = [
 /// 允许**起进程**的源文件：**封闭名单**。
 ///
 /// 这是比"碰文件系统"更重的一件事：读写文件改的是数据，起一个进程改的是**整台机器**。因此它
-/// 同样是一条显式的、封闭的名单——谁要起进程，就得在这里被人看见。三个：terminal 窗
+/// 同样是一条显式的、封闭的名单——谁要起进程，就得在这里被人看见。四个：terminal 窗
 /// （主体的那只手，TASK_36）、MCP 的 stdio 通道（外面那台 server 的子进程，TASK_42）、
-/// 以及**平台缝本身**（`platform.rs`：两个消费者的臂都在那里拼命令行、杀进程树——它是这两条
-/// 起进程路径的共同出口，因此必须与它们一样被看见）。
-const PROCESS_SOURCES: [&str; 3] = ["terminal_app.rs", "mcp/stdio.rs", "platform.rs"];
+/// **平台缝本身**（`platform.rs`：两个消费者的臂都在那里拼命令行、杀进程树——它是这两条
+/// 起进程路径的共同出口，因此必须与它们一样被看见），以及**沙箱后端端口**
+/// （`sandbox_backend.rs`：它的探针必须**真跑一次** bwrap，「`bwrap` 在不在、命名空间建没建」
+/// 不可能靠读代码回答；它只起**探针**这一种进程——主体那条命令仍由 terminal 窗起）。
+const PROCESS_SOURCES: [&str; 4] = [
+    "terminal_app.rs",
+    "mcp/stdio.rs",
+    "platform.rs",
+    "sandbox_backend.rs",
+];
 
 /// 进程执行 API 记号：只允许出现在上面那份名单里。
 ///

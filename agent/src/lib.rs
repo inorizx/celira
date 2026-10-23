@@ -81,6 +81,11 @@ pub mod im_app;
 pub mod im_channel;
 pub mod im_profile_app;
 pub mod im_social_app;
+/// **子进程的系统调用过滤器**（Linux）：identity 沙箱后端靠它断网（拒绝 IP 套接字与
+/// `io_uring_setup`，并在 `execve` 前清掉继承的 fd）。别的平台没有这一件——那一档本来
+/// 就不在场（`TerminalTier::Sandbox::available` 为假）。
+#[cfg(target_os = "linux")]
+pub mod landlock;
 pub mod machine;
 pub mod manual_entry;
 pub mod mcp;
@@ -101,6 +106,8 @@ pub mod recovery;
 pub mod resident_lifetime;
 pub mod responses_adapter;
 pub mod sandbox;
+pub mod sandbox_backend;
+pub mod seccomp;
 pub mod self_concept;
 pub mod skills_desktop;
 pub mod status_bar;

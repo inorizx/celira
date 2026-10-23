@@ -9,11 +9,13 @@
 //! 判分只认回执：`exit` / 两条流的字节数与截断标记 / `scrubbed` / `unscrubbed` /
 //! 失败分类。测试里的命令都是**真的跑**（PowerShell 或 bash），因为这一层的全部意义就是真跑。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use celira_agent::app_contract::{AppPort, EffectClass};
-use celira_agent::core::{Action, ActionId, ActionOutcome, ActionParams, ActionPort};
+use celira_agent::core::{
+    Action, ActionAdmission, ActionId, ActionOutcome, ActionParams, ActionPort,
+};
 use celira_agent::foundation::{AgentId, OperationId, ResultState, RunId, Turn};
 use celira_agent::terminal_app::{
     CAPABILITY_HELD, CAPABILITY_RUN, CAPABILITY_STOP, ENCODING_UTF8, MAX_COMMAND_BYTES,
@@ -1190,5 +1192,877 @@ fn a_plain_command_reads_as_a_closed_output() {
     assert!(
         !receipt.contains("closed = false"),
         "没泄漏就不许报泄漏：{receipt}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `sandbox` 档：档位、能力面、越界、keep、真执行
+// ---------------------------------------------------------------------------
+//
+// 这一组的前五条**离线**（不需要 bwrap：它们判的是本层自己的规则）；后四条**真跑**，
+// 前提是这台机器上的 bwrap 真的能兑现保证集——`bwrap_ready()` 会真跑一次探针，
+// 不可用就 `skip:` 并把原因打出来（`--nocapture` 可见），**不冒充通过**。
+//
+// ⚠ 判据从"随便哪一支后端可用"改成"**bwrap** 可用"（2026-10-23）：表里现在有两支，
+// 后面那几条用例装的是 `BwrapBackend`（它们判的是 bwrap 的命名空间效果）。拿
+// `choose()` 当闸门的话，一台 bwrap 起不来、identity 可用的机器会走进来跑一堆
+// bwrap 用例——那不是"通过"，是把闸门装错了地方。
+
+/// 这台机器上的 **bwrap** 真的可用吗（真跑探针，不是 `which bwrap`）。
+#[cfg(target_os = "linux")]
+fn bwrap_ready() -> bool {
+    match celira_agent::sandbox_backend::SandboxBackend::probe(
+        &celira_agent::sandbox_backend::BwrapBackend::new(),
+    ) {
+        Ok(reading) => {
+            eprintln!("bwrap 探针：{}", reading.evidence);
+            true
+        }
+        Err(unavailable) => {
+            eprintln!(
+                "skip: 本机 bwrap 不可用（{}）——这一组真执行用例不跑",
+                unavailable.message()
+            );
+            false
+        }
+    }
+}
+
+/// 一支装好 bwrap 后端的 `sandbox` 声明（入口探针通过之后就是这个形状）。
+#[cfg(target_os = "linux")]
+fn sandboxed() -> TerminalAccess {
+    TerminalAccess::new(TerminalTier::Sandbox, vec![])
+        .with_sandbox_backend(Box::new(celira_agent::sandbox_backend::BwrapBackend::new()))
+}
+
+/// 一支装好 identity 后端的 `sandbox` 声明（不建命名空间那一支）。
+#[cfg(target_os = "linux")]
+fn identity_sandboxed(root: &Path) -> TerminalAccess {
+    TerminalAccess::new(TerminalTier::Sandbox, vec![]).with_sandbox_backend(Box::new(
+        celira_agent::sandbox_backend::IdentityBackend::new(root),
+    ))
+}
+
+/// **多出来的一档只是那一个词**：`sandbox` 认得，`full` 一个字都没变，别的一律不猜。
+#[test]
+fn the_sandbox_tier_is_its_own_word_and_nothing_else() {
+    assert_eq!(TerminalTier::parse("sandbox"), Some(TerminalTier::Sandbox));
+    assert_eq!(TerminalTier::Sandbox.as_str(), "sandbox");
+    assert_eq!(TerminalTier::parse("full"), Some(TerminalTier::Full));
+    for unknown in [
+        "",
+        " ",
+        "Sandbox",
+        "SANDBOX",
+        " sandbox",
+        "sandbox ",
+        "sand-box",
+        "sandboxes",
+        "none",
+        "bwrap",
+        "read-only",
+    ] {
+        assert_eq!(
+            TerminalTier::parse(unknown),
+            None,
+            "`{unknown}` 不是一档，必须拒绝而不是就近取一档"
+        );
+    }
+}
+
+/// **能力面就是授权面**：`sandbox` 只有 `terminal_run`，`keep` 那一族与它的两个配套动词不在场；
+/// `full` 三条照旧（这一刀没有动它）。
+#[test]
+fn the_sandbox_tier_has_one_verb_and_no_keep_family() {
+    let root = test_root();
+    let app = TerminalApp::new(TerminalAccess::new(TerminalTier::Sandbox, vec![]), &root);
+    let caps = app.declared_capabilities();
+    let ids: Vec<&str> = caps.items().iter().map(|each| each.id().as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![CAPABILITY_RUN],
+        "沙箱档的能力面只有一条动词：{ids:?}"
+    );
+    // 效应声明必须与能力面同一句话（装配期自洽性检查的判据）。
+    assert_eq!(app.declared_effects().len(), 1);
+    assert_eq!(
+        app.declared_effects()[0].action().as_str(),
+        CAPABILITY_RUN,
+        "沙箱档只声明那一条写"
+    );
+    // 不在能力面上的动词，按名字调过来也不接纳。
+    for id in [CAPABILITY_HELD, CAPABILITY_STOP] {
+        let admission = ActionPort::admit(
+            &app,
+            &agent(),
+            &RunId::new("hand"),
+            &Action::with_params(ActionId::new(id), ActionParams::none()),
+        );
+        assert!(
+            matches!(admission, ActionAdmission::Refused { .. }),
+            "`{id}` 在 sandbox 档不该被接纳"
+        );
+    }
+    // `full`：三条动词、两条写效应，逐字未变。
+    let full_app = TerminalApp::new(full(vec![]), &test_root());
+    assert_eq!(full_app.declared_capabilities().items().len(), 3);
+    assert_eq!(full_app.declared_effects().len(), 2);
+}
+
+/// **`keep` 在沙箱档明确拒绝**（`invalid-argument`），而且是在**执行之前**拒的。
+#[test]
+fn keep_is_refused_in_the_sandbox_tier_before_anything_runs() {
+    let root = test_root();
+    let mut app = TerminalApp::new(TerminalAccess::new(TerminalTier::Sandbox, vec![]), &root);
+    let outcome = call(
+        &mut app,
+        command("touch keep-marker.txt").with("keep", "true"),
+    );
+    assert_eq!(failure_of(&outcome), "invalid-argument");
+    assert!(
+        !root.join("keep-marker.txt").exists(),
+        "「不支持」要在执行之前说清：{}",
+        text_of(&outcome)
+    );
+    assert!(
+        !root.join("terminal").exists(),
+        "沙箱档不该写那本「我起过的东西」的账"
+    );
+    // `keep=false` 不被这一道拒——它走的是执行那条路。
+    let outcome = call(&mut app, command("true").with("keep", "false"));
+    assert_ne!(
+        failure_of(&outcome),
+        "invalid-argument",
+        "`keep=false` 是这一档唯一的行为，不该被拒：{}",
+        text_of(&outcome)
+    );
+}
+
+/// **没有后端就不跑**：`sandbox` 档没装上后端时每条命令都是 `spawn-failure`，
+/// **绝不在宿主上裸跑顶替**（这条用例要一个文件记号来证明"什么都没执行"）。
+#[test]
+fn a_sandbox_without_a_backend_never_falls_back_to_the_host() {
+    let root = test_root();
+    let mut app = TerminalApp::new(TerminalAccess::new(TerminalTier::Sandbox, vec![]), &root);
+    let outcome = call(&mut app, command("touch bare-host-marker.txt"));
+    assert_eq!(
+        failure_of(&outcome),
+        "spawn-failure",
+        "没有后端 ⇒ 如实说没跑起来：{}",
+        text_of(&outcome)
+    );
+    assert!(
+        !root.join("bare-host-marker.txt").exists(),
+        "没有任何一条命令该落到宿主上"
+    );
+}
+
+/// **越界的 `cwd` 是本地拒绝**：在根之外执行一条命令，一次也不许跑起来。
+///
+/// 同一支用例带**正对照**：根之内的子目录不被这道检查挡（挡对了也挡错了同样是错）。
+#[cfg(target_os = "linux")]
+#[test]
+fn a_cwd_outside_the_environment_root_is_refused_in_the_sandbox_tier() {
+    let root = test_root();
+    let inside = root.join("sub");
+    std::fs::create_dir_all(&inside).expect("建子目录");
+    let outside = scratch("sandbox-outside");
+    let escaped = outside.join("escaped.txt");
+    let _ = std::fs::remove_file(&escaped);
+
+    let mut app = TerminalApp::new(sandboxed(), &root);
+    let outcome = call(
+        &mut app,
+        command(&format!("touch '{}'", escaped.display()))
+            .with("cwd", outside.to_string_lossy().as_ref()),
+    );
+    assert_eq!(
+        failure_of(&outcome),
+        "invalid-argument",
+        "越界的 cwd 必须本地拒绝：{}",
+        text_of(&outcome)
+    );
+    assert!(!escaped.exists(), "拒绝要在执行之前");
+
+    // 正对照：根之内的目录不该被这一道挡（它的结局是执行，不是 invalid-argument）。
+    let outcome = call(
+        &mut app,
+        command("pwd").with("cwd", inside.to_string_lossy().as_ref()),
+    );
+    assert_ne!(
+        failure_of(&outcome),
+        "invalid-argument",
+        "根之内的 cwd 不该被拒：{}",
+        text_of(&outcome)
+    );
+}
+
+/// **真执行：写得到自己的根，写不到外面**（系统只读 ＋ 环境根可写 ＋ `/tmp` 是沙箱自己的）。
+#[cfg(target_os = "linux")]
+#[test]
+fn a_sandboxed_command_writes_its_own_root_and_nothing_else() {
+    if !bwrap_ready() {
+        return;
+    }
+    let root = test_root();
+    let host_tmp_name = format!("celira-sbx-tmpfs-{}", std::process::id());
+    let host_tmp = std::env::temp_dir().join(&host_tmp_name);
+    let _ = std::fs::remove_file(&host_tmp);
+    let escaped = scratch("sandbox-escape").join("escaped.txt");
+    let _ = std::fs::remove_file(&escaped);
+
+    let mut app = TerminalApp::new(sandboxed(), &root);
+    let outcome = call(
+        &mut app,
+        command(&format!(
+            "echo inside > inside.txt; echo wrote-inside; \
+             touch /etc/.celira-sbx-escape 2>/dev/null && echo system-writable || echo system-read-only; \
+             : > /tmp/{host_tmp_name} && echo tmp-writable; \
+             touch '{escaped}' 2>/dev/null && echo outside-writable || echo outside-read-only",
+            escaped = escaped.display()
+        )),
+    );
+    let receipt = text_of(&outcome);
+    assert_eq!(outcome.state(), ResultState::Success, "{receipt}");
+    // 回执说清是哪只手执行的（审计那一格）。
+    assert!(
+        receipt.contains("sandbox = bwrap"),
+        "沙箱回执要带上后端名字（`sandbox = bwrap`）：{receipt}"
+    );
+    // 环境根真的可写（`--bind <根> <根>` 生效）。
+    assert_eq!(
+        std::fs::read_to_string(root.join("inside.txt"))
+            .expect("根里那个文件该在")
+            .trim(),
+        "inside"
+    );
+    // 系统只读：`/etc` 下写不进去。
+    assert!(
+        receipt.contains("system-read-only"),
+        "`/etc` 必须写不进去（`--ro-bind / /`）：{receipt}"
+    );
+    // `/tmp` 是沙箱自己的 tmpfs：写进去的东西不落到宿主。
+    assert!(
+        receipt.contains("tmp-writable"),
+        "`/tmp` 是可写的 tmpfs：{receipt}"
+    );
+    assert!(
+        !host_tmp.exists(),
+        "沙箱里的 `/tmp` 不是宿主那个 `/tmp`（写进去不该出现）"
+    );
+    // 根外面的普通路径同样写不进去。
+    assert!(
+        receipt.contains("outside-read-only"),
+        "根外面的路径必须只读：{receipt}"
+    );
+    assert!(!escaped.exists(), "根外面一个字节都不该写出来");
+}
+
+/// **真执行：默认断网**（新的 netns 里只有回环、没有路由）。
+#[cfg(target_os = "linux")]
+#[test]
+fn a_sandboxed_command_has_no_network() {
+    if !bwrap_ready() {
+        return;
+    }
+    let mut app = TerminalApp::new(sandboxed(), &test_root());
+    let outcome = call(&mut app, command("cat /proc/net/dev; cat /proc/net/route"));
+    let receipt = text_of(&outcome);
+    assert_eq!(outcome.state(), ResultState::Success, "{receipt}");
+    // `/proc/net/*` 是**这个 netns** 的那一份（宿主那一份在另一次挂载里）。
+    assert!(receipt.contains("lo:"), "沙箱里至少看得见回环：{receipt}");
+    assert!(
+        !receipt.contains("eth0:"),
+        "宿主的网卡不该出现在沙箱里（`--unshare-net` 没生效？）：{receipt}"
+    );
+    // 没有路由（默认路由那一行的 Destination 是 `00000000`）。
+    assert!(
+        !receipt.contains("00000000"),
+        "沙箱里不该有任何路由：{receipt}"
+    );
+}
+
+/// **真执行：调用方的 secret 不进子进程**（`CELIRA_TEST_SECRET`，看取值与键名两样）。
+#[cfg(target_os = "linux")]
+#[test]
+fn the_caller_secret_never_reaches_a_sandboxed_child() {
+    if !bwrap_ready() {
+        return;
+    }
+    let secret = format!("s3cr3t-sandbox-{}", std::process::id());
+    // ⚠ `set_var` 在 edition 2024 里是 `unsafe`（进程级共享状态）：这里串行使用，用完立刻摘掉。
+    unsafe { std::env::set_var("CELIRA_TEST_SECRET", &secret) };
+    let mut app = TerminalApp::new(sandboxed(), &test_root());
+    let outcome = call(&mut app, command("env"));
+    unsafe { std::env::remove_var("CELIRA_TEST_SECRET") };
+
+    let receipt = text_of(&outcome);
+    assert_eq!(outcome.state(), ResultState::Success, "{receipt}");
+    assert!(
+        !receipt.contains(&secret),
+        "凭据的**取值**不许出现在子进程环境里：{receipt}"
+    );
+    assert!(
+        !receipt.contains("CELIRA_TEST_SECRET"),
+        "连键名都不该在子进程环境里：{receipt}"
+    );
+    let scrubbed: usize = receipt
+        .lines()
+        .find_map(|line| line.strip_prefix("scrubbed = "))
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0);
+    assert!(
+        scrubbed >= 1,
+        "洗掉几个要如实报（这一次至少那个 secret）：{receipt}"
+    );
+}
+
+/// **真执行：超时那一堵墙在沙箱里同样管用**（bwrap 自持一个进程组，按组杀整棵树）。
+#[cfg(target_os = "linux")]
+#[test]
+fn a_sandboxed_timeout_kills_the_command_and_says_so() {
+    if !bwrap_ready() {
+        return;
+    }
+    let root = test_root();
+    let late = root.join("late.txt");
+    let _ = std::fs::remove_file(&late);
+    let mut app = TerminalApp::new(sandboxed(), &root);
+    let outcome = call(
+        &mut app,
+        command("sleep 3; touch late.txt").with("timeout", "1"),
+    );
+    let receipt = text_of(&outcome);
+    assert_eq!(failure_of(&outcome), "timeout", "{receipt}");
+    assert!(receipt.contains("killed = true"), "{receipt}");
+    // 等过那条命令本可以跑完的时刻：击杀真的生效时它一个字都不会落下。
+    std::thread::sleep(Duration::from_millis(3000));
+    assert!(
+        !late.exists(),
+        "超时之后那条命令不该还有机会写文件：{receipt}"
+    );
+}
+
+/// **入口**：`--terminal sandbox` 只有两条路——真的装上**某一支**后端（并打印 `backend =`），
+/// 或者**非零退出**并带上一个**稳定词**。**没有第三条路**（不退回 `full`，也不在宿主上裸跑）。
+///
+/// 两个稳定词是不同的失败：`sandbox-unavailable`（这台机器没有能兑现的后端）与
+/// `sandbox-identity-mismatch`（机器能、身份不对）。这一条钉的是"二选一"本身，不钉
+/// 这台机器落在哪一边——同一份源码要能在装了 bwrap 的机器与没装 userns 的机器上都成立。
+///
+/// 这一条走的是**真的二进制**（`agent_run`），不是库里的某个函数：入口那一行话是操作者
+/// 唯一能看见的东西，因此它必须被真进程钉住。
+#[cfg(target_os = "linux")]
+#[test]
+fn the_entry_installs_a_backend_or_refuses_with_a_stable_word() {
+    let root = std::env::temp_dir().join(format!("celira-sbx-entry-{}", std::process::id()));
+    // 环境根真的存在（identity 的探针要往里写一个文件；这也是真实装机的形状）。
+    std::fs::create_dir_all(&root).expect("建环境根");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent_run"))
+        .args([
+            "run",
+            "--root",
+            root.to_string_lossy().as_ref(),
+            "--agent",
+            "agent-t36",
+            "--materials",
+            std::env::temp_dir().to_string_lossy().as_ref(),
+            "--run",
+            "sbx",
+            "--max-turns",
+            "1",
+            "--terminal",
+            "sandbox",
+        ])
+        .output()
+        .expect("起得来 agent_run");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let installed = stderr.contains("backend = ");
+    let refused =
+        stderr.contains("sandbox-unavailable") || stderr.contains("sandbox-identity-mismatch");
+    assert!(
+        installed ^ refused,
+        "入口必须二选一：装上一支后端（打印 `backend =`），或者带稳定词拒绝；\
+         不许既不装、也不说，更不许两条同时出现：{stderr}"
+    );
+    if refused {
+        assert!(
+            !output.status.success(),
+            "拒绝必须非零退出（不能假装跑起来了）：{stderr}"
+        );
+    }
+    // 装上了后端 ⇒ 那支后端必须真的过了探针（打印的是它的保证集读数）。
+    if installed {
+        assert!(
+            stderr.contains("network=") && stderr.contains("files="),
+            "装上了后端就要把保证集读出来（审计那一格）：{stderr}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `sandbox` 档的第二支后端：identity（uid ＋ seccomp，不建命名空间）
+// ---------------------------------------------------------------------------
+//
+// 这一组**不依赖 bwrap**：它存在的理由正是那些"bwrap 起不来"的机器（本机就是：
+// Ubuntu 24.04 默认 AppArmor 下 bwrap 在 `RTM_NEWADDR` 上被拒）。判据全部是**真跑**：
+// 子进程写自己的根、写不了 `/etc`、连不出网、看不见调用方的 fd。没有一条是"看代码推断"。
+
+/// 造一个**没有 `CLOEXEC`** 的 fd（`dup(2)`）。
+///
+/// 为什么不能拿 `File::open` 造夹具：std 在 Linux 上给每个新 fd 都打 `O_CLOEXEC`，
+/// 那种 fd 本来就不会跨 `execve`——用它测"继承的句柄"是一条永远会通过的假用例。
+/// `dup(2)` 交出来的 fd **不带** 那个标记，正是 `close_range` 要收的那一种。
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn dup_inheritable(fd: i32) -> Option<i32> {
+    const SYS_DUP: i64 = 32;
+    let returned: i64;
+    // 安全：`dup` 只读一个整数、不改内存。
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inlateout("rax") SYS_DUP => returned,
+            in("rdi") fd as u64,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack),
+        );
+    }
+    (returned > 0).then_some(returned as i32)
+}
+
+/// aarch64 那一份（`__NR_dup` = 23）。
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+fn dup_inheritable(fd: i32) -> Option<i32> {
+    const SYS_DUP: i64 = 23;
+    let mut value = fd as i64;
+    // 安全：`dup` 只读一个整数、不改内存。
+    unsafe {
+        core::arch::asm!(
+            "svc 0",
+            in("x8") SYS_DUP,
+            inout("x0") value,
+            options(nostack),
+        );
+    }
+    (value > 0).then_some(value as i32)
+}
+
+/// 别的架构：没有夹具 ⇒ 这条用例如实跳过（并在 `--nocapture` 里说清原因）。
+#[cfg(all(
+    target_os = "linux",
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
+))]
+fn dup_inheritable(_fd: i32) -> Option<i32> {
+    None
+}
+
+/// 连 `dup(2)` 几次，得到一串**高位**的、不带 `CLOEXEC` 的 fd。
+///
+/// ⚠ 为什么不能只 dup 一次：最低空闲号就是 3，而子进程里 bash 读 `/proc/self/fd` 时
+/// **也会拿到 3**——"泄漏的 3"和"读目录的 3"撞在同一个号上，那条用例就永远分不清
+/// （2026-10-23 本机踩到：正对照与 identity 两端都印 `0 1 2 3`）。连开几个之后，
+/// 泄漏的那几个落在 4 以上，判据才有区分度。
+#[cfg(target_os = "linux")]
+fn dup_chain(count: usize) -> Vec<std::fs::File> {
+    use std::os::fd::FromRawFd;
+    let mut fds = Vec::new();
+    let mut current = 1;
+    for _ in 0..count {
+        let Some(next) = dup_inheritable(current) else {
+            break;
+        };
+        fds.push(unsafe { <std::fs::File as FromRawFd>::from_raw_fd(next) });
+        current = next;
+    }
+    fds
+}
+
+/// 回执里 `fds=…` 那一行的列表（`cd /proc/self/fd && printf fds=; echo *` 的输出）。
+#[cfg(target_os = "linux")]
+fn fd_listing(receipt: &str) -> String {
+    receipt
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("fds="))
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// **argv 与保证集**（离线）：identity 那一支不包 bwrap、自己声明 confinement、
+/// 工作目录由编排层设；保证集照实降级（`network=none-ip` 不是 bwrap 的 `network=none`）。
+#[cfg(target_os = "linux")]
+#[test]
+fn the_identity_backend_declares_its_own_argv_and_guarantees() {
+    use celira_agent::sandbox_backend::{
+        Confinement, IdentityBackend, SandboxBackend, SandboxRequest, SandboxRequestError,
+    };
+
+    let root = test_root();
+    let backend = IdentityBackend::new(&root);
+    assert_eq!(SandboxBackend::name(&backend), "identity");
+    assert_eq!(backend.environment_root(), root.as_path());
+
+    // argv：`<shell> -c <命令原文>`——不包 bwrap，环境根不进命令行。
+    let request = SandboxRequest::new(&root, &root, "echo hi", "bash");
+    let plan = backend.command(&request).expect("拼得出命令行");
+    assert_eq!(plan.program(), "bash");
+    assert_eq!(plan.args(), ["-c", "echo hi"]);
+    assert_eq!(
+        plan.confinement(),
+        Confinement::SeccompNoIp,
+        "identity 的断网与 fd 纪律全靠编排层在 execve 前装"
+    );
+    assert_eq!(plan.working_directory(), Some(root.as_path()));
+
+    // 越界的 cwd / 不存在的根：与 bwrap **同一份**拒绝（不是第二套规则）。
+    let outside = scratch("identity-outside");
+    let escaped = SandboxRequest::new(&root, &outside, "true", "bash");
+    assert_eq!(
+        backend.command(&escaped).err(),
+        Some(SandboxRequestError::CwdOutsideWorkspace)
+    );
+    let missing = root.join("does-not-exist");
+    let gone = SandboxRequest::new(&missing, &missing, "true", "bash");
+    assert_eq!(
+        backend.command(&gone).err(),
+        Some(SandboxRequestError::WorkspaceUnavailable)
+    );
+
+    // 保证集：**说得出来的必须是它真兑现的**。identity 不是 netns、不是挂载隔离。
+    let guarantees = SandboxBackend::guarantees(&backend);
+    assert_eq!(guarantees.value("network"), Some("none-ip"));
+    assert_ne!(
+        guarantees.value("network"),
+        Some("none"),
+        "`none` 是 bwrap 的 netns 那一格：identity 只是拒 IP 套接字（AF_UNIX 照旧通）"
+    );
+    assert_eq!(
+        guarantees.value("files"),
+        Some("workspace-writable,landlock")
+    );
+    assert_eq!(guarantees.value("pid"), Some("none"));
+    assert_eq!(guarantees.value("ipc"), Some("none"));
+    assert_eq!(guarantees.value("uts"), Some("none"));
+    assert_eq!(guarantees.value("resources"), Some("none"));
+    assert_eq!(guarantees.value("workspace"), Some("persistent"));
+    assert_eq!(guarantees.value("没有这一格"), None);
+}
+
+/// **真跑一**：环境根里写得出、`/etc` 里写不出（系统面挡住）。
+#[cfg(target_os = "linux")]
+#[test]
+fn an_identity_command_writes_its_root_and_never_etc() {
+    let root = test_root();
+    let escaped = format!("/etc/.celira-identity-escape-{}", std::process::id());
+    let _ = std::fs::remove_file(&escaped);
+    let mut app = TerminalApp::new(identity_sandboxed(&root), &root);
+    let outcome = call(
+        &mut app,
+        command(
+            "echo inside > inside.txt; \
+             if touch /etc/.celira-identity-escape-PROBE 2>/dev/null; then echo etc-writable; \
+             else echo etc-read-only; fi",
+        ),
+    );
+    let receipt = text_of(&outcome);
+    eprintln!("identity 写面回执：\n{receipt}");
+    assert_eq!(outcome.state(), ResultState::Success, "{receipt}");
+    assert!(
+        receipt.contains("sandbox = identity"),
+        "回执要带上后端名字：{receipt}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("inside.txt"))
+            .expect("环境根里那个文件该在")
+            .trim(),
+        "inside",
+        "identity 的可写面就是环境根：{receipt}"
+    );
+    assert!(
+        receipt.contains("etc-read-only") && !receipt.contains("etc-writable"),
+        "`/etc` 必须写不进去（DAC）：{receipt}"
+    );
+    let probe = "/etc/.celira-identity-escape-PROBE";
+    assert!(!Path::new(probe).exists(), "`/etc` 下一个字节都不该写出来");
+    assert!(!Path::new(&escaped).exists());
+}
+
+/// **真跑一（第二半）**：**环境根之外写不进去**——Landlock 把"写入"关进了根。
+///
+/// 这一条是 identity 与 DAC 的分水岭：测试进程与子进程**是同一个 uid**，父目录也归它所有，
+/// 所以**没有 Landlock 时这条命令必然成功**（2026-10-23 真机：`touch` 成功、兄弟目录被造出来）。
+/// 它证明的不是"系统只读"（那是 `/etc` 那一格），而是"造不出一个别人的家"。
+#[cfg(target_os = "linux")]
+#[test]
+fn an_identity_command_cannot_write_outside_its_root() {
+    let root = test_root();
+    let parent = root.parent().expect("临时目录有父目录").to_path_buf();
+    let escaped = parent.join(format!("celira-escape-{}", std::process::id()));
+    let _ = std::fs::remove_file(&escaped);
+
+    let mut app = TerminalApp::new(identity_sandboxed(&root), &root);
+    let outcome = call(
+        &mut app,
+        command(&format!(
+            "if touch {} 2>/dev/null; then echo escaped; else echo confined; fi",
+            escaped.display()
+        )),
+    );
+    let receipt = text_of(&outcome);
+    eprintln!("identity 根外写回执：\n{receipt}");
+    assert_eq!(outcome.state(), ResultState::Success, "{receipt}");
+    assert!(
+        receipt.contains("confined") && !receipt.contains("escaped"),
+        "环境根之外必须写不进去（Landlock）：{receipt}"
+    );
+    assert!(!escaped.exists(), "根外那个文件一个字节都不该写出来");
+}
+
+/// **真跑一（第三半）**：**临时区在环境根里**——Landlock 连 `/tmp` 都不许写，所以编排层必须
+/// 把 `TMPDIR` 指到根内；否则 `mktemp`、`git`、编译器这类命令一用临时文件就失败。
+#[cfg(target_os = "linux")]
+#[test]
+fn a_sandboxed_command_gets_a_temp_dir_inside_its_root() {
+    let root = test_root();
+    let mut app = TerminalApp::new(identity_sandboxed(&root), &root);
+    let outcome = call(&mut app, command("mktemp > where.txt && cat where.txt"));
+    let receipt = text_of(&outcome);
+    eprintln!("identity 临时区回执：\n{receipt}");
+    assert_eq!(outcome.state(), ResultState::Success, "{receipt}");
+    let written = std::fs::read_to_string(root.join("where.txt"))
+        .expect("命令要把它自己的临时路径写下来")
+        .trim()
+        .to_string();
+    let path = std::path::Path::new(&written);
+    assert!(
+        path.starts_with(std::fs::canonicalize(&root).unwrap()),
+        "临时文件必须落在环境根里（`/tmp` 那一格是写不了的）：{written}"
+    );
+}
+
+/// **真跑二**：断网——子进程连 `/dev/tcp` 必须失败，而且拒绝理由必须是 `Permission denied`
+/// （seccomp 生效），不是"超时"或"连接被拒"（后者说明连接真的走出去了）。
+#[cfg(target_os = "linux")]
+#[test]
+fn an_identity_command_cannot_open_an_ip_socket() {
+    let root = test_root();
+    let mut app = TerminalApp::new(identity_sandboxed(&root), &root);
+    let outcome = call(
+        &mut app,
+        command("( exec 3<>/dev/tcp/1.1.1.1/443 ) 2>&1; echo probe-exit=$?"),
+    );
+    let receipt = text_of(&outcome);
+    eprintln!("identity 断网回执：\n{receipt}");
+    assert_eq!(outcome.state(), ResultState::Success, "{receipt}");
+    // 本机在线时，拒绝的理由必须是内核的 `EACCES`（`Permission denied`）——那是过滤器
+    // 真的生效的证据；离线的机器只会说 `Network is unreachable`，同样过不了网，但不是
+    // 过滤器挡住了它（探针两面都接受，见 `IdentityBackend`）。**两种都不许是"连接成功"
+    // 或者"连接被拒"**：后者说明包真的发出去了。
+    assert!(
+        receipt.contains("Permission denied") || receipt.contains("Network is unreachable"),
+        "拒绝的理由必须是 EACCES（在线）或没有路由（离线）：{receipt}"
+    );
+    assert!(
+        !receipt.contains("Connection refused"),
+        "`Connection refused` 说明连接真的走出去了（过滤器没生效）：{receipt}"
+    );
+    assert!(
+        receipt.contains("probe-exit=1"),
+        "那次连接必须失败（不是\"连上了但没说话\"）：{receipt}"
+    );
+    // 正对照：换一个不存在的族（AF_UNIX 路径）不该被这道过滤器挡——断网不是"什么都不能建"。
+    let outcome = call(
+        &mut app,
+        command("( exec 4<>/dev/tcp/1.1.1.1/443 ) 2>&1; echo again=$?"),
+    );
+    let receipt = text_of(&outcome);
+    assert!(
+        receipt.contains("Permission denied"),
+        "同一支过滤器必须在第二次调用里照样生效：{receipt}"
+    );
+}
+
+/// **真跑三**：继承的 fd 不泄漏。
+///
+/// 夹具是**真的**：先在测试进程里 `dup(1)` 造一个不带 `CLOEXEC` 的 fd，然后用**同一份**
+/// 命令在 `full` 档里跑一次——它必须看得见那个号（正对照）；再在 identity 档里跑一次，
+/// 它必须看不见（`close_range` 生效）。没有正对照的话，"看不见"可能只是夹具没造出来。
+#[cfg(target_os = "linux")]
+#[test]
+fn an_identity_child_inherits_no_caller_fd() {
+    // 连开五个：第一个一定是 3，而 3 恰好是子进程读 `/proc/self/fd` 时自己拿到的号——
+    // 它的存在**不区分**"泄漏"与"读目录"。因此判据只看 3 之后的那些号（4/5/6/7）。
+    let held = dup_chain(5);
+    let leaked: Vec<String> = held
+        .iter()
+        .map(std::os::fd::AsRawFd::as_raw_fd)
+        .filter(|fd| *fd > 3)
+        .map(|fd| fd.to_string())
+        .collect();
+    if leaked.is_empty() {
+        eprintln!("skip: 本架构没有 `dup` 夹具——继承 fd 那一条不跑");
+        return;
+    }
+    let root = test_root();
+    let inspect = "cd /proc/self/fd && printf fds=; echo *";
+
+    // 正对照（`full` 档）：这几个 fd 必须出现在子进程的 fd 表里。
+    let mut host = TerminalApp::new(full(vec![]), &root);
+    let host_receipt = text_of(&call(&mut host, command(inspect)));
+    let host_fds = fd_listing(&host_receipt);
+    for fd in &leaked {
+        assert!(
+            host_fds.split_whitespace().any(|token| token == fd),
+            "夹具必须真的会泄漏（`full` 档应当看得见 fd {fd}）：{host_receipt}"
+        );
+    }
+
+    // identity：同一个命令，调用方的 fd 必须已经不在了（0/1/2 ＋ 读目录那一格之外没有）。
+    let mut app = TerminalApp::new(identity_sandboxed(&root), &root);
+    let receipt = text_of(&call(&mut app, command(inspect)));
+    let fds = fd_listing(&receipt);
+    eprintln!("fd 对照（full 看见 {host_fds:?}；identity 看见 {fds:?}）");
+    for fd in &leaked {
+        assert!(
+            !fds.split_whitespace().any(|token| token == fd),
+            "调用方的 fd {fd} 不许出现在子进程里（`close_range` 没生效？）：{receipt}"
+        );
+    }
+    assert!(
+        fds.split_whitespace()
+            .all(|token| token.parse::<u32>().map(|fd| fd <= 3).unwrap_or(false)),
+        "子进程只该看见 0/1/2（＋读目录那一格）：{fds:?}（{receipt}）"
+    );
+}
+
+/// **探针真跑**：identity 的探针给出四格读数，而且它自己不留垃圾。
+#[cfg(target_os = "linux")]
+#[test]
+fn the_identity_probe_measures_instead_of_guessing() {
+    use celira_agent::sandbox_backend::{IdentityBackend, SandboxBackend};
+    let root = test_root();
+    let reading = IdentityBackend::new(&root)
+        .probe()
+        .expect("本机 identity 必须可用（真跑）");
+    eprintln!("identity 探针：{}", reading.evidence);
+    assert_eq!(reading.backend, "identity");
+    for required in [
+        "uid=",
+        "workspace=writable",
+        "system=read-only",
+        "fds=0,1,2",
+    ] {
+        assert!(
+            reading.evidence.contains(required),
+            "探针证据里少了 `{required}`：{}",
+            reading.evidence
+        );
+    }
+    // 断网那一格：本机在线 ⇒ `denied`（过滤器生效）；离线的机器 ⇒ `unreachable`
+    // （探针把两者都算过，见 `IdentityBackend` 的判据）。**不许**是 `reachable`。
+    assert!(
+        reading.evidence.contains("network=denied")
+            || reading.evidence.contains("network=unreachable"),
+        "断网那一格必须是 denied 或 unreachable：{}",
+        reading.evidence
+    );
+    assert!(
+        !reading.evidence.contains("network=reachable"),
+        "连得上就不是这一档：{}",
+        reading.evidence
+    );
+    // 探针写完就删：环境根里不许留下 `.celira-identity-probe-*`。
+    let leftovers: Vec<String> = std::fs::read_dir(&root)
+        .expect("读环境根")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter(|name| name.starts_with(".celira-identity-probe-"))
+        .collect();
+    assert!(leftovers.is_empty(), "探针留下了垃圾：{leftovers:?}");
+}
+
+/// **入口的身份判据**（离线可判的那一半）：环境根属于当前 uid 时通过；
+/// 不属于时拒绝，且**给得出修复命令**（不 chown、不回退）。
+#[cfg(target_os = "linux")]
+#[test]
+fn the_entry_identity_rule_refuses_a_foreign_root_with_a_fix() {
+    use celira_agent::sandbox_backend::{IdentityBackend, check_entry_identity};
+    let root = test_root();
+    // 正例：这个目录是我们自己的（测试进程建的）。
+    check_entry_identity(&root, &IdentityBackend::new(&root)).expect("自己的根必须通过");
+    // 反例：拿一个**不归当前 uid** 的目录（`/etc` 的 owner 是 root）。
+    // 判据是 owner 比较，因此这一条在非 root 进程里必然拒绝——不需要 chown，也不需要 root。
+    let foreign = IdentityBackend::new("/etc");
+    let failure = check_entry_identity(Path::new("/etc"), &foreign).expect_err("必须拒绝");
+    assert_eq!(failure.as_str(), "sandbox-identity-mismatch");
+    assert!(
+        !failure.message().contains("sandbox-unavailable"),
+        "身份不对不是\"没有后端\"：{}",
+        failure.message()
+    );
+    assert!(
+        failure.detail().contains("chown -R"),
+        "拒绝必须给一条可执行的修复命令：{}",
+        failure.detail()
+    );
+    // `full` 档不经过这条判据（它不承诺写边界）：这里的证据是"这条函数只被 sandbox 调用"，
+    // 由两个 bin 的分支结构钉住（`TerminalTier::Full => Ok(Some(access))` 在调用之前返回）。
+}
+
+/// **缺省档**：不给 `--terminal` 时，Linux 上会试着装 `sandbox`；本机（bwrap 不可用、
+/// identity 可用）必须落到 identity，而不是"没有手"、更不是 `full`。
+#[cfg(target_os = "linux")]
+#[test]
+fn the_default_tier_picks_the_strongest_backend_that_really_works() {
+    use celira_agent::sandbox_backend::{BwrapBackend, IdentityBackend, SandboxBackend};
+    let root = test_root();
+    let bwrap = BwrapBackend::new().probe().is_ok();
+    let identity = IdentityBackend::new(&root).probe().is_ok();
+    let chosen = celira_agent::sandbox_backend::choose(&root);
+    match (bwrap, identity) {
+        (true, _) => assert_eq!(
+            chosen.expect("bwrap 可用就必须选它").name(),
+            "bwrap",
+            "能建命名空间的机器用更强的"
+        ),
+        (false, true) => assert_eq!(
+            chosen
+                .expect("bwrap 不行、identity 行 ⇒ 选 identity")
+                .name(),
+            "identity"
+        ),
+        (false, false) => assert!(
+            chosen.is_err(),
+            "两支都不可用 ⇒ 必须拒绝（没有\"那就别沙箱了\"这条路）"
+        ),
+    }
+}
+
+/// **exec 失败仍然是 `spawn-failure`**（不是"跑完、退出码 134"）。
+///
+/// 这一条钉的是 `crate::seccomp::CLOSE_RANGE_FLAGS` 那个偏差的**理由**：`close_range` 若用
+/// 立刻关闭（flags=0），std 的错误管也会被关掉，子进程在 `execve` 失败时自己 abort——
+/// 父进程拿到 `spawn() = Ok`，一次"程序不存在"就被读成一次"跑完了"。用 `CLOEXEC`（4）
+/// 之后，同一条路径仍是 `spawn-failure`。这一条是那条注释的**可复核证据**。
+#[cfg(target_os = "linux")]
+#[test]
+fn an_identity_shell_that_cannot_start_is_still_spawn_failure() {
+    use celira_agent::sandbox_backend::IdentityBackend;
+    let root = test_root();
+    let access = TerminalAccess::new(TerminalTier::Sandbox, vec![])
+        .with_sandbox_backend(Box::new(IdentityBackend::new(&root)))
+        .with_shell("celira-no-such-shell-for-identity");
+    let mut app = TerminalApp::new(access, &root);
+    let outcome = call(&mut app, command("true"));
+    let receipt = text_of(&outcome);
+    assert_eq!(
+        failure_of(&outcome),
+        "spawn-failure",
+        "引擎起不来必须是 spawn-failure，不是一次『跑完』的读数：{receipt}"
+    );
+    assert!(
+        !receipt.contains("134"),
+        "更不许变成 abort 的读数（close_range 旗标用错了？）：{receipt}"
     );
 }

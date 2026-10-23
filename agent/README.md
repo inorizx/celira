@@ -56,8 +56,11 @@
 | `src/event_cards.rs` | **系统服务层第四个件**（事件卡片）：把「**本次清醒期里**世界又动了什么」摆成 Run 内的**增量**——宿主在主体**跑着**的时候听到铃就拉一次 B1（`since = 本次活动开始`）写进一个 **Run 级细胞**（`EventCardsReport`，与上下文占用读数格同族：宿主写、本件渲染），turn 边界把增量摆出来；**零正文**（只有「房名 +N」）、**一条只播一次**（Run 级内存去重、收场即散、零持久）、**零动静不出块**（与通知栏/组件区那两件快照刻意相反）、**永不让活动失败**；渲染顺序机械（增量多在前、同量按房名）；与通知栏/锚的三方分工见 §3.23 |
 | `src/notification_bar.rs` | **系统服务层第二个件**（通知栏）：把「世界有什么新的」摆成**开场快照**一块——只渲染（读是宿主的事：它每唤醒读一次 App 的只读投影）、**只在开场摆一次**（快照不是活状态，`before_turn` 返回空批次）、投影里**一行正文都没有**、**按事件定价**（TASK_73 起：分母 `可见 N 间` ＋ 有新的房逐行 `= <条数>` ＋ 余数 `其余 M 间 = 0`——**计数为 0 的房不逐行点名**，没出现的就是零新；全静默一行 `可见 N 间 · 全部 = 0`；`k = N` 时不给余数行；形状的唯一装配点是 `im_app::render_new_since`）；没有锚或读不回来时如实写 `unknown`，而且**永不让活动失败**（便利坏了不挡清醒，与门铃的 fail-closed 刻意相反）（见 §3.19） |
 | `src/web_app.rs` | **第四个真实 App**（第一条**出网窗**，TASK_35）：两条只读动词——`web_search`（问搜索接口：≤5 条，每条「标题 / 地址 / 摘要 / 日期」；标题与摘要各 ≤200 字节、日期 ≤64 字节机械截断，**地址是把手、不截断**（超 2 KiB 的那一行不列并计数）；查有两个方言 `results-json` / `search-api`）与 `web_fetch`（**交给配置好的那家取**，两个方言 `fetch-doc` / `fetch-raw`；**没有"自己抓"这一条回退**，见 §3.24）。抓取只剩**四条机械限制**：地址只判形状、回执 ≤64 KiB（超限拒绝、不截断）、30 秒窗口、一次调用一次请求；⚠ **私网 / 重定向 / 内容类型不归我们管**（对面去取，它的出口与策略不归我们）。失败词表是本 App 自己的（**封闭表，以 `WebFailure::as_str` 为准——本节不列清单、不数个数**；"没配"与"被拒"是**两格**，见 §3.80；直连抓取退役时 `wrong-kind` / `redirect-loop` / `private-address-refused` 三格一并退役）。**两条动词都是只读**（没有任何写效应）。来源由宿主声明（没配 ⇒ 两条都如实 `credential-absent`）。见 §3.24 |
-| `src/terminal_app.rs` | **第五个真实 App**（**主体的手**）：**档位门控装配**——宿主声明 `--terminal <tier>` 才在场（不给 ⇒ **动词不存在**；未知档位**拒绝启动**、不静默降档；v1 只装 `full` ＝整机全权）。**三条动词**：`terminal_run(command, cwd?, timeout?, keep?, name?)`（一次性：跑完即散；**不给 `cwd` ⇒ 在主体自己的环境根里执行**——默认是一个**声明的地址**，不是「进程碰巧从哪儿起」；**`keep=true` ⇒ 「这件要活到关家」**——输出落 `<环境根>/terminal-logs/<名字>.out`、这件事记进账）、`terminal_held`（读数：我起过、还留着的东西 ＋ pid 三态）、`terminal_stop`（动作：收那一件）。命令交给平台默认 shell（本平台是它自带那个，可用声明覆盖——缝）；平台缝的形状是「**契约唯一、实现多份**」——**墙只写一份，臂只留四件**（今天两支：Windows＝PowerShell、Linux＝bash）。**五堵机械墙**：**凭据洗**（系统自有前缀 ＋ 宿主点名的键名；洗掉几个如实报、洗不掉的点名，**取值一个字节都不落**）、**超时**（默认 120s、可调、**上限 600s**，到点**尽力击杀进程树**——Linux 按进程组发 `SIGKILL`）、**输出有界**（stdout/stderr 各 ≤32 KiB，**截断带明确标记**、退出码照报；**非 UTF-8 的输出按本机平台读数解并说出来**——Windows 报页码、Linux 如实说 `not-utf8`）、**审计走既有动作事实**、**没有 OS 沙箱也不假装有**。失败词表五项封闭（`invalid-argument` / `timeout` / `spawn-failure` / `output-lost` / `unknown`）；**失败也带正文**（超时 / 没杀干净时，**已经读到**的两条流与读数照样交出去，另有一行 `note` 说明这次只保证到什么程度）；**跑起来了、跑完了就是成功**（退出码是读数不是失败）。效果是**第四类** `unverifiable-write`。它还**往显示区交素材**（`held_material` → `holdings::HoldingRow::Held`，方向 `app → 显示区`）。见 §3.25 / §3.70 |
+| `src/terminal_app.rs` | **第五个真实 App**（**主体的手**）：**档位门控装配**——宿主声明 `--terminal <tier>` 才在场（不给 ⇒ 取缺省档，Linux 上是 `sandbox`，探针不过则**动词不存在**；未知档位**拒绝启动**、不静默降档；两档：`sandbox` ＝只能写自己的环境根 / 系统只读 / 默认断网，`full` ＝整机全权）。**`sandbox` 只有一条动词**（`terminal_run`：`keep` 那一族不在场，`cwd` 必须在环境根之内）；**`full` 三条**：`terminal_run(command, cwd?, timeout?, keep?, name?)`（一次性：跑完即散；**不给 `cwd` ⇒ 在主体自己的环境根里执行**——默认是一个**声明的地址**，不是「进程碰巧从哪儿起」；**`keep=true` ⇒ 「这件要活到关家」**——输出落 `<环境根>/terminal-logs/<名字>.out`、这件事记进账）、`terminal_held`（读数：我起过、还留着的东西 ＋ pid 三态）、`terminal_stop`（动作：收那一件）。命令交给平台默认 shell（本平台是它自带那个，可用声明覆盖——缝）；平台缝的形状是「**契约唯一、实现多份**」——**墙只写一份，臂只留四件**（今天两支：Windows＝PowerShell、Linux＝bash）。**五堵机械墙**：**凭据洗**（系统自有前缀 ＋ 宿主点名的键名；洗掉几个如实报、洗不掉的点名，**取值一个字节都不落**）、**超时**（默认 120s、可调、**上限 600s**，到点**尽力击杀进程树**——Linux 按进程组发 `SIGKILL`）、**输出有界**（stdout/stderr 各 ≤32 KiB，**截断带明确标记**、退出码照报；**非 UTF-8 的输出按本机平台读数解并说出来**——Windows 报页码、Linux 如实说 `not-utf8`）、**审计走既有动作事实**、**`full` 没有 OS 沙箱也不假装有**（`sandbox` 档反过来：真后端 ＋ 真探针，见 `src/sandbox_backend.rs`）。失败词表五项封闭（`invalid-argument` / `timeout` / `spawn-failure` / `output-lost` / `unknown`）；**失败也带正文**（超时 / 没杀干净时，**已经读到**的两条流与读数照样交出去，另有一行 `note` 说明这次只保证到什么程度）；**跑起来了、跑完了就是成功**（退出码是读数不是失败）。效果是**第四类** `unverifiable-write`。它还**往显示区交素材**（`held_material` → `holdings::HoldingRow::Held`，方向 `app → 显示区`）。见 §3.25 / §3.70 |
 | `src/terminal_held.rs` | **终端名下那些活到关家的事**（2026-10-11 主人裁决「她起的东西活得跟住户一样久」＋「回得来」）：一本**只追加**的账（`<环境根>/terminal`，一行一条 JSON，与 `<环境根>/timers`、notes 同款；两种行 `start` / `stop`，六个键就是契约，手写编解码、**认不出的取值明确拒绝**）＋ **折出来的版面**（`Held::fold`：同名后起的覆盖先起的 ⇒ **一个名字任何时刻只指一件事**，否则停它就有歧义）——判据 22「账只追加，版面可重写」，**没有第二份权威**。输出落在 `<环境根>/terminal-logs/<名字>.out`（**与账分开放**：她的安排与那件事吐出来的东西寿命不同——停掉一件不等于要删掉它吐过的话），她**用已有的文件动词读它**（不另造一个"读输出"的动作）。**它不记"还活着吗"**（那是读的时候向操作系统问一次的事——写进账里就等于把"当时"当成"现在"）、**一个进程都不杀**（收口是住户结束的作业收容 ＋ **主体自己停它的那个动作**（动词面在 `terminal_app`，见 §3.25）——**它不是第二个收尸者**）。见 §3.25 |
+| `src/landlock.rs` | **写边界的第二把锁**（2026-10-23）：Landlock（内核 ≥ 5.13，**无特权**）把子进程的**写入**关进环境根。它补的是 identity 后端原来缺的那一半——seccomp 管"建不建套接字"，DAC 管"系统写不写得了"，但**同一个 uid 里"只能写自己那一格"是假的**；Landlock 让它变成真的：根内可写、根外与 `/tmp` 一律 `EACCES`、读照常。ABI 差异是判据（`REFER` 是 ABI 2、`TRUNCATE` 是 ABI 3，塞错位会让内核直接拒绝建规则集（`EINVAL`）⇒ 一整套写边界没装上），所以先问版本再裁位；ABI < 1 ⇒ 如实不可用，identity 跟着不可用。做不出"只挡住某个目录"的减法（允许清单，父目录一允许就覆盖子树）⇒ **读的保密仍要靠专用 uid**。装法：`open_directory`（`O_PATH`）＋ 加规则 ＋ `restrict_writes_to`，全部在 `pre_exec` 里发裸系统调用（不分配、不加依赖）；版本用 `abi` 问。见 §3.25 |
+| `src/sandbox_backend.rs` | **沙箱后端端口**（2026-10-23，`terminal=sandbox` 那一档的第一刀）：「**哪只手执行**」是可插拔的，**权限语义不可插拔**（`docs/runtime/terminal/` 那份裁决稿 §4）。一份请求 `SandboxRequest`（环境根 / `cwd` / 命令 / shell）＋ 一个端口 `SandboxBackend`：`name`（审计用的稳定名字）/ `guarantees`（**真的**兑现什么，八格封闭取值——说不出来的写 `none`，今天 bwrap 的 `resources=none` 就是如实登记的缺口）/ `probe`（**这台机器上可用吗**，真跑不是 `which`）/ `command`（只拼 argv，**不起进程**：起进程仍只有编排层那一处）。第一支实现 `BwrapBackend`：`--ro-bind / /` ＋ `--dev` / `--proc` / `--tmpfs /tmp` ＋ `--bind <环境根> <环境根>` ＋ 四个命名空间（net / pid / ipc / uts）＋ `--die-with-parent` / `--new-session` / `--chdir`；探针在沙箱**里面**量五样：命名空间标识必须与本进程不同、`/etc` 写不进去（只读系统）、`/proc/net/*` 只有 `lo` 且没有路由（断网）、`/tmp` 写得进去（挂载真的做上了）——**不看退出码**（一个把 `--unshare-net` 悄悄忽略掉的包装器同样返回 0）。**不可用就是拒绝**：`choose()` 一支都不过 ⇒ `sandbox-unavailable`，**不退回 `full`、不在宿主裸跑**；`systemd-run --user` **不是兜底**（本机实证：接受属性但不建命名空间）。第二支实现 `IdentityBackend`（2026-10-23，不建任何命名空间）：写面靠 **uid（DAC）**、断网靠 **seccomp**、句柄靠 **`close_range`**——探针四格全是真跑（有效 uid 不是 0、环境根里建得出文件、`/etc` 建不出、一条**装了同一套 confinement 的真子进程**连不出网且看不见继承的 fd）；保证集照实降级为 `files=workspace-writable,dac-only`、`network=none-ip`、`pid=none` / `ipc=none` / `uts=none`。命令行是**裸 shell**（`<shell> -c`），由 `Confinement::SeccompNoIp` 告诉编排层在 `execve` 前装过滤器与清 fd。**入口的身份纪律**（`check_entry_identity` / `choose_for_entry`）：以 root 组装 `sandbox` 档 ⇒ 拒绝；选中 identity 而环境根 owner 不是当前有效 uid ⇒ 拒绝并给 `chown -R` 修复行（**不 chown、不回退**）——两者报 `SANDBOX_IDENTITY_MISMATCH`，与「没有后端」的 `sandbox-unavailable` **刻意不是同一个词**。名字里的「供应商」那族词按语言守卫留在模型适配层。见 §3.25 |
+| `src/seccomp.rs` | **子进程的系统调用过滤器**（2026-10-23，identity 沙箱后端的断网与句柄纪律）：一份 **classic BPF** 程序（13 条）＋ 两次 `prctl`（`PR_SET_NO_NEW_PRIVS` 然后 `PR_SET_SECCOMP`），装法逐条对应 2026-10-23 真机实测。拒 `socket(AF_INET)` / `socket(AF_INET6)`（`EACCES`）与 `io_uring_setup`（否则可用它的套接字操作绕开 `socket`），别的族（unix 套接字）与读文件照旧放行，架构不符则杀整条进程。`confine_child` 是 `pre_exec` 钩子的全部内容：**装过滤器 ＋ `close_range(3, ~0U, CLOEXEC)`**（调用方的已连接套接字进不来）——两半必须一起装，装一半不算兑现。⚠ 旗标是 4（`CLOEXEC`）而不是规格写的 0：立刻关闭会连 `std` 的错误管一起关掉，`execve` 失败时子进程 abort 成 134、父进程却拿到 `Ok`（本机两条路都量过；`CLOEXEC` 给的是同一条"执行之后不继承"的保证，且保住 `spawn-failure` 分类）。`FILTER` 的跳转目标在单测里逐条钉住（classic BPF 的 `jt` / `jf` 只向前，规格里那条「命中就返回」因此排成前向等价体，语义逐字相同）。没有 libc / nix / seccompiler：`core::arch::asm!` 直接发系统调用（x86_64 与 aarch64 两套；别的架构 `install` 返回 `SeccompUnavailable`，**不装一个猜出来的表**）。`SUPPORTED` / `SOCKET_SYSCALL` / `IO_URING_SETUP_SYSCALL` / `CLOSE_RANGE_FIRST` / `CLOSE_RANGE_LAST` 是可读的那几格。见 §3.25 |
 | `src/platform.rs` | **平台缝**（Linux 臂那一刀）：terminal 与 MCP **共用的一份平台知识**——默认 shell 名（`powershell.exe` / `cmd.exe` / `bash`）、怎么拼命令行（`bash -c`、`cmd.exe /C`，含各自的启动卫生：Windows 的 `-NoProfile`、Linux 摘掉 `BASH_ENV` / `ENV` 两个 `bash -c` 的 profile 缝）、怎么**击杀整棵进程树**（Windows＝`taskkill /T /F`；Linux＝子进程 `process_group(0)` 自持一组、按组 `SIGKILL`，手写 FFI、零新依赖）、以及**凭据洗**（系统自有前缀 `CELIRA_` ＋ 宿主点名的键名；**先清空再交**——只 `envs()` 是假墙；只报洗掉几个/洗不掉的点名，**取值一个字节都不落**）。形状与第五刀同一份：**契约唯一、实现多份**——墙只写一份（在各自的消费者里），**臂只留四件**，本件只做其中三件＋凭据洗（**非 UTF-8 怎么解**留在各自的臂里）。它**不认识任何消费者**（守卫：不许引用 `crate::terminal_app` / `crate::mcp`），不读环境根、不落盘；没有臂的平台上是 fail-closed（入口拒绝开启，本件不留近似实现）。见 §3.25 / §3.29 |
 | `src/mcp/`（`mod.rs` / `app.rs` / `stdio.rs` / `remote.rs` / `wire.rs` / `scheme.rs` / `wire_tokens.rs`） | **外部来源的第一台 App**（TASK_42；Linux 臂那一刀补 bash 臂；远程端点那一刀补网络通道）：市面上的 MCP server 在这里就是**一台被授权的 App**——宿主开机声明一次（`--mcp <名>=stdio:<命令>` 或 `<名>=<加密地址>`，可重复），主体要用的时候再展开；它与出厂内置件走**同一份窄契约**（`AppPort`），因此 **OS 一行不用认识 MCP**。三条正交事实：授权面归宿主（**装配期**，装 / 卸要重启宿主）、通道归宿主级（**懒**：声明 ≠ 起进程）、动词面归那一次活动的展开状态。两条通道走同一份 `Transport` 契约：本地 stdio（洗凭据、收进程树）与网络端点（地址墙、不跟随重定向、答复有界、凭据只从环境取）；效果档两档（默认 `unverifiable-write`；`,read-only` = 宿主显式背书）；四堵墙（转发窗口 / 回执有界 / 词表封闭 / **凭据洗**——判据与实现在 `platform.rs` 只有一份）；没有臂的平台入口**拒绝开启**（不静默换近似行为）。见 §3.29 |
 | `src/skills_desktop.rs` | **系统服务层第五个件**（TASK_41）：**技能桌面**——报材料区 `<材料根>/skills/` 的**一级条目**（＝直接**子目录**数：散 skill 与包都算一项，散**文件**不算）：头一行 `skills: N 项（要翻看用 files_list，路径 skills/）`，然后最多 **12** 行**名字 ＋ 一句触发**（`description` 按预算取整句；名字 64 / 触发 160 字节封顶，超出说「另 N 项」）；**只读、纯投影、零正文**（`SKILL.md` 只读开头 frontmatter 两行，正文仍然只能 `files_read` 读）；`skills/` 不存在 ⇒ **整块不出场**（不是空标题，也不是 `0 项`），存在但空 ⇒ 如实说「技能区为空」。见 §3.28 |
@@ -643,26 +646,62 @@ agent_run run ... --notes-create
 "越界子串"名单，因此它出现在任何被扫描的源文件里都会红。主体那一栏的名字（`url`）按**整条带引号
 的字面量**放行，同一个词当标识符用照旧违规（对照断言在守卫里）。
 
-### 3.25 terminal 窗：主体的手（整机信任档）
+### 3.25 terminal 窗：主体的手（`sandbox` 与 `full` 两档）
 
-**一句话**：前面四件都是"看"或"记"，这件是**做**——在这台机器上执行命令，一次性，跑完即散。
-**档位就是授权本体**：不是出厂内置，宿主用 `--terminal full` 声明才装配；不给 ⇒ 这个 App 不在场
-（动词不存在、能力面一个字节都没有）；档位是**封闭枚举**，未知档位拒绝启动。
+**一句话**：前面四件都是"看"或"记"，这件是**做**——执行一条命令，一次性，跑完即散。
+**档位就是授权本体**：不是出厂内置，宿主用 `--terminal <tier>` 声明；**不给 ⇒ 缺省档**
+（2026-10-23 裁：Linux 上默认试着给 `sandbox`，探针不过就**没有手**并打一行原因——
+**绝不替你换成 `full`**，也不在宿主裸跑）；档位是**封闭枚举**，未知档位拒绝启动。今天两档：
+
+- **`sandbox`**（默认该给的那一档）：**系统只读、默认断网**，`cwd` 必须在环境根之内。动词只有
+  `terminal_run` 一条（`keep` 那一族不在场：一件活在本次进程寿命之外的东西已经不在这个范围里），
+  越界是 `invalid-argument`（零执行）。**执行后端可插拔**：`BwrapBackend`（命名空间，`--bind`
+  环境根＋私有 `/tmp`，**只有环境根可写**）与 `IdentityBackend`（bwrap 起不来的机器，例如默认
+  AppArmor 的 Ubuntu 24.04：uid ＋ seccomp，**按 DAC 判，可写面是"这个 uid 能写的地方"**，
+  `/tmp` 共享），见 [`sandbox_backend.rs`](src/sandbox_backend.rs) 与 [`seccomp.rs`](src/seccomp.rs)。
+  **回执多一行 `sandbox = <后端名>` ＋ 它的保证集**——那一行就是"这只手到底被什么挡住"的权威读数。
+  **后端不可用 ⇒ 入口非零退出并报 `sandbox-unavailable`**——**绝不退回 `full`，也不在宿主上裸跑**；
+- **`full`**（**break-glass**）：整机全权。三条动词（`terminal_run` / `terminal_held` / `terminal_stop`），
+  `keep` 那一族只在这一档有；`cwd` 可指向任何存在的目录。**它没有 OS 沙箱，也不假装有。**
 
 **权威位置（本节不再重复它们的内容）**：
 
-- **五堵墙、`full` 是信任声明不是安全豁免、失败也带正文、三态与两条件、编码读数、
+- **写边界的第二把锁（Landlock）为什么必须与 seccomp 一起装、ABI 差异、它能做什么与做不到什么** →
+  [`landlock.rs`](src/landlock.rs) 的 `//!`
+- **为什么沙箱不带网络、出网为什么是 `web` 窗的事** →
+  [`SANDBOX_NETWORK_DECISIONS.md`](../docs/runtime/terminal/SANDBOX_NETWORK_DECISIONS.md)
+- **五堵墙、两档的分界、`full` 是信任声明不是安全豁免、失败也带正文、三态与两条件、编码读数、
   `unverifiable-write` 为什么自成一类、臂与加臂的路径** → [`terminal_app.rs`](src/terminal_app.rs) 的 `//!`
+- **后端端口（保证集 / 探针 / argv 拼法）、为什么 `systemd-run --user` 不是兜底、
+  探针为什么不能只看退出码** → [`sandbox_backend.rs`](src/sandbox_backend.rs) 的 `//!`
 - **默认 shell、命令行拼接（含启动卫生）、进程树击杀、凭据洗那一份知识** →
   [`platform.rs`](src/platform.rs) 的 `//!`（两个消费者共用一份）
 - **装配期为什么放行这一类写** → [`app_contract.rs`](src/app_contract.rs) 的 `requires_verification`
 - **机器处境那一行**（`shell = bash` 是读数、不是清单） → [`machine.rs`](src/machine.rs) 的 `//!`
 - **证明** → [`tests/terminal_app.rs`](tests/terminal_app.rs)
 
-⚠ **如实登记的覆盖边界**：这一档的前提是"**这台机器、以及手落脚的所有目录都是可信的**"——因此
-**没有 OS 沙箱、也不假装有**（所以没有 `sandbox-unavailable` 那种既像隔离又像故障的第三种说法；
-`cwd` 可指向任何存在的目录，它不是墙）。`unknown` **没有机械的解除手段**，v1 不为这条罕见路径预建
-机制——旧的"宿主显式 acknowledge"是**未决效果门**的出口，门已退役；今天这一格由主体自己去看账本。
+⚠ **如实登记的覆盖边界（两档各自的那一条）**：
+
+- **`full`**：前提是"**这台机器、以及手落脚的所有目录都是可信的**"——它不做隔离，因此那一档
+  不存在 `sandbox-unavailable` 这种说法；`cwd` 可指向任何存在的目录，它不是限制。
+- **`sandbox`**：两支后端兑现的东西**不一样，回执照实印**，别把它们读成同一个承诺：
+  - `bwrap`：写隔离（只有环境根）＋ 断网 ＋ pid/ipc/uts 命名空间 ＋ 凭据洗；**不是保密边界**
+    （`--ro-bind / /` 意味着系统可读，同 uid 读得到的文件照旧读得到）；
+  - `identity`：**写边界靠 Landlock**（`files=workspace-writable,landlock`，内核 ≥ 5.13、无特权）——
+    环境根之外**一个字节都写不出去**（`/tmp` 也写不了；`TMPDIR` 被指到根内的 `.celira-tmp`，
+    所以 `mktemp` / `git` 这类命令照常能用），哪怕与主人是同一个 uid；没有 pid/ipc/uts
+    命名空间（`pid=none`，同 uid 的进程可见、可 kill），**读**仍是全系统可读；
+  - 两支都**不限资源**（没有 cgroup，`resources=none` 是如实登记的缺口）；
+  - **`identity` 的"读"那一半仍要靠部署**：Landlock 只能做"允许清单"（父目录一允许就覆盖子树），
+    做不出"全系统可读、只挡住某个目录"的减法。要连"读不到主人的东西"也成立，把住户放进**专用
+    uid**——安装脚本 [`deploy/celira-identity-setup.sh`](deploy/celira-identity-setup.sh)
+    （`--check` / `--apply` / `--remove`，布局与真机读数见裁决稿 §8.1）。
+    **验收工具**：[`examples/sandbox_accept.rs`](examples/sandbox_accept.rs) —— 以住户身份跑，
+    五条判据逐条印 `PASS` / `FAIL`（`identity` 现在是 5/5，靠的是 Landlock 而不是 uid）。
+  探针不可用的原因要照实读：`sandbox-unavailable` 是**入口**的拒绝，不是动作失败分类。
+
+`unknown` **没有机械的解除手段**，v1 不为这条罕见路径预建机制——旧的"宿主显式 acknowledge"是
+**未决效果门**的出口，门已退役；今天这一格由主体自己去看账本。
 
 ### 3.26 模型源可配：默认档零迁移，换家档四件套，文件档在场即权威
 
@@ -2574,8 +2613,9 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 
 - **一处规则两份实现**：壳里那份与 `residents.js` 判据同源，跨语言**没法委托** ⇒ 权威在后者，
   **改一边必须同时改另一边**
-- **缺省档给的是写与读、没有执行**：没有"能跑、但出不去"那一档——那要内核级隔离，**未建**（档位是封闭
-  枚举，加档等真实消费者）
+- **执行那一档曾经不存在，现在有了**（2026-10-23 起）：`--terminal sandbox` 给的是"能跑、但写不出
+  环境根、默认上不了网"；`full` 才是整机。这一条原来的登记（"那要内核级隔离，未建"）已过期——
+  两档的边界与证据见 §3.25 与 `agent/src/sandbox_backend.rs`
 - **作品面与终端档是两条轴**，互不冒充（前者是"自己的东西不用申请"，后者是"这台机器给不给那只手"）；
   终端的取值与 `files_*` 的动词名 / 语义都没动——**动的只是缺省**
 

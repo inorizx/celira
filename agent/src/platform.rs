@@ -235,6 +235,20 @@ mod arm {
         bash_command(shell, command, environment)
     }
 
+    /// **臂的一件**：把一份「程序 ＋ 参数」装成命令行（沙箱后端给的 argv，**不是** shell 词法）。
+    ///
+    /// 与 [`bash_command`] 共用同一条启动卫生：子进程**自持一个进程组**（组长就是它自己）。
+    /// 少了这一行，超时击杀按 `-pid` 发出去会落到一个不存在的进程组上（或者更糟，落到
+    /// 别人的组里）——沙箱那一档的命令行是 `bwrap …`，它自己不设这个就没人替它设。
+    ///
+    /// 它不认识「沙箱」这回事：给什么程序就拼什么程序（臂只回答「这台机器怎么起进程」）。
+    pub fn argv_command(program: &str, args: &[String]) -> Command {
+        let mut builder = Command::new(program);
+        builder.args(args);
+        builder.process_group(0);
+        builder
+    }
+
     /// **臂的一件**：怎么拼 MCP 的命令行（同一支 bash 臂——与 terminal 同款：
     /// `bash -c`、自持进程组、摘 profile 缝；契约与 Windows 臂相同，不换近似行为）。
     pub fn mcp_command(
@@ -250,6 +264,43 @@ mod arm {
     fn is_profile_seam(key: &OsString) -> bool {
         key.to_str()
             .is_some_and(|name| PROFILE_SEAM_KEYS.contains(&name))
+    }
+
+    /// **臂的一件**：把 `sandbox` 档的 confinement 装到命令行上——子进程 `execve` 之前装
+    /// seccomp 过滤器、把 3 号及之后的全部 fd 标记成 `execve` 时关闭（见 `crate::seccomp`）。
+    ///
+    /// 为什么放在**臂**里而不是后端里：起进程这件事仍然只有这一处出口（后端只给 argv）。
+    /// 为什么不是每个后端自己拼：`pre_exec` 是 `Command` 的方法，只有拿到 `Command` 的一方
+    /// 才能装；后端拿不到，也就不该拿到。
+    ///
+    /// ⚠ 钩子里的两件事都**不分配**（见 `crate::seccomp::confine_child` 的约束）。失败 ⇒
+    /// `spawn` 报错（**不 exec**）：标记不上继承的 fd 就等于"数不清子进程手里有什么"。
+    pub fn confine_command(
+        builder: &mut Command,
+        environment_root: &std::path::Path,
+    ) -> Result<(), String> {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::process::CommandExt;
+
+        // 环境根的 C 字符串**在父进程里**备好：`pre_exec` 里不许分配、也不该拼路径。
+        let root = CString::new(environment_root.as_os_str().as_bytes())
+            .map_err(|_| "环境根的路径里含 NUL，拼不出 C 字符串".to_string())?;
+
+        // 安全：钩子只发裸系统调用、只用栈与静态内存，不分配、不碰锁
+        // （`pre_exec` 的契约见 `std::os::unix::process::CommandExt`）。
+        //
+        // 顺序是语义：**seccomp 先装**（它设 `no_new_privs`，也是断网那一半），
+        // **再**开目录、**再**把 Landlock 的写边界压上——写边界压上之后不可撤销，
+        // 所以它必须是最后一步，且失败就**不许 exec**（返回 Err ⇒ std 放弃 exec）。
+        unsafe {
+            builder.pre_exec(move || {
+                crate::seccomp::confine_child()?;
+                let dir = crate::landlock::open_directory(root.as_ptr())?;
+                crate::landlock::restrict_writes_to(dir)
+            });
+        }
+        Ok(())
     }
 
     /// **臂的一件**：尽力击杀**整棵进程树**；返回"击杀报成功了吗"。
@@ -293,3 +344,7 @@ mod arm {
 pub use arm::kill_tree;
 #[cfg(any(windows, target_os = "linux"))]
 pub use arm::{MCP_SHELL, TERMINAL_SHELL, mcp_command, terminal_command};
+/// 沙箱后端给的 argv 只在 Linux 上有消费者（`TerminalTier::Sandbox` 的臂就在那一支），
+/// 因此这条缝只导出在 Linux 上——别的平台上不留一个没人用的替身。
+#[cfg(target_os = "linux")]
+pub use arm::{argv_command, confine_command};

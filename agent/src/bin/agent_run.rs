@@ -77,7 +77,7 @@ const USAGE: &str = "\
                    [--context-window <正整数>] [--im-endpoint <URL>]
                    [--identity-agent <core 里的 id> --identity-name <此世界的名字>]
                    [--web-sources <路径>]
-    [--terminal <tier>] [--files <own|full>]
+    [--terminal <sandbox|full>] [--files <own|full>]   （缺省 sandbox；不可用则没有手）
                    [--mcp <声明>]
                    [--model <id>] [--model-endpoint <URL>]
                    [--model-protocol <responses|chat-completions>]
@@ -304,13 +304,14 @@ fn start(
     request.declarations.web = web_tier.unwrap_or_default();
     // terminal 的档位是**可选**的：不给就没有这只手；给了但档位不认识、或本平台没有实现，
     // 都在这里直接拒绝（fail-closed，不静默降档、不静默换行为）。
-    request.declarations.terminal = match resolve_terminal(&terminal_tier) {
-        Ok(terminal) => terminal,
-        Err((message, code)) => {
-            eprintln!("{message}");
-            return code;
-        }
-    };
+    request.declarations.terminal =
+        match resolve_terminal(&terminal_tier, &request.environment_root) {
+            Ok(terminal) => terminal,
+            Err((message, code)) => {
+                eprintln!("{message}");
+                return code;
+            }
+        };
     // **文件面的档位**（2026-10-20 主人裁「要么没有要么全开」）：不给 = own（只能动自己
     // 那一块，出厂以来的样子）；给了 full = 任意文件夹。档位在**解析那一处**就已经 fail-closed
     // （认不出的取值直接拒绝），这里只把它落进声明包。
@@ -1025,25 +1026,97 @@ fn web_access(list: Option<&Path>, env_root: &Path) -> (Option<SearchAccess>, Op
     }
 }
 
-/// terminal 档位的解析。两条都是 fail-closed：**不认识的档位**不降级；**本平台没有实现**
-/// 也不换一个近似行为（退出码与"参数写错"同族）。
-fn resolve_terminal(tier: &Option<String>) -> Result<Option<TerminalAccess>, (String, i32)> {
+/// terminal 档位的解析。三条都是 fail-closed：**不认识的档位**不降级；**本平台没有实现**
+/// 也不换一个近似行为（退出码与"参数写错"同族）；**`sandbox` 还要在这台机器上真跑一次探针**
+/// ——bwrap 不在 / 被 AppArmor 挡住 / `--unshare-net` 建不起来 ⇒ 非零退出并报
+/// `sandbox-unavailable`，**绝不退回 `full`，也不在宿主上裸跑**。
+///
+/// **不给旗标**不算"拒绝"：那是缺省档，见 [`default_terminal`]。
+fn resolve_terminal(
+    tier: &Option<String>,
+    environment_root: &Path,
+) -> Result<Option<TerminalAccess>, (String, i32)> {
     let Some(text) = tier else {
-        return Ok(None);
+        return Ok(default_terminal(environment_root));
     };
     let Some(tier) = TerminalTier::parse(text) else {
-        return Err((format!("未知的 terminal 档位: {text}（v1 只有 full）"), 1));
+        return Err((
+            format!("未知的 terminal 档位: {text}（v1 只有 sandbox / full）"),
+            1,
+        ));
     };
     if !tier.available() {
         return Err((
             format!(
-                "本平台没有 terminal 的 {} 档实现（有实现的平台：Windows、Linux）：不静默换行为，直接拒绝",
-                tier.as_str()
+                "本平台没有 terminal 的 {} 档实现（有实现的平台：{}）：不静默换行为，直接拒绝",
+                tier.as_str(),
+                if tier == TerminalTier::Sandbox {
+                    "Linux"
+                } else {
+                    "Windows、Linux"
+                }
             ),
             1,
         ));
     }
-    Ok(Some(TerminalAccess::new(tier, credential_names())))
+    let access = TerminalAccess::new(tier, credential_names());
+    match tier {
+        // `full` **不经过身份纪律**：它不承诺写边界（`sandbox_backend::choose_for_entry`）。
+        TerminalTier::Full => Ok(Some(access)),
+        // `sandbox`：身份 → 后端 → 合不合，三关一次调用。两类拒绝各有稳定词：
+        // 没有后端 `sandbox-unavailable`；身份不对 `sandbox-identity-mismatch`
+        // （修法不同：装一个后端 vs 换一个身份跑）。
+        TerminalTier::Sandbox => {
+            match celira_agent::sandbox_backend::choose_for_entry(environment_root) {
+                Ok(backend) => {
+                    // 一行读数：这一档真的装上了哪只手（后端 ＋ 它的保证集）。
+                    eprintln!(
+                        "terminal = sandbox（backend = {}，{}）",
+                        backend.name(),
+                        backend.guarantees().reading()
+                    );
+                    Ok(Some(access.with_sandbox_backend(backend)))
+                }
+                Err(refusal) => Err((
+                    format!("terminal=sandbox 拒绝启动：{}", refusal.message()),
+                    1,
+                )),
+            }
+        }
+    }
+}
+
+/// **缺省档**（2026-10-23 裁）：不给 `--terminal` ⇒ Linux 上默认就试着给 `sandbox`。
+///
+/// 探针不过 ⇒ 保留「**没有手**」并打一行原因：**绝不退 `full`**（那等于把整机交给一个
+/// 用户没要求的档），**也不在宿主上裸跑**。"没有手"是唯一安全的降级方向——它让缺省装机
+/// 不至于连话都不会说，又不会在用户不知情时扩大授权。
+///
+/// 非 Linux（`sandbox` 那一档没有实现）⇒ 同样没有手：缺省不是"换成别的东西"，是"没有"。
+fn default_terminal(environment_root: &Path) -> Option<TerminalAccess> {
+    if !TerminalTier::Sandbox.available() {
+        return None;
+    }
+    match celira_agent::sandbox_backend::choose_for_entry(environment_root) {
+        Ok(backend) => {
+            eprintln!(
+                "terminal = sandbox（缺省档；backend = {}，{}）",
+                backend.name(),
+                backend.guarantees().reading()
+            );
+            Some(
+                TerminalAccess::new(TerminalTier::Sandbox, credential_names())
+                    .with_sandbox_backend(backend),
+            )
+        }
+        Err(refusal) => {
+            eprintln!(
+                "terminal = 没有手（缺省 sandbox 拒绝启动：{}）；要用整机请显式 --terminal full",
+                refusal.message()
+            );
+            None
+        }
+    }
 }
 
 /// 外部来源的 App（MCP server）的**授权面**解析。

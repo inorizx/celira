@@ -32,6 +32,10 @@
 5. `RUNTIME_TERMINAL_ENGINEERING.md`：终局理念到 Rust 工程骨架的桥梁，定义领域边界、Ports/Adapters、持久化拓扑与第一实现切片。
 6. `RUNTIME_TERMINAL_DECISIONS.md`：多路评审后的负责人裁决，负责指导本轮修订。
 
+沙箱切片（实现期裁决，不属于终局本体）：`SANDBOX_PROVIDER_DECISIONS.md`（可插拔后端）、
+`SANDBOX_IDENTITY_DECISIONS.md`（边界装在哪一层）、`SANDBOX_NETWORK_DECISIONS.md`
+（沙箱为什么**不带**网络：出网是一条独立能力）。
+
 历史验证与实施材料已退出工作树，归 Git 历史（考古：`git log -- docs/runtime/history/slices/`）。其中 Slice 05（Effect/Recovery）与 Slice 12（Started/Interrupted）的历史验证证据同此——它们只是当前终局约束的历史证据，不是终局本体或新实现授权。
 
 上述 Slice 材料只表示历史验证或实施证据，不是终局本体的并列定义，也不自动授权继续旧路线。若 Slice 与本组终局裁决、上层契约或当前实现事实冲突，必须报告冲突并以更高权威为准；清理 Slice 前应先承接其中仍有效的唯一约束和未完成状态。

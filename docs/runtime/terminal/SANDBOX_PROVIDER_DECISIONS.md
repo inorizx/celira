@@ -87,19 +87,19 @@ SandboxResolver
 
 ```text
 bwrap
-  ↓ 不可用（例如非特权 user namespace 被禁）
-systemd-run --user + ProtectSystem / ProtectHome / PrivateTmp / NoNewPrivileges / MemoryMax
-  ↓ 不可用
+  ↓ 不可用（例如非特权 user namespace 被 AppArmor 限制）
 SandboxUnavailable（明确拒绝；不退回宿主）
 ```
+
+**`systemd-run --user` 不是兜底**：本机实测 systemd 255 在用户管理器下会接受 `ProtectSystem` / `ProtectHome` / `PrivateTmp` / `PrivateNetwork` 属性，但因为没有 CAP_SYS_ADMIN，挂载/网络命名空间根本没建，`ProtectSystem=strict` 下仍能写工作区外。它不是沙箱，不能拿来当 provider；只有固定参数的**系统级 helper**（需要单独的安全裁决）或容器/VM 才能作为后续 provider。
 
 这条链只是**内置 provider 的默认顺序**。以后可以加 rootless 容器或微虚拟机，但不改变上面的 Grant 语义。
 
 性能口径（本机实测/量级，不是承诺）：
 
 - 裸跑 `/bin/true`：约 1–2 ms/次；
-- `systemd-run --user`：约 20 ms/次（含临时 unit 建销）；
-- bwrap：正常 Linux 上通常个位数到十几毫秒；本次验收机因 user namespace 被禁，无法本机测量；
+- bwrap：正常 Linux 上通常个位数到十几毫秒；本次验收机在 AppArmor 放开非特权 userns 后 **200 次约 908 ms（≈4.5 ms/次）**；限制恢复后按预期失败；
+- `systemd-run --user`：约 20 ms/次，但**不是沙箱**，不列入 provider；
 - 常驻 rootless 容器：冷启 100–500 ms，热 exec 10–50 ms，内存约 20–100 MB/Agent；
 - 微虚拟机：启动 100–300 ms，内存约 30–128 MB/Agent。
 

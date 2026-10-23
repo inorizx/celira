@@ -84,8 +84,12 @@ const USAGE: &str = "\
   --im-endpoint     声明 Celira IM 的端点：门铃就来自它。必给——没有它就没有门铃。
   --context-window  声明这次清醒期的上下文窗口（状态行 `context` 段的分母）；
                     不给时取适配层当前模型档位的公开标称值。`0` 不是合法声明。
-  --terminal <tier> 声明 terminal 窗的档位：不给就没有这只手（动词不存在）；
-                    v1 只有 `full`（整机全权）。未知档位直接拒绝，不静默降档。
+  --terminal <tier> 声明 terminal 窗的档位：不给就取缺省档——Linux 上默认给 `sandbox`
+                    （探针真跑；这台机器上不可用 ⇒ 没有手，只打一行原因，不会替你换成 full）；
+                    两档：`sandbox` = 只能写自己的环境根、系统只读、默认断网（Linux 上由
+                    bwrap 或 identity 执行；显式要它但不可用 ⇒ 拒绝启动并报 `sandbox-unavailable`）；
+                    `full` = 整机全权（break-glass，只在专用机器上用）。未知档位直接拒绝，
+                    不静默降档，也不从 `sandbox` 退到 `full`。
   --files <档位>    声明文件面的档位：`own`（缺省）＝ 只能动自己那一块（资料根读、
                     作品目录写）；`full` ＝ 任意文件夹（`files_*` 的地址一律写绝对路径）。
                     这一档由主人给，不是 Agent 能申请的；未知档位直接拒绝，不静默降档。
@@ -482,13 +486,14 @@ fn main() -> ExitCode {
 
     // terminal 窗的档位：**不给就没有这只手**；不认识的档位、或本平台没有实现的档位，
     // 都在这里直接拒绝（fail-closed，不静默降档、不静默换行为）。
-    let terminal = match resolve_terminal(options.terminal_tier.as_deref()) {
-        Ok(terminal) => terminal,
-        Err((message, code)) => {
-            eprintln!("{message}");
-            return ExitCode::from(code as u8);
-        }
-    };
+    let terminal =
+        match resolve_terminal(options.terminal_tier.as_deref(), Path::new(&options.root)) {
+            Ok(terminal) => terminal,
+            Err((message, code)) => {
+                eprintln!("{message}");
+                return ExitCode::from(code as u8);
+            }
+        };
 
     // **文件面的档位**（2026-10-20 主人裁「要么没有要么全开」）：不给 = own（只能动自己
     // 那一块，出厂以来的样子）；给了 full = 任意文件夹。认不出的取值**拒绝启动**——
@@ -849,24 +854,99 @@ fn web_access(list: Option<&Path>, env_root: &Path) -> (Option<SearchAccess>, Op
 
 /// terminal 档位的解析（在打开环境、起任何东西之前）。
 ///
-/// 两条都是 fail-closed：**不认识的档位**不降级；**本平台没有实现**也不换一个近似行为。
-fn resolve_terminal(tier: Option<&str>) -> Result<Option<TerminalAccess>, (String, i32)> {
+/// 三条都是 fail-closed：**不认识的档位**不降级；**本平台没有实现**也不换一个近似行为；
+/// **`sandbox` 还要在这台机器上真跑一次探针**（`crate::sandbox_backend::choose`）——
+/// bwrap 不在、被 AppArmor 挡住、`--unshare-net` 建不起来，都在这里结束：**非零退出**并报
+/// `sandbox-unavailable`。**绝不退回 `full`，也不在宿主上裸跑**（§5 / §7 的「不做静默降级」）。
+///
+/// **不给旗标**不算"拒绝"：那是缺省档，见 [`default_terminal`]。
+fn resolve_terminal(
+    tier: Option<&str>,
+    environment_root: &Path,
+) -> Result<Option<TerminalAccess>, (String, i32)> {
     let Some(text) = tier else {
-        return Ok(None);
+        return Ok(default_terminal(environment_root));
     };
     let Some(tier) = TerminalTier::parse(text) else {
-        return Err((format!("未知的 terminal 档位: {text}（v1 只有 full）"), 1));
+        return Err((
+            format!("未知的 terminal 档位: {text}（v1 只有 sandbox / full）"),
+            1,
+        ));
     };
     if !tier.available() {
         return Err((
             format!(
-                "本平台没有 terminal 的 {} 档实现（有实现的平台：Windows、Linux）：不静默换行为，直接拒绝",
-                tier.as_str()
+                "本平台没有 terminal 的 {} 档实现（有实现的平台：{}）：不静默换行为，直接拒绝",
+                tier.as_str(),
+                if tier == TerminalTier::Sandbox {
+                    "Linux"
+                } else {
+                    "Windows、Linux"
+                }
             ),
             1,
         ));
     }
-    Ok(Some(TerminalAccess::new(tier, credential_names())))
+    let access = TerminalAccess::new(tier, credential_names());
+    match tier {
+        // `full` **不经过身份纪律**：它不承诺写边界，因此 uid 不是它的前提（见
+        // `sandbox_backend::choose_for_entry` 的注释）。这里一个字都没变。
+        TerminalTier::Full => Ok(Some(access)),
+        // `sandbox`：**身份 → 后端 → 身份与后端合不合**，三关合成一次调用
+        // （`choose_for_entry`）。两类拒绝各带自己的稳定词：没有后端是
+        // `sandbox-unavailable`，身份不对是 `sandbox-identity-mismatch` ——
+        // 修法不同，词就不能共用（理由写在 `sandbox_backend` 的常量注释里）。
+        TerminalTier::Sandbox => {
+            match celira_agent::sandbox_backend::choose_for_entry(environment_root) {
+                Ok(backend) => {
+                    // 一行读数（操作者要看得出「这一档真的装上了哪只手」）：后端 ＋ 它的保证集。
+                    eprintln!(
+                        "agent_host: terminal = sandbox（backend = {}，{}）",
+                        backend.name(),
+                        backend.guarantees().reading()
+                    );
+                    Ok(Some(access.with_sandbox_backend(backend)))
+                }
+                Err(refusal) => Err((
+                    format!("terminal=sandbox 拒绝启动：{}", refusal.message()),
+                    1,
+                )),
+            }
+        }
+    }
+}
+
+/// **缺省档**（2026-10-23 裁）：不给 `--terminal` ⇒ Linux 上默认就试着给 `sandbox`。
+///
+/// 探针不过 ⇒ 保留「**没有手**」并打一行原因：**绝不退 `full`**（那等于把整机交给一个
+/// 用户没要求的档），**也不在宿主上裸跑**。"没有手"是唯一安全的降级方向——它让缺省装机
+/// 不至于连话都不会说，又不会在用户不知情时扩大授权。
+///
+/// 非 Linux（`sandbox` 那一档没有实现）⇒ 同样没有手：缺省不是"换成别的东西"，是"没有"。
+fn default_terminal(environment_root: &Path) -> Option<TerminalAccess> {
+    if !TerminalTier::Sandbox.available() {
+        return None;
+    }
+    match celira_agent::sandbox_backend::choose_for_entry(environment_root) {
+        Ok(backend) => {
+            eprintln!(
+                "agent_host: terminal = sandbox（缺省档；backend = {}，{}）",
+                backend.name(),
+                backend.guarantees().reading()
+            );
+            Some(
+                TerminalAccess::new(TerminalTier::Sandbox, credential_names())
+                    .with_sandbox_backend(backend),
+            )
+        }
+        Err(refusal) => {
+            eprintln!(
+                "agent_host: terminal = 没有手（缺省 sandbox 拒绝启动：{}）；要用整机请显式 --terminal full",
+                refusal.message()
+            );
+            None
+        }
+    }
 }
 
 /// **出网档的解析**（在打开环境、起任何东西之前）：照 `resolve_terminal` 的形状。

@@ -1,14 +1,27 @@
-//! terminal 窗：**主体的手**（整机信任档）。
+//! terminal 窗：**主体的手**（两档：`sandbox` 与 `full`）。
 //!
 //! 主体是聊天居民：说话、记事、看世界都齐了，但**做不了事**。本件给主体一次性执行一条命令的能力
-//! ——这台机器上的任意命令，跑完即散。
+//! ——`sandbox` 档只能写自己的环境根、系统只读、默认断网；`full` 档是整机全权，跑完即散。
 //!
 //! ## 档位就是授权本体
 //!
-//! 本件**不是**出厂内置：它由宿主用一个旗标声明（`--terminal full`）才装配；不给 ⇒ **这个 App 不在
-//! 场**（动词不存在，能力面里一个字节都没有）。档位是**封闭枚举**，v1 只装 `full`（整机全权）一档；
+//! 本件**不是**出厂内置：它由宿主用一个旗标声明（`--terminal <tier>`）才装配；**不给旗标是入口
+//! 的缺省档**（Linux 上先试 `sandbox`，探针不过就**没有这只手**，见两个二进制里的
+//! `default_terminal`）——本件只在"给了档位"与"没给"两种世界里工作，**不给就没有这个 App 在
+//! 场**（动词不存在，能力面里一个字节都没有）。档位是**封闭枚举**，今天两档：
+//!
+//! - **`sandbox`**（默认该给的那一档）：**只能写自己的环境根，系统只读，默认断网**。哪只手执行
+//!   由可插拔的沙箱后端决定（[`crate::sandbox_backend`]；Linux 两支：bwrap，以及不建命名空间、
+//!   靠 uid ＋ seccomp 的 identity）。后端探针
+//!   不过 ⇒ **入口非零退出并报 `sandbox-unavailable`**——**绝不退回 `full`，也不在宿主上裸跑**；
+//! - **`full`**（**break-glass**）：整机全权——"这台机器随你用"。它**没有沙箱，也不假装有**；
+//!   要不要重开、多久到期是主人的手续，不在本件。
+//!
 //! 未知档位**拒绝启动**，不静默降级到某一档（降档是加墙，等真实消费者再立）。
 //!
+//! **两档共用同一套墙与同一份回执**（洗凭据 / 超时 / 输出有界 / 审计 / 三态如实）：换档换的是
+//! **手落到哪儿**，不是"信不信任主体的读数"。`keep` 那一族（活到关家）**只属于 `full`**——
+//! 一件活在沙箱外面的东西，已经不是"只能写自己环境根"的那只手了（v1 明确拒绝，见下）。
 //! **`full` 是信任声明，不是安全豁免**：五堵墙一堵都不少；它不加的是**效果域**上的边界承诺
 //! ——这正是"给够"的语义（零弹窗、不逐条批）。命令内容**不做语义分类**：没有黑白名单、没有
 //! "这条命令危险"的判断（那一轴调研里市场也没做好，我们不接）。
@@ -50,8 +63,11 @@
 //!    命令，流的寿命不归它**——它顺手拉起的常驻进程不该拖着这一轮（实测：一条 1 秒跑完的
 //!    命令挂了 68 分钟）。这一格**不是失败**，它说的是"这次读取覆盖到哪"；
 //! 4. **审计免费**：每一条命令与它的结果都走既有的动作事实（本层不另建日志、不另立事实源）；
-//! 5. **没有 OS 沙箱，也不假装有**：`full` 档本来就是"这台机器随主体用"，本层不做隔离，
-//!    因此也不存在 `sandbox-unavailable` 这种既像隔离又像故障的第三种说法。
+//! 5. **没有 OS 沙箱，也不假装有**——**这一条说的是 `full` 档**：它本来就是"这台机器随主体用"，
+//!    本层不做隔离，因此那一档不存在 `sandbox-unavailable` 这种既像隔离又像故障的第三种说法。
+//!    **`sandbox` 档反过来**：它有一支真的后端（[`crate::sandbox_backend`]）与一次真跑的探针，
+//!    不可用时**入口拒绝**——那一档的 `sandbox-unavailable` 是**入口**的事，不是动作失败分类
+//!    （动作词表仍是下面那五项封闭的）。
 //!
 //! ## 失败词汇（封闭五项）
 //!
@@ -135,6 +151,32 @@
 //!
 //! **负空间**：不加调度 / 唤醒 / 常驻任务队列（它不是定时器，只回答"这一件留住"）；收尸那一条
 //! 在 [`crate::terminal_held`] 的"不收尸"里（本件只按账停主体点名的那一件）。
+//!
+//! ## `sandbox` 档：墙一条没少，换的是**手落在哪儿**
+//!
+//! 判据一句话：**"给不给这只手"和"这只手能伸到哪儿"是两件事，前者是档位，后者是沙箱。**
+//!
+//! **共用的一半**（因此只写一份）：洗凭据、超时击杀、输出有界与编码读数、三态如实、失败也带
+//! 正文、效果归类（`terminal_run` 仍是第四类 `unverifiable-write`）——两个档位走的是**同一个
+//! 编排函数**（[`measure`]），差的只有"怎么拼命令行"这一步。
+//!
+//! **`sandbox` 多的那一半**：
+//!
+//! - **系统只读、环境根可写、默认断网**：由后端（[`crate::sandbox_backend::BwrapBackend`]）
+//!   拼出来的 argv 兑现，而**不是**由这里的 if 语句兑现；
+//! - **`cwd` 必须在环境根之内**（缺省就是环境根）：越界 ⇒ **本地拒绝 `invalid-argument`**、
+//!   零执行。判据是"这次请求自相矛盾"，不是"我们要挡住一次逃逸"——真正的边界是
+//!   `--ro-bind / /`：根外面**根本没有挂上可写的面**；
+//! - **`keep` 明确拒绝**（`invalid-argument`）：一件活到关家的东西活在本进程的寿命之外，
+//!   它已经不是"只能写自己环境根"的那只手了。"这一档不支持"要在**第一次请求时**就说清，
+//!   而不是起一个跑着跑着悄悄消失的东西；
+//! - **`terminal_held` / `terminal_stop` 不在场**：那一族是 `keep` 的配套（看它、停它），
+//!   而 `keep` 在这一档不存在。更要紧的是：`terminal_stop` 收的是**宿主上的进程树**——
+//!   让一个沙箱档的动词去杀外面的 pid，等于从沙箱里伸出一只手。⇒ 这一档的能力面只有
+//!   `terminal_run` 一条（能力面就是授权面，不摆一个用不了/不该用的动词）。
+//!
+//! **后端不可用 ⇒ 拒绝**（[`crate::sandbox_backend`] §「没有合格后端」）：入口在起任何东
+//! 西之前探针一次，不过就非零退出并报 `sandbox-unavailable`。**没有"那就 full 吧"这条路**。
 //!
 //! ## 平台缝（fail-closed）与「臂」
 //!
@@ -227,8 +269,18 @@ pub const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
 /// 超时的硬上限（秒）：声明可以调，但**调不过它**。
 pub const MAX_TIMEOUT_SECONDS: u64 = 600;
 
-/// 单条流（stdout / stderr）的字节上限：超限**截断并标记**。
+/// **单条流**（stdout / stderr）的字节上限：超限**截断并标记**。
 pub const MAX_OUTPUT_BYTES: usize = 32 * 1024;
+
+/// `terminal_run` 在 `sandbox` 档的详情**开头那一段**（`full` 档一个字都不加）。
+///
+/// 为什么把边界写进能力详情而不只写在文档里：主体读到的是这一段，它要在**调之前**就知道
+/// "这一档写不了外面、默认也上不了网"，而不是跑一条 `curl` 才发现。
+const SANDBOX_RUN_PREFIX: &str = "这一档在沙箱里执行：系统只读、默认断网；`cwd` 必须在环境根之内\
+     （缺省就是它）。能写哪儿由后端决定，回执的 `sandbox` 那一行写着后端与它的保证集——\
+     bwrap 给的是「只有环境根可写」（`/tmp` 也是私有的），identity 给的是「按 uid 的 DAC 判」\
+     （同一个 uid 能写的地方它写得了）。`keep` 不支持——这一档没有「活到关家」（要给一条命令留到\
+     关家，那是 `full` 档的事）。\n";
 
 /// 尾部窗口占单流上限的份额（分母）：截断时**首尾各留一半**。
 ///
@@ -329,10 +381,13 @@ impl TerminalFailure {
 
 /// 档位（**封闭枚举**）。
 ///
-/// v1 只有一档；加档是加墙，等真实消费者（多租户、多个执行点）再立。
+/// 加档是加墙：一档 = 一种"这只手能伸到哪儿"的承诺。今天两档，二者的差别不在
+/// "信不信任"，而在**效果域**（`sandbox` 有自己的环境根、系统只读、默认断网；`full` 是整机）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerminalTier {
-    /// 整机全权：这台机器上的任意命令。
+    /// 沙箱：只能写自己的环境根，系统只读，默认断网（后端可插拔，见 `crate::sandbox_backend`）。
+    Sandbox,
+    /// 整机全权（**break-glass**）：这台机器上的任意命令。
     Full,
 }
 
@@ -343,6 +398,7 @@ impl TerminalTier {
     /// ——那正是该被拒绝的东西（fail-closed），而不是该被我们猜出来的东西。
     pub fn parse(text: &str) -> Option<Self> {
         match text {
+            "sandbox" => Some(TerminalTier::Sandbox),
             "full" => Some(TerminalTier::Full),
             _ => None,
         }
@@ -351,6 +407,7 @@ impl TerminalTier {
     /// 稳定标识（入口报错时用它，不进主体的词表）。
     pub fn as_str(self) -> &'static str {
         match self {
+            TerminalTier::Sandbox => "sandbox",
             TerminalTier::Full => "full",
         }
     }
@@ -360,12 +417,20 @@ impl TerminalTier {
     /// 这是**编译期**判断——它回答"这一份二进制里编进了哪些臂"（今天两支：Windows 与
     /// Linux）；与「机器处境」（`machine.rs`：**运行时**从机器现读它是什么——平台与 shell
     /// 名）**不是一回事**，两者不能互相顶替：机器处境跟着机器走，能力面跟着**这一份构建**走。
+    ///
+    /// ⚠ **两档的臂不是同一支**：`full` 只要有 shell 臂（Windows / Linux）；`sandbox` 今天
+    /// **只有 Linux**（bwrap 是 Linux 的机制）。**编译期"有臂"不等于"这台机器上可用"**——
+    /// bwrap 装没装、非特权 user namespace 让不让建，是**运行时**的事，由
+    /// `crate::sandbox_backend` 的真跑探针回答；入口两个都判。
     pub fn available(self) -> bool {
-        cfg!(any(windows, target_os = "linux"))
+        match self {
+            TerminalTier::Sandbox => cfg!(target_os = "linux"),
+            TerminalTier::Full => cfg!(any(windows, target_os = "linux")),
+        }
     }
 }
 
-/// 宿主给 terminal 窗的**声明**：档位 + 要洗掉的凭据键名。
+/// 宿主给 terminal 窗的**声明**：档位 + 要洗掉的凭据键名（+ `sandbox` 档那一支**已探针通过**的后端）。
 ///
 /// 键名由宿主给出（本件**不读环境变量**：那是入口的事）：系统自有前缀那族按前缀洗，
 /// 这里给的是另外几个（模型、搜索……）。本类型**不派生 `Debug`**，也永远不携带取值。
@@ -374,6 +439,12 @@ pub struct TerminalAccess {
     tier: TerminalTier,
     scrub: Vec<String>,
     shell: Option<String>,
+    /// `sandbox` 档的执行后端（**入口探针通过之后**才装进来；别的档位是 `None`）。
+    ///
+    /// 为什么由入口装、而不是本件自己现找：**"这台机器上能不能沙箱"是装配期的一次真跑探针**
+    /// （`crate::sandbox_backend::choose`），它必须在起任何东西之前就有结论——挂在动作执行
+    /// 那一刻判会把"入口拒绝"变成"每条命令都失败一次"。`Arc` 是为了 `Clone`（声明包会复制）。
+    sandbox: Option<std::sync::Arc<dyn crate::sandbox_backend::SandboxBackend + Send + Sync>>,
 }
 
 impl TerminalAccess {
@@ -383,6 +454,7 @@ impl TerminalAccess {
             tier,
             scrub,
             shell: None,
+            sandbox: None,
         }
     }
 
@@ -395,9 +467,28 @@ impl TerminalAccess {
         self
     }
 
+    /// **缝**：装上 `sandbox` 档的执行后端（入口探针通过之后调它）。
+    ///
+    /// 不给 ⇒ `sandbox` 档的每一条命令都是 `spawn-failure`（**没有后端就不跑**，绝不在宿主上
+    /// 裸跑顶替）。这一格是"可插拔"落地的地方：换后端只是换传进来的这一支。
+    pub fn with_sandbox_backend(
+        mut self,
+        backend: Box<dyn crate::sandbox_backend::SandboxBackend + Send + Sync>,
+    ) -> Self {
+        self.sandbox = Some(std::sync::Arc::from(backend));
+        self
+    }
+
     /// 声明的档位。
     pub fn tier(&self) -> TerminalTier {
         self.tier
+    }
+
+    /// 这一档的执行后端（只有 `sandbox` 档会有；没装就是 `None`）。
+    fn sandbox_backend(
+        &self,
+    ) -> Option<&(dyn crate::sandbox_backend::SandboxBackend + Send + Sync)> {
+        self.sandbox.as_deref()
     }
 
     /// 这次要用哪个 shell（`None` = 平台默认）。
@@ -428,12 +519,28 @@ impl TerminalApp {
         }
     }
 
-    /// 本件声明的能力（三条：跑一次、跑一件留着、停一件）。
-    fn own_capabilities() -> Capabilities {
-        Capabilities::of(vec![
+    /// 本件声明的能力（**按档位**：`full` 三条，`sandbox` 一条）。
+    fn own_capabilities(&self) -> Capabilities {
+        Self::capabilities_for(self.access.tier())
+    }
+
+    /// 某一档的能力面：`full` 三条（跑一次、跑一件留着、停一件），`sandbox` 只有第一条。
+    ///
+    /// **能力面就是授权面**：不摆一个这一档用不了、或者不该用的动词。`sandbox` 少了
+    /// `terminal_held` / `terminal_stop` 不是省事——`keep` 在这一档不存在，而 `terminal_stop`
+    /// 收的是**宿主上**的进程树（让沙箱里的手去杀外面的 pid，等于从沙箱里伸出一只手）。
+    fn capabilities_for(tier: TerminalTier) -> Capabilities {
+        // `sandbox` 的 `terminal_run` 与 `full` 那一条**不是同一句话**：参数说明与详情要说清
+        // 这一档的边界（只能写自己那一块、系统只读、默认断网、`keep` 不支持）。
+        let sandboxed = tier == TerminalTier::Sandbox;
+        let mut items = vec![
             Capability::new(
                 ActionId::new(CAPABILITY_RUN),
-                "在这台机器上执行一条命令（一次性：跑完即散，没有会话、没有后台）",
+                if sandboxed {
+                    "在你自己的环境根里执行一条命令（沙箱：系统只读、默认断网；一次性，跑完即散）"
+                } else {
+                    "在这台机器上执行一条命令（一次性：跑完即散，没有会话、没有后台）"
+                },
                 vec![
                     ParamSpec::new(
                         PARAM_COMMAND,
@@ -443,7 +550,11 @@ impl TerminalApp {
                     ParamSpec::new(
                         PARAM_CWD,
                         false,
-                        "在哪个目录里执行（不给就在你自己的家里执行；必须是存在的目录）",
+                        if sandboxed {
+                            "在哪个目录里执行（不给就在你自己的环境根里执行；必须在环境根之内——越界会被拒绝）"
+                        } else {
+                            "在哪个目录里执行（不给就在你自己的家里执行；必须是存在的目录）"
+                        },
                     ),
                     ParamSpec::new(
                         PARAM_TIMEOUT,
@@ -453,11 +564,19 @@ impl TerminalApp {
                     ParamSpec::new(
                         PARAM_KEEP,
                         false,
-                        format!(
-                            "这件要活到关家（`{KEEP_TRUE}` / `{KEEP_FALSE}`，缺省 `{KEEP_FALSE}`）。\
-                             给 `{KEEP_TRUE}` ⇒ 它不在这条命令里跑完：系统替你留着它、把它的输出写进\
-                             一个文件，并把这件事记进「我起过的东西」那本账（回执给名字、pid、输出路径）"
-                        ),
+                        if sandboxed {
+                            format!(
+                                "这一档不支持：`sandbox` 档没有「活到关家」——一件活在本次进程寿命\
+                                 之外的东西，已经不在「只能写自己的环境根」这个范围内了。给 `{KEEP_TRUE}` \
+                                 会被明确拒绝（`invalid-argument`）；缺省 `{KEEP_FALSE}` 就是这一档唯一的行为"
+                            )
+                        } else {
+                            format!(
+                                "这件要活到关家（`{KEEP_TRUE}` / `{KEEP_FALSE}`，缺省 `{KEEP_FALSE}`）。\
+                                 给 `{KEEP_TRUE}` ⇒ 它不在这条命令里跑完：系统替你留着它、把它的输出写进\
+                                 一个文件，并把这件事记进「我起过的东西」那本账（回执给名字、pid、输出路径）"
+                            )
+                        },
                     ),
                     ParamSpec::new(
                         PARAM_NAME,
@@ -471,7 +590,7 @@ impl TerminalApp {
                 ],
             )
             .with_details(format!(
-                "命令词汇：交给本平台默认的 shell（就是这个平台自带那个），词法就是那个 shell 的\
+                "{}命令词汇：交给本平台默认的 shell（就是这个平台自带那个），词法就是那个 shell 的\
                  ——换 shell 会让命令语法变，但这个动词不变。状态不保留：每次调用都是全新的 \
                  shell 进程——`cd`、变量、函数都不过夜，所以别指望上一条命令留下的处境；要在哪个目录\
                  里执行就传 `cwd`（不传就在你自己的家里执行——你放 `projects/` 的那个地方），\
@@ -505,10 +624,14 @@ impl TerminalApp {
                  看得见、收得住的范围之外（收不住，也停不掉）。回执给的是名字、pid、输出路径\
                  三样；它到底起没起成，读那个输出文件（那是它自己说的话）。一件活到关家的事，\
                  用 `{CAPABILITY_HELD}` 看、用 `{CAPABILITY_STOP}` 停；家一关，它跟着走。",
+                if sandboxed { SANDBOX_RUN_PREFIX } else { "" },
                 MAX_OUTPUT_BYTES / 1024,
                 DRAIN_WINDOW.as_secs()
             )),
-            Capability::new(
+        ];
+        // `keep` 那一族与它的两个配套动词**只属于 `full`**（见 [`Self::capabilities_for`] 的判据）。
+        if !sandboxed {
+            items.push(Capability::new(
                 ActionId::new(CAPABILITY_HELD),
                 "看我起过、还留着的东西（名字、起了多久、pid、还在不在、输出写到哪儿）",
                 vec![],
@@ -525,8 +648,8 @@ impl TerminalApp {
                  都没起过」，两件事）。⚠ 死条目不会自己走：一件起来就崩了，它还留在账上（`state = gone`\
                  是读数）——什么时候把它划掉是你的事（`{CAPABILITY_STOP}`）。家一关，账上那些跟着走\
                  （它们活到关家）。",
-            ),
-            Capability::new(
+            ));
+            items.push(Capability::new(
                 ActionId::new(CAPABILITY_STOP),
                 "停掉一件我起过、还留着的东西（连它拉起的那些一起收）",
                 vec![ParamSpec::new(
@@ -544,8 +667,9 @@ impl TerminalApp {
                  而它拉起的东西又脱离了那棵树时（例如托 WMI、计划任务、服务去起的），这一下够不着\
                  它；那种形状今天收不住，要你自己去收。名字不在账上 ⇒ 本地拒绝（`invalid-argument`），\
                  不猜。",
-            ),
-        ])
+            ));
+        }
+        Capabilities::of(items)
     }
 
     /// 执行一条命令。
@@ -562,11 +686,19 @@ impl TerminalApp {
         // （「不会被默认为当前工作目录」）。给了与不给走**同一道检查**：不存在（或不是目录）
         // ⇒ 本地拒绝（那是一次**无法执行**的请求，不值得为它起一个注定失败的进程）；
         // **没有静默回落**（回落就是把"家不在"读成"那就在别处跑吧"）。
+        let sandboxed = self.access.tier() == TerminalTier::Sandbox;
+        let environment_root = self.held.environment_root().to_path_buf();
         let directory = match params.get(PARAM_CWD) {
             Some(raw) => PathBuf::from(raw.trim()),
-            None => self.held.environment_root().to_path_buf(),
+            None => environment_root.clone(),
         };
         if !directory.is_dir() {
+            return refused(TerminalFailure::InvalidArgument);
+        }
+        // **`sandbox`：只能写自己那一块**。`cwd` 越出环境根 ⇒ **本地拒绝**（零执行）：
+        // 那是一次自相矛盾的请求（"在一个我不该写的地方执行一条命令"），不该变成一次
+        // 跑起来才失败的命令。真正的边界仍在后端那一边（系统只读绑着），这里是**早说清**。
+        if sandboxed && !crate::sandbox_backend::within_workspace(&environment_root, &directory) {
             return refused(TerminalFailure::InvalidArgument);
         }
         let timeout = match params.get(PARAM_TIMEOUT) {
@@ -587,9 +719,21 @@ impl TerminalApp {
             },
             None => false,
         };
+        // **`keep` 只属于 `full`**：一件活到关家的东西活在本进程寿命之外，它已经不是
+        // "只写自己环境根"的那只手了。这一档明确拒绝（"不支持"要在第一次请求时就说清，
+        // 而不是起一个跑着跑着悄悄消失的东西）。
+        if keep && sandboxed {
+            return refused(TerminalFailure::InvalidArgument);
+        }
         if !keep {
             // 缺省那一档：**与从前逐字节相同**（跑完即散，五堵墙一条不少）。
-            return execute(&self.access, command, &directory, timeout);
+            return execute(
+                &self.access,
+                command,
+                &directory,
+                &environment_root,
+                timeout,
+            );
         }
         let wanted = params.get(PARAM_NAME).map(str::trim).unwrap_or("");
         self.keep_it(command, &directory, wanted)
@@ -1180,14 +1324,97 @@ fn push_output_body(receipt: &mut String, name: &str, body: &OutputBody) {
     }
 }
 
+/// 一条命令落到**哪只手**上：`full` ⇒ 宿主上的 shell；`sandbox` ⇒ 后端给的 argv。
+///
+/// 判据一句话：**换档换的是执行的手，不是墙**。两个分支都进同一个 [`measure`]（五堵墙、
+/// 三态、渲染各只有一份）。
 #[cfg(any(windows, target_os = "linux"))]
 fn execute(
     access: &TerminalAccess,
     command: &str,
     directory: &Path,
+    environment_root: &Path,
     timeout: Duration,
 ) -> ActionOutcome {
-    run_tree(access, command, directory, timeout)
+    match access.tier() {
+        TerminalTier::Full => run_tree(access, command, directory, timeout),
+        TerminalTier::Sandbox => {
+            run_sandboxed(access, command, directory, environment_root, timeout)
+        }
+    }
+}
+
+/// **沙箱那一档**：同一个编排，换一条命令行（后端拼的 argv，不是 shell 词法）。
+///
+/// 三处差异，全部是"手落在哪儿"而不是"读多少"：命令行由后端给（[`crate::sandbox_backend`]）、
+/// 工作目录由后端写进 `--chdir`（进程自己的 cwd 不动）、回执多一行 `sandbox = <名字>`。
+/// 其余每一个字节（洗凭据、超时、截断标记、编码读数、失败也带正文）与 `full` 逐字相同。
+#[cfg(target_os = "linux")]
+fn run_sandboxed(
+    access: &TerminalAccess,
+    command: &str,
+    directory: &Path,
+    environment_root: &Path,
+    timeout: Duration,
+) -> ActionOutcome {
+    let Some(backend) = access.sandbox_backend() else {
+        // 没有后端就不跑。入口本该拒绝开启整档（`resolve_terminal` 的探针）；走到这里
+        // 只能如实说"没跑起来"——**绝不在宿主上裸跑顶替**。
+        return refused(TerminalFailure::SpawnFailure);
+    };
+    let shell = access.shell().unwrap_or(crate::platform::TERMINAL_SHELL);
+    let request =
+        crate::sandbox_backend::SandboxRequest::new(environment_root, directory, command, shell);
+    let plan = match backend.command(&request) {
+        Ok(plan) => plan,
+        // 越界的 `cwd` / 根没了：本地拒绝（零执行）。理由与 `run` 里那道检查同源——
+        // 这里是后端的最后一道自检，不是第二套规则。
+        Err(_) => return refused(TerminalFailure::InvalidArgument),
+    };
+    let (environment, scrubbed, unscrubbed) = crate::platform::child_environment(&access.scrub);
+    let mut builder = crate::platform::argv_command(plan.program(), plan.args());
+    builder
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // 与 `full` **同一条规矩**：先清空再交我们洗过的那一份（`apply_environment`）。
+    crate::platform::apply_environment(&mut builder, environment);
+    // **工作目录落到哪儿**是后端声明的一格：bwrap 用 `--chdir` 在沙箱里面定（这里 `None`，
+    // 进程自己站在哪里与命令站在哪里是两件事）；identity 没有 `--chdir`，由编排层设进程
+    // 自己的 cwd。两种落点，同一件事。
+    if let Some(directory) = plan.working_directory() {
+        builder.current_dir(directory);
+    }
+    // **confinement 也是后端声明的**（identity ＝ seccomp ＋ 清 fd；bwrap ＝ 不用）。
+    // 装的时机是 `execve` 之前，因此只能在编排层这一处（后端拿不到 `Command`）。
+    // **临时区在环境根里**：identity 那支的 Landlock 连 `/tmp` 都不许写，命令一用临时文件
+    // （`mktemp`、`git`、编译器）就会失败。把 `TMPDIR` 指到根内一个固定目录，是"只能写环境根"
+    // 的直接延伸，不是放宽：写进那儿的一律还在根里。目录建不出来也不拦——命令自己会报错。
+    // **临时区由后端声明**（identity：根内的 `.celira-tmp`；bwrap：它自己的 `/tmp` 是私有
+    // tmpfs，不用改）。本件只负责把它设进进程——`current_dir` 那一格同款。
+    if let Some(temp) = plan.temp_directory() {
+        builder.env("TMPDIR", temp);
+    }
+    if plan.confinement() == crate::sandbox_backend::Confinement::SeccompNoIp {
+        // 装不上就不跑（`SpawnFailure` 是封闭词表里最近的一条：这条命令没起来）。
+        if crate::platform::confine_command(&mut builder, environment_root).is_err() {
+            return refused(TerminalFailure::SpawnFailure);
+        }
+    }
+    measure(builder, scrubbed, unscrubbed, timeout, Some(backend.name()))
+}
+
+/// 没有沙箱臂的平台（今天只有 Windows）：这一档根本不在场（`TerminalTier::available` 为假），
+/// 入口已经拒绝开启；万一走到这里，如实说"没跑起来"，**绝不换一个近似行为**。
+#[cfg(windows)]
+fn run_sandboxed(
+    _access: &TerminalAccess,
+    _command: &str,
+    _directory: &Path,
+    _environment_root: &Path,
+    _timeout: Duration,
+) -> ActionOutcome {
+    refused(TerminalFailure::SpawnFailure)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -1195,6 +1422,7 @@ fn execute(
     _access: &TerminalAccess,
     _command: &str,
     _directory: &Path,
+    _environment_root: &Path,
     _timeout: Duration,
 ) -> ActionOutcome {
     // 平台缝：**本平台没有能用的臂**。入口已经拒绝开启这一档（见 `TerminalTier::available`），
@@ -1233,6 +1461,22 @@ fn run_tree(
     // ——那样凭据一个都没洗掉，这堵墙就成了装饰（本刀的离线用例抓到过这个）。
     crate::platform::apply_environment(&mut builder, environment);
     builder.current_dir(directory);
+    measure(builder, scrubbed, unscrubbed, timeout, None)
+}
+
+/// **同一个编排**：起进程、读两条流、按超时收场、渲染回执。
+///
+/// 它是两个档位的**汇合点**，判据是"墙只写一份"：`full` 与 `sandbox` 交进来的差别只有
+/// 一条命令行（以及沙箱多出来的那行 `sandbox` 读数），从这里往下**每一行都相同**。
+/// `sandbox` 为 `Some` ⇒ 这是沙箱档的回执，多一行 `sandbox = <名字>`（审计要的那一格）。
+#[cfg(any(windows, target_os = "linux"))]
+fn measure(
+    mut builder: std::process::Command,
+    scrubbed: usize,
+    unscrubbed: Vec<String>,
+    timeout: Duration,
+    sandbox: Option<&str>,
+) -> ActionOutcome {
     let mut child = match builder.spawn() {
         Ok(child) => child,
         Err(_) => return refused(TerminalFailure::SpawnFailure),
@@ -1319,6 +1563,10 @@ fn run_tree(
         receipt.push_str(&format!("killed = {killed}\n"));
     } else {
         receipt.push_str(&format!("exit = {}\n", exit_reading(waited)));
+    }
+    // 沙箱档多一行读数：**这一条命令是哪只手执行的**。`full` 不加这一行（逐字不变）。
+    if let Some(name) = sandbox {
+        receipt.push_str(&format!("sandbox = {name}\n"));
     }
     push_output_reading(&mut receipt, "stdout", &out, &stdout_body.encoding);
     push_output_reading(&mut receipt, "stderr", &err, &stderr_body.encoding);
@@ -1552,18 +1800,24 @@ mod platform {
 
 impl ActionPort for TerminalApp {
     fn capabilities(&self, _agent: &AgentId, _run: &RunId) -> Capabilities {
-        Self::own_capabilities()
+        self.own_capabilities()
     }
 
-    /// 局部准入：本层一律放行。
+    /// 局部准入：本层一律放行——**除了这一档不在场的动词**。
     ///
     /// 这里没有要判的东西：**档位就是授权本体**（在场 = 被授权）。⚠ 原来这里接着写的是"写效应那一格
     /// 由 OS 的未决效果门按声明类别管（本件声明的是写 ⇒ 有未决时它照旧被拦）"——**门已退役**
     /// （门是指令，而世界只该给信息）：本件**照旧声明**它是写（见 [`AppPort::declared_effects`]），
     /// 声明自洽性检查照旧在装配期跑，只是不再有一道门按类别拦写。
+    ///
+    /// **`sandbox` 档的 `terminal_held` / `terminal_stop` 一律拒**（`unknown-capability`）：能力面
+    /// 里没有它们（见 [`TerminalApp::capabilities_for`]），准入这一格是同一句话的第二道门——
+    /// 一个不在能力面上的动词，即使被人按名字调过来也不能执行。
     fn admit(&self, _agent: &AgentId, _run: &RunId, action: &Action) -> ActionAdmission {
+        let sandboxed = self.access.tier() == TerminalTier::Sandbox;
         match action.id().as_str() {
-            CAPABILITY_RUN | CAPABILITY_HELD | CAPABILITY_STOP => ActionAdmission::Admitted,
+            CAPABILITY_RUN => ActionAdmission::Admitted,
+            CAPABILITY_HELD | CAPABILITY_STOP if !sandboxed => ActionAdmission::Admitted,
             _ => ActionAdmission::refused(crate::core::UNKNOWN_CAPABILITY),
         }
     }
@@ -1589,11 +1843,11 @@ impl AppPort for TerminalApp {
     }
 
     fn description(&self) -> &str {
-        "在这台机器上执行命令；`keep=true` ⇒ 这件要活到关家（输出落文件、记进账，`terminal_held` 看、`terminal_stop` 停）。档位就是授权：`full` 档在场即整机随你用，不做命令内容判断；限制全是机械的——洗凭据、超时尽力杀进程树、输出有界且截断带标记。没有 OS 沙箱，也不假装有"
+        "在你的环境根里执行一条命令：一次性，跑完即散。`sandbox` 档只能写自己的环境根、系统只读、默认断网；`full` 档是整机执行（break-glass），`keep` 只在那一档有。限制全是机械的——洗凭据、超时尽力杀进程树、输出有界且截断带标记，不是命令黑白名单"
     }
 
     fn declared_capabilities(&self) -> Capabilities {
-        Self::own_capabilities()
+        self.own_capabilities()
     }
 
     /// 一条写效应，**而且是一个显式的类别偏差**。
@@ -1607,20 +1861,23 @@ impl AppPort for TerminalApp {
     /// 门已退役（门是指令，而世界只该给信息）：今天这一格是"那次执行没有结果"的如实读数，
     /// 由主体自己去看（账本 `trace.ndjson`）。
     fn declared_effects(&self) -> Vec<EffectDeclaration> {
-        vec![
-            EffectDeclaration::new(
-                ActionId::new(CAPABILITY_RUN),
-                EffectClass::UnverifiableWrite,
-                None,
-            ),
+        // 与能力面**同一句话**（装配期自洽性检查要求声明落在自己的能力里）：`sandbox` 档只有
+        // `terminal_run` 一条写效应，`terminal_stop` 在那一档不在场。
+        let mut effects = vec![EffectDeclaration::new(
+            ActionId::new(CAPABILITY_RUN),
+            EffectClass::UnverifiableWrite,
+            None,
+        )];
+        if self.access.tier() == TerminalTier::Full {
             // `terminal_stop` 同款：它确实改变世界（收掉一棵进程树），而"那次收干净了没有"
             // **没有**一条同参只读复核能回答——再收一次不是复核，是又一次收。
-            EffectDeclaration::new(
+            effects.push(EffectDeclaration::new(
                 ActionId::new(CAPABILITY_STOP),
                 EffectClass::UnverifiableWrite,
                 None,
-            ),
-        ]
+            ));
+        }
+        effects
     }
 
     /// 来源档 = **这一段回执里携带的内容从哪个口子进来**。
