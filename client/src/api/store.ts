@@ -18,6 +18,7 @@ import type {
   OwnedAgent,
   Participant,
   Room,
+  RoomAttention,
 } from '@/api/domain'
 import type {
   BackendBindingView,
@@ -36,6 +37,10 @@ import {
 // 参与者投影的**唯一权威**（原先本文件与 core.ts 各有一份逐字相同的副本）。
 import { toParticipant } from './participantProjection.ts'
 import { mentionedMe } from './mentionTargets.ts'
+// 通知门控的**唯一裁决面**（纯函数）：这里只负责凑事实，不在 `if` 串里自己裁决。
+import { shouldNotifyMessage } from './notificationGate.ts'
+// 提醒档的投影（乐观更新 / 回退 / 回读共用一份判据）。
+import { DEFAULT_ROOM_ATTENTION, withRoomAttention } from './roomAttention.ts'
 import { credentialScopeKey } from './credentials.ts'
 import { errorText } from './contractErrors.ts'
 import { createCallMedia, type CallMedia, type CallMediaState, type CallSignalKind, type CallSignalPayload } from '@/lib/callMedia'
@@ -486,6 +491,17 @@ interface AppState {
   togglePinned: (roomId: string) => Promise<void>
   toggleMuted: (roomId: string) => Promise<void>
   /**
+   * **服务端提醒档**（`PUT /v1/rooms/{room_id}/attention`，契约 `CORE_V1_IM_CONTRACT.md` §9.1）：
+   * `all` = 普通群消息也提醒我；`mentions` = 只接受**结构化** @。
+   *
+   * ⚠ 与上面两个**不是同一层**：`pinned` / `muted` 是本机偏好（`api/roomPrefs.ts`，
+   * 不发请求），这一格是**世界侧的个人事实**（换设备跟着走）。
+   *
+   * 形状：**乐观更新**（先改房间列表，开关立刻响应）→ 发请求 → 用服务端回读值落回；
+   * 失败**回退到原值并重抛**（不许静默成"已保存"，也不许让开关自己弹回去还说没事）。
+   */
+  setRoomAttention: (roomId: string, level: RoomAttention) => Promise<void>
+  /**
    * 改完自己的名字之后，把**世界的回读值**落进 store（表达权第四刀，2026-10-17）。
    *
    * 为什么必须有它：`me` 是世界侧事实的投影 —— 页面**不能**自己改本地那一份
@@ -697,22 +713,38 @@ function trackNewMessages(roomId: string, messages: Message[]): Message[] {
   return newlyAdded
 }
 
+/**
+ * 这条消息要不要弹通知。
+ *
+ * **门控判据不在这里** —— `api/notificationGate.ts` 的 `shouldNotifyMessage` 是唯一裁决面
+ * （全局开关 / 系统消息 / 自己发的 / 本机免打扰 / 服务端提醒档 / 提及偏好，顺序都在那一份里）。
+ * 本函数只做两件事：**凑事实**（读开关偏好、查房间、判"是不是结构化 @ 我"），以及
+ * 门控放行之后**决定弹什么**（标题里那句「（提及）」）。
+ *
+ * `attention` 读的是**当前房间列表**：它是 `GET /v1/rooms` 的投影（`core.toRoomListEntry`），
+ * 乐观更新落在同一份 `rooms` 上 ⇒ 用户拨开关的那一刻，门控就已经按新档判了（不用等刷新）。
+ * `undefined`（还没读回 / 旧服务端）由门控按 `all` 处理 —— 宁多响一声，不静默吞掉群消息。
+ */
 async function maybeNotify(roomId: string, message: Message): Promise<void> {
   const me = useAppStore.getState().me
   const notify = await loadNotifyPrefs()
-  const notificationsOn = notify.enabled
-  const mentionsOn = notify.mentions
-  if (!notificationsOn && !mentionsOn) return
-  if (message.system) return
-  if (message.authorId === me?.participant?.id) return
   const room = useAppStore.getState().rooms.find((r) => r.id === roomId)
-  if (room?.muted) return
   // 提及判据读**结构化事实**（消息 `mentions` 里的 participant id），绝不从正文猜：
   // 正文里手打一句 `@我的显示名` 不构成提及（契约 `CORE_V1_MENTION_TARGETS.md` §6：
   // Core 永不从正文推断 mention）。旧判据是 `message.body.includes('@'+显示名)`，一次
   // 误报与一次漏报都只差一个名字的写法。
   const isMention = mentionedMe(message, me?.participant?.id)
-  if (!notificationsOn && !(mentionsOn && isMention)) return
+  const allowed = shouldNotifyMessage({
+    notificationsOn: notify.enabled,
+    mentionsOnly: notify.mentions,
+    // 本机「消息免打扰」= **完全静音**：它压过服务端提醒档（含 @ 我），见门控文件头 §优先级。
+    muted: room?.muted === true,
+    attention: room?.attention,
+    system: message.system === true,
+    fromSelf: message.authorId === me?.participant?.id,
+    mentionedMe: isMention,
+  })
+  if (!allowed) return
   let authorName = '新消息'
   try {
     authorName = getParticipant(message.authorId).displayName
@@ -2040,6 +2072,27 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     toggleMuted: async (roomId) => {
       await toggleRoomPref(roomId, 'muted')
+    },
+
+    setRoomAttention: async (roomId, level) => {
+      const apiNow = getApi()
+      // 这个世界没有这一档（未来某个实现没接）：不假装写成功 —— 但也不制造一个
+      // "拨了没反应"的开关（界面按能力探测决定画不画它，见 `RoomInfoDrawer`）。
+      if (!apiNow?.setRoomAttention) return
+      const current = get().rooms.find((r) => r.id === roomId)?.attention ?? DEFAULT_ROOM_ATTENTION
+      if (current === level) return
+      // ① 乐观：先改列表（开关立刻到新位置；门控也立刻按新档判）。
+      set((s) => ({ rooms: withRoomAttention(s.rooms, roomId, level) }))
+      try {
+        // ② 世界侧权威：响应回的是**写后的取值**，以它为准落回（通常就是 `level`）。
+        const applied = await apiNow.setRoomAttention(roomId, level)
+        set((s) => ({ rooms: withRoomAttention(s.rooms, roomId, applied) }))
+      } catch (error) {
+        // ③ 失败**回退 + 重抛**：静默吞掉正是这一格以前的病（拨了没反应、自己弹回去）。
+        //    那句话由调用方说（`RoomInfoDrawer` 的 `runAction` → `roomActionErrorText`）。
+        set((s) => ({ rooms: withRoomAttention(s.rooms, roomId, current) }))
+        throw error
+      }
     },
 
     // ── 通话（`CORE_V1_CALL.md`，Call P0 窄解冻切片）──────────────────────

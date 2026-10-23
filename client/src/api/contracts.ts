@@ -178,6 +178,25 @@ export interface RoomListEntryView {
   peer: ParticipantMinView | null
   read_state: ReadStateView
   peer_read?: PeerReadView | null
+  /**
+   * **提醒档**（契约 `CORE_V1_IM_CONTRACT.md` §9.1）：`"all"` / `"mentions"`。
+   *
+   * 服务端**恒给**这一格（缺行在投影处就已经折成 `"all"`）；这里标 `?` 是为了容忍
+   * 旧服务端 / 中间层省略字段 —— 客户端投影（`api/roomAttention.ts`）按缺省 `all` 读。
+   */
+  attention?: string | null
+}
+
+/**
+ * `PUT /v1/rooms/{room_id}/attention` 的响应（契约 §9.1）：只回**写后的权威取值**。
+ *
+ * 没有 `idempotency_replayed` —— 这一档是**状态写**（无幂等键），同值重写与改值都是
+ * 同一个 200，响应形状不因「是不是重写」而变。
+ */
+export interface PutAttentionResponse {
+  /** `all` / `mentions`。 */
+  attention: string
+  request_id: string
 }
 
 export interface RoomListEnvelope {

@@ -7,6 +7,19 @@
  */
 export type ParticipantKind = 'human' | 'agent'
 
+/**
+ * **提醒档**（服务端事实，契约 `CORE_V1_IM_CONTRACT.md` §9.1，2026-10-23 接入客户端）。
+ *
+ * `all` = 普通群消息也提醒我；`mentions` = 只接受**结构化** @（`message.mentions` 含我的 id）。
+ *
+ * 只有 `group` 房有这一档（两人房里没有「群消息」这件事，Core 对它们恒回 `all`）；
+ * 缺行 / 缺字段都投影成 `all` —— 宽容解析的唯一实现是 `api/roomAttention.ts`。
+ *
+ * ⚠ 它与 `Room.muted` **不是一回事**：`muted` 是**本机**的「完全免打扰」（`api/roomPrefs.ts`），
+ * 这一档是**世界侧**的个人事实（换设备跟着走）。两者同时在场时 `muted` 优先。
+ */
+export type RoomAttention = 'all' | 'mentions'
+
 export interface Participant {
   id: string
   kind: ParticipantKind
@@ -84,6 +97,14 @@ export interface Room {
   peerRead?: 'read' | 'unread'
   pinned?: boolean
   muted?: boolean
+  /**
+   * 服务端提醒档（`GET /v1/rooms` 每行的 `attention`；缺行 = `all`）。只有 `group` 房有意义。
+   *
+   * 唯一写入者在 store 的 `setRoomAttention`（乐观更新 + 失败回退），
+   * 与 `pinned` / `muted` 那两个**本机偏好**分属两层：那两个归 `api/roomPrefs.ts`，
+   * 这一格归 im 服务端。
+   */
+  attention?: RoomAttention
 }
 
 export type DeliveryState = 'sending' | 'delivered' | 'failed'

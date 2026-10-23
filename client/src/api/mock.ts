@@ -44,6 +44,7 @@ import type {
   Message,
   Participant,
   Room,
+  RoomAttention,
 } from '@/api/domain'
 import {
   type BackendBindingView,
@@ -241,6 +242,20 @@ export class MockApi implements RoomApi, RelationApi, ParticipantApi, HomeApi {
 
   async markRoomRead(roomId: string): Promise<void> {
     await this.advanceReadCursor(roomId, '')
+  }
+
+  /**
+   * `PUT /v1/rooms/{room_id}/attention` 的演示通道版本：只改**本地内存**的这一格
+   * （`roomList`，进程退出即还原），随后叫一次 `wakeup` 让 store 重读。
+   *
+   * ⚠ 契约里这一档只对 `group` 房、只对 active 成员成立，且**只有本人**能写 ——
+   * 那些是 im 服务端事务内的裁决，演示通道**不假装**拥有它们（文件头纪律 2：
+   * 这里没有权限、没有幂等事务）。真实世界里越权 / 两人房会被 Core 拒绝并回 404。
+   */
+  async setRoomAttention(roomId: string, level: RoomAttention): Promise<RoomAttention> {
+    this.roomList = this.roomList.map((r) => (r.id === roomId ? { ...r, attention: level } : r))
+    this.wakeup()
+    return level
   }
 
   async listEvents(after?: string): Promise<{ events: AppEvent[]; nextAfter: string }> {

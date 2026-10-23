@@ -40,8 +40,10 @@ import type {
   SendMessageResponse,
   TransferOwnerResponse,
   UploadAttachmentResponse,
+  PutAttentionResponse,
   PutPresentationResponse,
   PutProfileResponse,
+  RoomListEntryView,
   GetMyProfileResponse,
   PairingGrantIssue,
   PairingGrantListEnvelope,
@@ -63,6 +65,7 @@ import type {
   OwnedAgent,
   Participant,
   Room,
+  RoomAttention,
 } from '@/api/domain'
 import { agentProfilePath, buildAgentProfilePutRequest } from './profile.ts'
 import {
@@ -70,6 +73,8 @@ import {
   memberPresentationsPath,
   roomPresentationPath,
 } from './presentation.ts'
+// 提醒档的宽容解析（缺行 / 缺字段 / 读不懂 ⇒ `all`）：`PUT`/`GET` 两侧共用同一份判据。
+import { parseRoomAttention } from './roomAttention.ts'
 // 参与者投影的**唯一权威**（原先本文件与 store.ts 各有一份逐字相同的副本）。
 import { toParticipant } from './participantProjection.ts'
 // Call-stream 帧的解析（纯函数、fail closed）：认不出的帧一律丢掉，绝不猜。
@@ -137,6 +142,40 @@ export function toMessage(v: MessageView): Message {
 }
 
 /**
+ * **线协议房间行 → 视图模型 `RoomListEntry` 的唯一投影点**（2026-10-23 抽出）。
+ *
+ * 为什么导出（与 `toMessage` 同因）：`node --test` 是 TS 类型剥离模式、没有 jsdom，
+ * "缺字段怎么读"这种判据只能在**纯函数**上量（`tests/room-attention.test.ts`）。
+ *
+ * **提醒档（`attention`）就在这一处**（契约 `CORE_V1_IM_CONTRACT.md` §9.1）：
+ * group 房服务端恒给 `all` / `mentions`；两人房与旧服务端可能省略字段 —— 缺字段 / `null` /
+ * 读不懂一律按 `all` 读（"缺行 = all"）。反方向（猜成 `mentions`）会**静默吞掉**本该提醒的
+ * 群消息，猜错只会多响一声。
+ */
+export function toRoomListEntry(v: RoomListEntryView): RoomListEntry {
+  const peer = v.peer ? [toParticipant(v.peer)] : []
+  const room: Room = {
+    id: v.room.id,
+    name: v.room.name ?? peer[0]?.displayName ?? '会话',
+    avatarLabel: v.room.name?.slice(0, 1),
+    participantIds: peer.map((p) => p.id),
+    participants: [...peer],
+    peer: peer[0],
+    kind: (v.room.kind as Room['kind']) ?? undefined,
+    lastMessagePreview: '',
+    lastActivityAt: '',
+    unreadCount: v.read_state.unread_count,
+    // 「对方读没读我最后那条」：**原样搬**（服务端只在问题成立时给这一格；
+    // 缺字段 / null 都表示"这一格不出现"，不许就近映射成 'unread'）。
+    peerRead: v.peer_read ?? undefined,
+    // 提醒档：唯一的宽容解析点（缺省 `all`）。`Room.attention` 恒有值，
+    // 于是门控（`api/notificationGate.ts`）不必再判 "undefined 该当什么"。
+    attention: parseRoomAttention(v.attention),
+  }
+  return { room, peer }
+}
+
+/**
  * **世界侧传输层的唯一实现**（2026-09-25 拆分刀）。
  *
  * 四个 `implements` 对应四个事实域（房间与消息 / 关系 / 参与者管理 / Agent 服务），
@@ -201,25 +240,7 @@ export class CoreApi implements RoomApi, RelationApi, ParticipantApi, HomeApi, C
 
   async listRooms(): Promise<RoomListEntry[]> {
     const envelope = await this.api<RoomListEnvelope>('/v1/rooms')
-    return envelope.rooms.map((v) => {
-      const peer = v.peer ? [toParticipant(v.peer)] : []
-      const room: Room = {
-        id: v.room.id,
-        name: v.room.name ?? peer[0]?.displayName ?? '会话',
-        avatarLabel: v.room.name?.slice(0, 1),
-        participantIds: peer.map((p) => p.id),
-        participants: [...peer],
-        peer: peer[0],
-        kind: (v.room.kind as Room['kind']) ?? undefined,
-        lastMessagePreview: '',
-        lastActivityAt: '',
-        unreadCount: v.read_state.unread_count,
-        // 「对方读没读我最后那条」：**原样搬**（服务端只在问题成立时给这一格；
-        // 缺字段 / null 都表示"这一格不出现"，不许就近映射成 'unread'）。
-        peerRead: v.peer_read ?? undefined,
-      }
-      return { room, peer }
-    })
+    return envelope.rooms.map((v) => toRoomListEntry(v))
   }
 
   async listMessages(roomId: string): Promise<{ messages: Message[]; nextBefore: string | null }> {
@@ -282,6 +303,25 @@ export class CoreApi implements RoomApi, RelationApi, ParticipantApi, HomeApi, C
       method: 'PUT',
       body: { message_id: messageId },
     })
+  }
+
+  /**
+   * `PUT /v1/rooms/{room_id}/attention`：写**我自己**在这间 group 房的提醒档
+   * （契约 `CORE_V1_IM_CONTRACT.md` §9.1，2026-10-19 窄解冻切片）。
+   *
+   * 请求体**只有 `level`**（服务端 `deny_unknown_fields`）：「写谁的」由认证上下文给出，
+   * 请求体里没有主语。这是**状态写**（无幂等键、无版本号）：同值重写与改值都是同一个 200。
+   *
+   * 返回**服务端的回读值**（`{"attention": …}`）而不是入参：这一格的权威在世界上 ——
+   * 万一服务端规范化了取值，界面应当跟着服务端，而不是跟着我们请求里写的那一份。
+   * 回读值也走同一个宽容解析（认不出 ⇒ `all`，绝不抛在请求成功之后）。
+   */
+  async setRoomAttention(roomId: string, level: RoomAttention): Promise<RoomAttention> {
+    const result = await this.api<PutAttentionResponse>(`/v1/rooms/${roomId}/attention`, {
+      method: 'PUT',
+      body: { level },
+    })
+    return parseRoomAttention(result.attention)
   }
 
   async uploadAttachment(roomId: string, file: File): Promise<{ attachmentId: string }> {

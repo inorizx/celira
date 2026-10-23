@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { BellOff, ChevronRight, Images, LogOut, Pin, FileText, Search, ShieldCheck, UserMinus, UserPlus, Crown, PenLine } from 'lucide-react'
+import { AtSign, BellOff, ChevronRight, Images, LogOut, Pin, FileText, Search, ShieldCheck, UserMinus, UserPlus, Crown, PenLine } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -20,6 +20,7 @@ import type { Participant, ParticipantKind, Room } from '@/api/domain'
 import { getApi, useAppStore, useConnection, useRoomMessages } from '@/api/store'
 import { supportsMemberPresentations } from '@/api/uiPolicy'
 import { roomActionErrorText } from '@/api/contractErrors'
+import { attentionForChecked, attentionSwitchChecked } from '@/api/roomAttention'
 import { MemberAvatar } from './MemberAvatar'
 import { isOnline, isTyping } from '@/api/roomLive'
 import { membersWithSelf, roomHeadline, selfMember } from '@/api/roomHeadline'
@@ -53,6 +54,7 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
   const [actionError, setActionError] = useState<string | null>(null)
   const togglePinned = useAppStore((s) => s.togglePinned)
   const toggleMuted = useAppStore((s) => s.toggleMuted)
+  const setRoomAttention = useAppStore((s) => s.setRoomAttention)
   const leaveRoom = useAppStore((s) => s.leaveRoom)
   const removeMember = useAppStore((s) => s.removeMember)
   const transferOwnership = useAppStore((s) => s.transferOwnership)
@@ -64,6 +66,9 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
   const { me } = useConnection()
   // 成员呈报能力（TASK_72 ⑥）：这台后端真提供它才去拉。
   const presentationsSupported = supportsMemberPresentations(getApi())
+  // 提醒档能力探测：`RoomApi.setRoomAttention` 是可选的（与 `uiPolicy` 其余探测同规 ——
+  // 按"实现里真的有没有这个方法"判）。没有就不画那个开关：本仓最恨的就是拨了没反应的按钮。
+  const attentionSupported = typeof getApi()?.setRoomAttention === 'function'
 
   const coreMembers = room.id ? (membersByRoom[room.id] ?? null) : null
   const selfId = me?.participant.id ?? ''
@@ -444,6 +449,35 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
                     onCheckedChange={() => void toggleMuted(room.id)}
                   />
                 </label>
+                {/*
+                  **提醒档**（契约 `CORE_V1_IM_CONTRACT.md` §9.1）：与上面那一格**分属两层** ——
+                  「消息免打扰」是本机的完全静音（`api/roomPrefs.ts`，压过一切），
+                  而这一格是**世界侧**的个人事实（`PUT /v1/rooms/{id}/attention`，换设备跟着走）。
+                  只有 group 房有这一档（两人房里没有「群消息」）。开关的 `checked` / 目标值
+                  都由 `api/roomAttention.ts` 投影，组件不自己比较字符串。
+                */}
+                {isGroup && attentionSupported && (
+                  <>
+                    <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-muted">
+                      <AtSign className="size-4 text-muted-foreground" />
+                      <span className="text-body">只接受 @ 我的消息</span>
+                      <Switch
+                        className="ml-auto"
+                        aria-label="只接受 @ 我的消息"
+                        checked={attentionSwitchChecked(room.attention)}
+                        onCheckedChange={(checked) =>
+                          void runAction(async () => {
+                            // store 负责乐观更新 + 失败回退；失败的那句话由 `runAction` 显示。
+                            await setRoomAttention(room.id, attentionForChecked(checked))
+                          })
+                        }
+                      />
+                    </label>
+                    <p className="px-2 text-caption text-muted-foreground">
+                      只有 @ 你的消息会提醒；「消息免打扰」仍会完全静音。
+                    </p>
+                  </>
+                )}
               </section>
             </>
           )}

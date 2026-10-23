@@ -6,6 +6,7 @@ import type {
   OwnedAgent,
   Participant,
   Room,
+  RoomAttention,
 } from '@/api/domain'
 import type {
   BackendBindingView,
@@ -136,6 +137,20 @@ export interface RoomApi {
   recallMessage(roomId: string, messageId: string): Promise<void>
   advanceReadCursor(roomId: string, messageId: string): Promise<void>
   markRoomRead?(roomId: string): Promise<void>
+  /**
+   * **提醒档**（`PUT /v1/rooms/{room_id}/attention`，契约 `CORE_V1_IM_CONTRACT.md` §9.1）：
+   * 写**我自己**在这间 `group` 房的「要不要提醒我」——
+   * `all` = 普通群消息也提醒；`mentions` = 只接受**结构化** @。
+   *
+   * 返回**写后的权威取值**（服务端响应 `{"attention": …}` 的回读），调用方以它为准落回列表。
+   * 状态写：无幂等键，同值重写与改值都是同一个 200。两人房没有这一档（Core 回 404）。
+   *
+   * ⚠ 与 `roomPrefs.muted`（本机完全静音）**分属两层**：这一档是世界侧的个人事实，
+   * 换设备跟着走；两者都在时 `muted` 优先（判据在 `api/notificationGate.ts`）。
+   *
+   * 可选：能力探测按"实现里真的有没有这个方法"判（与 `uiPolicy` 其余探测同规）。
+   */
+  setRoomAttention?(roomId: string, level: RoomAttention): Promise<RoomAttention>
   /** Upload returns server public metadata; attachmentId remains for Core compatibility. */
   uploadAttachment?(roomId: string, file: File): Promise<{ attachmentId: string; attachment?: Attachment }>
   fetchAttachmentBlob?(roomId: string, attachmentId: string): Promise<Blob>
