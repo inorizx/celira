@@ -51,7 +51,7 @@ timeout 120 cargo fmt --check >/dev/null 2>&1 || gate_fmt="**失败**"
 say "门禁：test ${gate_pass} 通过 / ${gate_fail} 组失败 · clippy ${gate_clippy} 条 · fmt ${gate_fmt}"
 if [ "${gate_fail:-0}" -ne 0 ]; then
     say "  ⚠ 失败用例："
-    awk '/^failures:$/ {flag=1; next} /^test result:/ {flag=0} flag && NF {print "  - " $1}' "$WORK/gate.log" | sort -u | head -20
+    awk '/^failures:$/ {buf=""; flag=1; next} /^test result:/ {flag=0; printf "%s", buf} flag && /^    [^ ]/ {buf = buf "  - " $1 "\n"}' "$WORK/gate.log" | sort -u | head -20
 fi
 
 # ---- 动作面反复跑（重点：群聊与终端） --------------------------------------
@@ -73,7 +73,9 @@ for suite in $soak_list; do
         failed=$(grep -c 'test result: FAILED' "$out" || true)
         total=$((total + passed))
         if [ "${failed:-0}" -ne 0 ]; then
-            awk '/^failures:$/ {flag=1; next} /^test result:/ {flag=0} flag && NF {print $1}' "$out" \
+            # ⚠ 只为**失败用例名**这一块取值：cargo 会打两次 `failures:`——第一次是
+            # `---- 用例 stdout ----` 的正文（panic 原文），第二次才是名字表。取最后一次。
+            awk '/^failures:$/ {buf=""; flag=1; next} /^test result:/ {flag=0; printf "%s", buf} flag && /^    [^ ]/ {print $1}' "$out" \
                 | while read -r name; do
                     [ -n "$name" ] && printf '%s\t%s\n' "$suite" "$name" >> "$WORK/failures.tsv"
                 done
@@ -86,7 +88,7 @@ done
 timeout 900 cargo test --test im_app -- --test-threads=8 >"$WORK/im_app-concurrent.log" 2>&1
 conc_failed=$(grep -c 'test result: FAILED' "$WORK/im_app-concurrent.log" || true)
 if [ "${conc_failed:-0}" -ne 0 ]; then
-    awk '/^failures:$/ {flag=1; next} /^test result:/ {flag=0} flag && NF {print "im_app(并发)" "\t" $1}' "$WORK/im_app-concurrent.log" \
+    awk '/^failures:$/ {buf=""; flag=1; next} /^test result:/ {flag=0; printf "%s", buf} flag && /^    [^ ]/ {print "im_app(并发)" "\t" $1}' "$WORK/im_app-concurrent.log" \
         >> "$WORK/failures.tsv"
 fi
 
