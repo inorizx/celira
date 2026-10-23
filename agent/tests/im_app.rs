@@ -2341,6 +2341,12 @@ fn a_rejected_send_is_a_failure_while_an_unconfirmed_one_is_unknown() {
             ResultState::Unknown,
             "HTTP {status} + {body} 必须报未确认（不是失败）"
         );
+        // 未确认必须写清"等了多久、窗口多长"——主体要靠它判断还等不等。
+        let text = text_of(&outcome);
+        assert!(
+            text.contains("waited = ") && text.contains("window = 30.0s"),
+            "HTTP {status}: 未确认要带时间读数: {text}"
+        );
         assert_eq!(fake.connections(), 1, "未确认也不重发：恰好一次请求");
     }
 

@@ -16,7 +16,7 @@ use crate::core::ActionParams;
 use crate::foundation::OperationId;
 
 /// 单次请求的墙钟上限（与适配层同一量级）。
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// **标识**的字节上限（房间 / 参与者 / 消息目标这一族：世界签发的不透明标识）。
 ///

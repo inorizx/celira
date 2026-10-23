@@ -622,6 +622,24 @@ pub struct ImApp {
     vision: bool,
 }
 
+/// **回执未达**（写侧）：这次尝试没拿到可确认的结果，带上等了多少、窗口多长。
+///
+/// 它不给"成没成"的结论——那是主体自己去查的事；它只把系统真的知道的那些读数交出去。
+fn unconfirmed(waited: std::time::Duration, detail: &str) -> ActionOutcome {
+    ActionOutcome::unknown_with(vec![
+        ContentBlock::new(crate::core::RECEIPT_LABEL, crate::core::RECEIPT_MISSING),
+        ContentBlock::new(
+            "timing",
+            format!(
+                "waited = {:.1}s\nwindow = {:.1}s\n{}",
+                waited.as_secs_f64(),
+                crate::im_channel::REQUEST_TIMEOUT.as_secs_f64(),
+                detail
+            ),
+        ),
+    ])
+}
+
 impl ImApp {
     /// 装配一个 im app（请求客户端在这里建一次，含单次请求的墙钟上限）。
     pub fn new(access: ImAccess) -> Option<Self> {
@@ -1576,7 +1594,11 @@ impl ImApp {
         let payload = serde_json::Value::Object(payload).to_string();
         let path = format!("{ROOMS_PATH}/{room}{ROOM_HISTORY_SUFFIX}");
 
-        match self.exchange("POST", &path, Some(payload), Some(&key)) {
+        // 等多久要说清楚："没看见"只有在"等了多久"的语境里才有意义。
+        let started = std::time::Instant::now();
+        let reply = self.exchange("POST", &path, Some(payload), Some(&key));
+        let waited = started.elapsed();
+        match reply {
             Reply::Answered(value) => {
                 let message = value
                     .get("message")
@@ -1599,7 +1621,7 @@ impl ImApp {
                         render_said(room, id, replayed, reply_to, attachment.as_deref()),
                     )]),
                     // 2xx 却拿不到消息身份：我们无法说出"落成了哪一条" ⇒ 未确认，不猜。
-                    None => ActionOutcome::unknown(),
+                    None => unconfirmed(waited, "receipt = 2xx，但没有消息身份"),
                 }
             }
             // 说话侧：契约**列出**的那几个码是"明确的拒绝"（零新事实）⇒ 确定的失败；
@@ -1627,7 +1649,9 @@ impl ImApp {
             Reply::Refused(403) => ActionOutcome::failure(ImFailure::NotAMember.as_str()),
             Reply::Refused(404) => ActionOutcome::failure(ImFailure::UnknownRoom.as_str()),
             Reply::Refused(409) => ActionOutcome::failure(ImFailure::IdempotencyConflict.as_str()),
-            Reply::Refused(_) | Reply::Broken | Reply::Unreadable => ActionOutcome::unknown(),
+            Reply::Refused(_) | Reply::Broken | Reply::Unreadable => {
+                unconfirmed(waited, "receipt = 连接断了，或回执读不懂")
+            }
         }
     }
 

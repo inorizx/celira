@@ -1498,7 +1498,8 @@ fn measure(
     thread::spawn(move || pump_output(OutputSide::Out, stdout, MAX_OUTPUT_BYTES, out_tx));
     thread::spawn(move || pump_output(OutputSide::Err, stderr, MAX_OUTPUT_BYTES, err_tx));
 
-    let deadline = Instant::now() + timeout;
+    let started = Instant::now();
+    let deadline = started + timeout;
     let mut timed_out = false;
     let status = loop {
         match child.try_wait() {
@@ -1560,7 +1561,13 @@ fn measure(
     // 凭据读数全是同一份渲染。失败不该比成功少给东西（这就是"失败也带正文"的全部内容）。
     let mut receipt = String::new();
     if timed_out {
-        receipt.push_str(&format!("killed = {killed}\n"));
+        // 等了多久、窗口多长：这是主体判断"还等不等 / 要不要再探一次"的材料。
+        // 只报已经发生的（秒级），不预言"再等多久就会怎样"。
+        receipt.push_str(&format!(
+            "killed = {killed}\nwaited = {:.1}s\nwindow = {:.1}s\n",
+            started.elapsed().as_secs_f64(),
+            timeout.as_secs_f64()
+        ));
     } else {
         receipt.push_str(&format!("exit = {}\n", exit_reading(waited)));
     }

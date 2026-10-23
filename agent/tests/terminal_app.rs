@@ -822,6 +822,12 @@ fn a_timeout_still_hands_over_what_it_managed_to_print() {
         receipt.contains("note = "),
         "要说清这次只保证到什么程度：{receipt}"
     );
+    // 时长是主体判断"还等不等"的材料：它必须带"等了多久 / 窗口多长"（秒级），
+    // 而且必须是**已经发生的**读数——不预言、不编造。
+    assert!(
+        receipt.contains("waited = ") && receipt.contains("window = 5.0s"),
+        "超时要交出等了多久与窗口：{receipt}"
+    );
     assert!(
         !receipt.contains("exit = "),
         "进程是被杀的 ⇒ **没有退出码可报**，不许编一个出来：{receipt}"
