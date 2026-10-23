@@ -6419,3 +6419,62 @@ fn the_say_declaration_carries_the_reply_and_mention_parameters() {
     }
     assert_eq!(checked, 2, "说话与复核两条都要在声明里");
 }
+
+/// 两个住户在同一个群里互相安排任务（离线）：A 点名委托，B 引用回执。
+///
+/// 这条不看"谁聪明"，只看**动作链路**把协作要用的两个字段原样送到对面：
+/// `mentions`（叫谁）与 `reply_to_message_id`（接的哪一条）。没有真群也能测——
+/// 有真群的时候，走的也是这同一条链路。
+#[test]
+fn two_agents_hand_off_work_in_one_group() {
+    // 身份、房间、消息都是契约要求的规范 UUID 形状——协作链路上的每个字段都要真的合规。
+    let worker_id = "9b1f5a2c-7d3e-4a6b-8c5f-1e2d3c4b5a69";
+    let first_message = "5c7e9a10-2b4d-4f8e-9a6c-3d1e2f4a5b6c";
+    let fake = FakeIm::spawn(vec![
+        (201, say_body(first_message, false)),
+        (201, say_body("a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d", false)),
+    ]);
+
+    let mut planner =
+        ImApp::new(ImAccess::new(&fake.endpoint, "token-a").expect("声明")).expect("A 可以装配");
+    let mut worker =
+        ImApp::new(ImAccess::new(&fake.endpoint, "token-b").expect("声明")).expect("B 可以装配");
+    let room = "6f0f4f3a-3333-4333-8333-333333333333";
+
+    // A：点名委托 B（两个住户各有自己的活动身份，幂等键不会串）。
+    let delegated = planner.execute(
+        &agent(),
+        &OperationId::new(RunId::new("run-a"), Turn::FIRST),
+        &say(ActionParams::none()
+            .with(PARAM_ROOM, room)
+            .with(PARAM_BODY, "帮我把 draft 改成 v2")
+            .with(PARAM_MENTIONS, worker_id)),
+    );
+    assert_eq!(delegated.state(), ResultState::Success, "{delegated:?}");
+    let request = fake.next_request();
+    assert!(
+        request.starts_with(&format!("POST /v1/backend/rooms/{room}/messages ")),
+        "委托要发到群里: {request}"
+    );
+    assert!(
+        request.contains(&format!(r#""mentions":["{worker_id}"]"#)),
+        "委托要点名接单的人: {request}"
+    );
+
+    // B：接着 A 那条回话（引用 = 接单）。
+    let accepted = worker.execute(
+        &agent(),
+        &OperationId::new(RunId::new("run-b"), Turn::FIRST),
+        &say(ActionParams::none()
+            .with(PARAM_ROOM, room)
+            .with(PARAM_BODY, "收到，我来")
+            .with(PARAM_REPLY_TO, first_message)),
+    );
+    assert_eq!(accepted.state(), ResultState::Success, "{accepted:?}");
+    let request = fake.next_request();
+    assert!(
+        request.contains(&format!(r#""reply_to_message_id":"{first_message}""#)),
+        "接单要引用被接的那一条: {request}"
+    );
+    assert_eq!(fake.connections(), 2, "两次委托恰好两次请求，没有偷偷重发");
+}
