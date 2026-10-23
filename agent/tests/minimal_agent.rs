@@ -3745,8 +3745,9 @@ fn the_production_assembly_has_a_verb_budget() {
     use celira_agent::store::Environment;
     use celira_agent::terminal_app::{TerminalAccess, TerminalTier};
 
-    // **今天的实测值**（2026-10-20：apps=8 / verbs=59 / doors=4）。改这一行必须同时说清删了哪一条。
-    const VERB_BUDGET: usize = 59;
+    // **今天的实测值**（2026-10-23：apps=8 / verbs=60 / doors=4）。+1 是契约 §9.1 的
+    // `im_attention`（主人 2026-10-23 批准的两个入口之一）；本刀没有删动词，预算随批准的能力面 +1。
+    const VERB_BUDGET: usize = 60;
 
     let root = std::env::temp_dir().join(format!("celira-roster-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);

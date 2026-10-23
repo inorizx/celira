@@ -40,7 +40,9 @@
 //!   世界不拦——是主体的手不伸向自己看不了的东西。
 //!
 //! 明确**不**做（属别的刀）：SSE 门铃 / 常驻宿主；通知栏与已读水位；**给人看的「对方已读」那一格**
-//! （端点那一行带着它，本 App 不渲染——见 [`render_rooms`]）；旧 Runtime 的 Maintenance
+//! （端点那一行带着它，本 App 不渲染——见 [`render_rooms`]）；**按提醒档决定叫不叫醒**
+//! （那一层在宿主与 Core 的门铃侧；本 App 只写我自己的那一档，见 [`CAPABILITY_ATTENTION`]）；
+//! 旧 Runtime 的 Maintenance
 //! 窗口与"通讯录自动注入"（重建后不引入自动唤醒——主体要看得自己去看）；**自动存档与自动重读**
 //! （存档经主体本体，是主体的动作）。附件这条通道也只到**工具面**为止：不做预览档、不为字节
 //! 另存一份副本、不管 client 侧怎么呈现——媒体形态交出去的是**图像块**，不是预览图。
@@ -175,6 +177,18 @@ pub const CAPABILITY_ROOM_LIVE: &str = "im_room_live";
 /// 2026-09-28 裁决「不需要看到执行过程」）。它只说一件人也会说的事：我正在写。
 pub const CAPABILITY_TYPING: &str = "im_typing";
 
+/// **设置我在某一间群房里的提醒档**（写面，2026-10-23；契约 §9.1）：`all` = 群里普通消息
+/// 也叫醒我；`mentions` = 只有被**结构化 @** 才叫醒（被 @ 一定穿透，不论档位）。
+///
+/// ⚠ 它是**个人事实**：每（房 × 我）一格，只有我写得动、只有我看得见——身份只来自
+/// BackendAuth，请求体里**没有主语**，因此别人的行够不着。缺行 = `all` 是**服务端**的投影
+/// （这一侧不替它推断：`im_rooms` 读不到那一格时写 `?`）。
+///
+/// ⚠ 它**不改消息主链**：消息照常提交、未读照常计算、历史照常可读——这一档只决定那条
+/// **易失**通知发不发（**任何一档都不丢消息**）。"按档决定叫不叫醒"落在宿主与 Core 的门铃侧，
+/// 不在本 App。
+pub const CAPABILITY_ATTENTION: &str = "im_attention";
+
 /// 通讯录的 `since` 参数名（unix 毫秒，十进制）。
 pub const PARAM_SINCE: &str = "since";
 /// 翻记录的房间参数名（撤回也用它）。
@@ -195,6 +209,14 @@ pub const PARAM_BEFORE: &str = "before";
 pub const PARAM_MESSAGE: &str = "message";
 /// 附件身份参数名（取自 `im_read_history` 给每条消息的附件身份）。
 pub const PARAM_ATTACHMENT: &str = "attachment";
+/// 提醒档的参数名（闭集，见 [`ATTENTION_ALL`] / [`ATTENTION_MENTIONS`]）。
+///
+/// 它与 wire 上的字段**同名**（请求体只有这一格）——不像 `message` / `message_id` 那样两套名字。
+pub const PARAM_LEVEL: &str = "level";
+/// 提醒档取值：**群里普通消息也叫醒我**（服务端缺行时的投影就是它）。
+pub const ATTENTION_ALL: &str = "all";
+/// 提醒档取值：**只有被结构化 @ 才叫醒**（被 @ 一定穿透，不论档位）。
+pub const ATTENTION_MENTIONS: &str = "mentions";
 
 /// 说话时**要引用的消息身份**参数名（取自 `im_read_history` 给的消息身份）。
 ///
@@ -568,6 +590,8 @@ const MY_PRESENTATION_PATH: &str = "/v1/backend/rooms/{}/my-presentation";
 const ROOM_LIVE_PATH: &str = "/v1/backend/rooms/{}/live";
 /// 某间房的 typing 声明路径（写面、无参数、204；`{}` 是房间标识）。
 const ROOM_TYPING_PATH: &str = "/v1/backend/rooms/{}/typing";
+/// 提醒档那条路径后缀（写面，契约 §9.1：**我在这一间房**的提醒档；无 query、无幂等键）。
+const ATTENTION_SUFFIX: &str = "/attention";
 
 /// 这个 App 的通道面。
 pub struct ImApp {
@@ -650,7 +674,7 @@ impl ImApp {
             Capability::new(
                 ActionId::new(CAPABILITY_ROOMS),
                 "列出我参与的房间：每个房间给标识、种类、显示名、我读到哪儿与还欠几条、\
-                 最近一条预览、最近活动时间与自 `since` 以来的条数",
+                 我在这间房的提醒档、最近一条预览、最近活动时间与自 `since` 以来的条数",
                 vec![ParamSpec::new(
                     PARAM_SINCE,
                     false,
@@ -665,6 +689,10 @@ impl ImApp {
                  `unread` 与 `read` 是世界记得的那个位置（服务端按成员周期记着，跨你的 Run 活着）——\
                  `unread = 0` 是「这间房没有你还没看的」；`read = -` 是「你还没读过这间房的任何一条」；\
                  `?` 是读不到（这一版世界没给这一栏，或形状读不懂）——读不到不等于零。\
+                 `attention` 是你在这间房的提醒档（`all` = 群里普通消息也叫醒；`mentions` = \
+                 只有被 @ 才叫醒，被 @ 一定穿透；`?` = 读不到——这一版世界没给这一栏，或形状\
+                 读不懂，读不到不等于 `all`）：它只由你自己用 `im_attention` 写，\
+                 只决定叫不叫醒你，不改消息、未读与历史。\
                  回执首行是你的身份（`me = …`：一次活动只问服务器一次；问不到就写 `unknown`，\
                  不拿本机身份或显示名顶替）——读到 `actor` 时用它分自己与别人。",
             ),
@@ -1099,6 +1127,40 @@ impl ImApp {
                  （执行过程不进 IM）。\n\
                  没有同参复核可配（信号自灭，读回来归因不了）⇒ 效应类别是 \
                  `unverifiable-write`；要看此刻谁在写，读 `im_room_live`。",
+            ),
+            // **提醒档（2026-10-23）**：我在这间群房里的那一格（契约 §9.1）。
+            //
+            // ⚠ 它不是"通知设置"那个大筐：只有两个词，只决定那条**易失**通知发不发；
+            // 消息主链（提交 / 未读 / 历史）不受影响，被 @ 一定穿透。
+            Capability::new(
+                ActionId::new(CAPABILITY_ATTENTION),
+                "设置我在这间群房里的提醒档：all = 群里普通消息也叫醒我；\
+                 mentions = 只有被 @ 才叫醒（被 @ 一定穿透）",
+                vec![
+                    ParamSpec::new(PARAM_ROOM, true, "房间标识（取自 im_rooms）"),
+                    ParamSpec::new(
+                        PARAM_LEVEL,
+                        true,
+                        format!("提醒档：`{ATTENTION_ALL}`（普通消息也叫醒）或 `{ATTENTION_MENTIONS}`（只有被 @ 才叫醒）"),
+                    ),
+                ],
+            )
+            .with_details(
+                "它写的是你自己那一格：每（房 × 你）一行，只有你写得动、只有你看得见——\
+                 请求体里没有主语，身份只来自你自己的凭据，因此别人的行够不着。\n\
+                 一句话语义：`all` = 这间房有人说话就叫醒你；`mentions` = 只有结构化 @ 才\
+                 叫醒你（被 @ 一定穿透，不论这一档）。\n\
+                 ⚠ 它不改消息主链：消息照常提交、未读照常计算、历史照常可读——\
+                 任何一档都不丢消息，它只决定那条易失通知发不发。\n\
+                 只有群房有这一档：1:1 房（direct / human_direct）不接受它。\n\
+                 同值重写天然幂等（状态写，不带幂等键；重写一次是 200、零新事实）。\n\
+                 回执形状：`room`、`attention`（世界记下的权威取值）。\n\
+                 只读复核：`im_rooms`——那间房那一行的 `attention` 栏就是它（`?` = 读不到）。\n\
+                 失败：房不存在 / 我不是它的 active 成员 / 不是群房 ⇒ 一律 `unknown-room`\
+                 （契约把三者合成同一个 404，本层也不分解）；\
+                 `level` 不是那两个词 ⇒ `invalid-argument`（工具面先拒，一次都不出网）；\
+                 世界回 400 ⇒ 同样 `invalid-argument`（不猜是哪一半）；\
+                 其余非 2xx、以及 2xx 却读不出那一格 ⇒ 提交结果未确认（不猜、不重发）。",
             ),
         ])
     }
@@ -2246,6 +2308,51 @@ impl ImApp {
         }
     }
 
+    /// **设置我在某一间群房里的提醒档**：`PUT /v1/backend/rooms/{room}/attention`。
+    ///
+    /// 契约 §9.1（2026-10-19 窄解冻切片 1a，本动作只接那一条**既有**端点）：请求体**只有
+    /// `level`**（`deny_unknown_fields`），`level ∈ {all, mentions}`；成功 200
+    /// `{"attention": …, "request_id": …}`——只回写后的权威取值。
+    ///
+    /// **状态写、不带幂等键**：同值重写天然幂等（照读游标的先例）——重发一次是 200、
+    /// 零新事实，因此它不需要键，也不需要"重放"那一格。
+    ///
+    /// **只写我自己那一行**：身份只来自 BackendAuth，**请求体里没有主语**——这条形状本身
+    /// 就是"够不着别人"的证据（不是靠这一层记得不传 `participant`）。
+    ///
+    /// **词先在本层判**（闭集两个词，逐字节相同）：拼错的词在本地拒绝、**一次都不出网**
+    /// ——世界对同一个词回 400，先发一次再报错只会把"我拼错了"说成"世界拒绝了我"。
+    ///
+    /// **三态如实**：200 且读得出那一格 ⇒ 成功（回执搬世界的取值）；被明确拒绝
+    /// （400 / 401 / 404）⇒ 对应分类；其余非 2xx、传输断、或 2xx 却读不出那一格
+    /// ⇒ `unknown`（**不猜、不重发**；要确认就用 `im_rooms` 看那一栏）。
+    fn set_attention(&self, params: &ActionParams) -> ActionOutcome {
+        let Some(room) = valid_room(params) else {
+            return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());
+        };
+        let Some(level) = valid_attention_level(params) else {
+            return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());
+        };
+        // 体里的字段名是 **wire 名**（与参数名同名：`level`）；只有这一格。
+        let payload = serde_json::json!({ "level": level }).to_string();
+        let path = format!("{ROOMS_PATH}/{room}{ATTENTION_SUFFIX}");
+        match self.exchange("PUT", &path, Some(payload), None) {
+            Reply::Answered(value) => match attention_of(&value) {
+                Some(attention) => ActionOutcome::success(vec![ContentBlock::new(
+                    CAPABILITY_ATTENTION,
+                    render_attention_set(room, attention),
+                )]),
+                // 2xx 却读不出"现在的档"：这次写被接受了没有说不清 ⇒ 不猜（用 im_rooms 复核）。
+                None => ActionOutcome::unknown(),
+            },
+            Reply::Refused(400) => ActionOutcome::failure(ImFailure::InvalidArgument.as_str()),
+            Reply::Refused(401) => ActionOutcome::failure(ImFailure::CredentialRejected.as_str()),
+            // 契约：房不存在 / 我不是成员 / 不是群房 ⇒ 同一个 404（不分解，不泄露存在性）。
+            Reply::Refused(404) => ActionOutcome::failure(ImFailure::UnknownRoom.as_str()),
+            Reply::Refused(_) | Reply::Broken | Reply::Unreadable => ActionOutcome::unknown(),
+        }
+    }
+
     /// **撤回的复核**（只读）：那条现在处于已撤回状态吗。
     ///
     /// 参数与 `im_recall` **完全相同**（复核问的是"这一次这一条"，参数不同就不是同一个问题）。
@@ -2456,7 +2563,8 @@ impl ActionPort for ImApp {
             | CAPABILITY_TRANSFER_OWNER
             | CAPABILITY_WRITE_PRESENTATION
             | CAPABILITY_ROOM_LIVE
-            | CAPABILITY_TYPING => ActionAdmission::Admitted,
+            | CAPABILITY_TYPING
+            | CAPABILITY_ATTENTION => ActionAdmission::Admitted,
             _ => ActionAdmission::refused(crate::core::UNKNOWN_CAPABILITY),
         }
     }
@@ -2502,6 +2610,9 @@ impl ActionPort for ImApp {
             // 写：**不带键**——声明本身没有"这一条还是那一条"的身份，重发
             // 只是把同一个"我正在写"续期（单调、天然幂等，同 `im_mark_read`）。
             CAPABILITY_TYPING => self.typing(action.params()),
+            // 提醒档（2026-10-23）：**不带键**——状态写，同值重写天然幂等（契约不要求键）。
+            // 身份只来自 BackendAuth ⇒ 它只能写**我自己**那一行。
+            CAPABILITY_ATTENTION => self.set_attention(action.params()),
             _ => ActionOutcome::failure(ImFailure::InvalidArgument.as_str()),
         }
     }
@@ -2630,6 +2741,14 @@ impl crate::app_contract::AppPort for ImApp {
                 EffectClass::RepeatableWrite,
                 Some(ActionId::new(CAPABILITY_ROOMS)),
             ),
+            // 提醒档（2026-10-23）：**状态写**——同参数第二次是同一个值的重写（200、零新事实）
+            // ⇒ 与 `im_mark_read` / `im_recall` 同一先例 `repeatable-write`（契约不要求幂等键：
+            // 同值重写天然幂等）。**复核 = 通讯录**：那间房那一行的 `attention` 栏就是世界记着的档。
+            EffectDeclaration::new(
+                ActionId::new(CAPABILITY_ATTENTION),
+                EffectClass::RepeatableWrite,
+                Some(ActionId::new(CAPABILITY_ROOMS)),
+            ),
         ]
     }
 
@@ -2658,7 +2777,8 @@ impl crate::app_contract::AppPort for ImApp {
                     | CAPABILITY_CREATE_GROUP
                     | CAPABILITY_INVITE
                     | CAPABILITY_WRITE_PRESENTATION
-                    | CAPABILITY_TYPING => SourceClass::System,
+                    | CAPABILITY_TYPING
+                    | CAPABILITY_ATTENTION => SourceClass::System,
                     _ => SourceClass::WorldSigned,
                 };
                 SourceDeclaration::new(capability.id().clone(), class)
@@ -2912,6 +3032,35 @@ fn valid_room(params: &ActionParams) -> Option<&str> {
         .filter(|room| !room.is_empty() && room.len() <= MAX_ID_BYTES)
 }
 
+/// 提醒档的参数校验：**闭集两个词**（[`ATTENTION_ALL`] / [`ATTENTION_MENTIONS`]，逐字节相同）。
+///
+/// 大小写、空白、别的任何词都在本地被拒（零出网）：世界对同一个词回 400，先发一次再报错
+/// 只会把"我拼错了"说成"世界拒绝了我"——而且白花一次往返。
+///
+/// **不 trim**：`all ` 不是 `all`（空格是输入的一部分，替主体裁掉它等于替他猜）；
+/// 也**不**认同义词（`everyone` / `quiet` / `@` 都不是这一档的词）。
+fn valid_attention_level(params: &ActionParams) -> Option<&str> {
+    params
+        .get(PARAM_LEVEL)
+        .filter(|level| is_attention_level(level))
+}
+
+/// 这一个词是不是契约闭集里的提醒档取值（两处判据只有这一份：
+/// 本地参数网关与回执解析共用）。
+fn is_attention_level(level: &str) -> bool {
+    level == ATTENTION_ALL || level == ATTENTION_MENTIONS
+}
+
+/// 从一份回执里取**提醒档**那一格：只认闭集里的两个词，其余一律「读不到」（`None`）。
+///
+/// 2xx 却读不出它 ⇒ 调用方报 `unknown`（不猜"大概就是我要的那个"）。
+fn attention_of(value: &serde_json::Value) -> Option<&str> {
+    match value.get("attention").and_then(|field| field.as_str()) {
+        Some(level) if is_attention_level(level) => Some(level),
+        _ => None,
+    }
+}
+
 /// 说话的正文校验：非空、≤ [`MAX_BODY_BYTES`] 字节、不含 NUL（契约：超限**拒绝不截断**）。
 fn valid_body(params: &ActionParams) -> Option<&str> {
     params
@@ -3140,6 +3289,15 @@ fn render_mark_read(room: &str, advanced: bool, read: &str, unread: &str) -> Str
         escaped_field(room),
         if advanced { "yes" } else { "no" },
     )
+}
+
+/// 设置提醒档的回执：房与我现在的档（世界回写的那一格，**原样**搬运）。
+///
+/// 它只报"世界现在记着什么"，不替这一档翻译成"以后会怎样"：档位决定的是那条**易失**通知
+/// 发不发——被 @ 一定穿透，因此 `mentions` 也**不是**"安静"。那两句解释在声明面里，
+/// 回执保持机械（与通讯录的行同一条纪律）。
+fn render_attention_set(room: &str, attention: &str) -> String {
+    format!("room = {}\nattention = {attention}", escaped_field(room))
 }
 
 /// 一条房内历史路径（可选往更旧的一页翻）。
@@ -3585,11 +3743,25 @@ fn find_recalled(rows: &[serde_json::Value], message: &str) -> Option<bool> {
     found
 }
 
+/// 通讯录那一行里的**提醒档**：只认闭集里的两个词，其余一律 `?`（读不到）。
+///
+/// ⚠ **缺格不冒充 `all`**：契约那句「缺行 = `all`」说的是**服务端投影**（它那儿没有这一行
+/// DB 行时自己填 `all`）。在这一侧，这一格缺席只可能意味着"这一版世界没有这一档"（旧服务端）
+/// 或"形状读不懂"——两者都不能替它推断出一个 `all`：那会让主体以为自己能把档从 `all` 改走，
+/// 而那条端点在那台旧世界上根本不存在。读不到就说读不到（与 `unread` / `read` 同一套三态词）。
+fn attention_text(room: &serde_json::Value) -> &'static str {
+    match room.get("attention").and_then(|value| value.as_str()) {
+        Some(level) if level == ATTENTION_ALL => ATTENTION_ALL,
+        Some(level) if level == ATTENTION_MENTIONS => ATTENTION_MENTIONS,
+        _ => "?",
+    }
+}
+
 /// 通讯录回执。
 ///
 /// ```text
 /// rooms = 2, since = 1758000000000
-/// <room_id>\t<kind>\t<display_name>\tsince = 3\tlast = <RFC3339|->\tpreview = <≤60B 截断|-></>
+/// <room_id>\t<kind>\t<display_name>\tunread = N\tread = <id|->\tattention = all|mentions|?\tsince = 3\tlast = <RFC3339|->\tpreview = <≤60B 截断|->
 /// ```
 ///
 /// 字段全部照端点原样搬运：`kind` 不翻译、`since = N` 不折叠成 `99+`（折叠是将来**通知栏呈现面**
@@ -3630,10 +3802,13 @@ fn render_rooms(body: &serde_json::Value, since: Option<i64>) -> Result<String, 
         // 见 `CORE_V1_AGENT_READ_CURSOR.md`）。它回答的是"我还欠这间房什么"，
         // 与 `since`（调用方自己给的锚）是两件事，因此分列两栏。
         //
-        // 三态词由 `read_state_fields` 统一渲染（**缺省不当零**：读不到写 `?`，
-        // 绝不写 0；位置为空是另一件事，写 `-`）——推进回执用的是同一个函数。
+        // 三态词由 `read_state_fields` 统一渲染（**缺省不当零**：读不到写 `?`，绝不写 0；
+        // 位置为空是另一件事，写 `-`）——推进回执用的是同一个函数。
         let (read, unread) = read_state_fields(room.get("read_state"));
         text.push_str(&format!("\tunread = {unread}\tread = {read}"));
+        // **我在这间房的提醒档**（契约 §9.1）：个人事实，只有我看得见。缺格 ⇒ `?`（读不到），
+        // **不冒充 `all`**——见 [`attention_text`]。
+        text.push_str(&format!("\tattention = {}", attention_text(room)));
         text.push_str(&format!("\tsince = {count}"));
         text.push_str("\tlast = ");
         text.push_str(field("last_activity_at"));

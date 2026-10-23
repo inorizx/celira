@@ -32,15 +32,16 @@ use celira_agent::core::{
 };
 use celira_agent::foundation::{AgentId, OperationId, ResultState, RunId, Turn};
 use celira_agent::im_app::{
-    ATTACHMENT_LINE_CHARS, ATTACHMENT_WINDOW_BYTES, ATTACHMENT_WINDOW_LINES,
-    CAPABILITY_CREATE_GROUP, CAPABILITY_INVITE, CAPABILITY_LEAVE_ROOM, CAPABILITY_MARK_READ,
-    CAPABILITY_READ_ATTACHMENT, CAPABILITY_READ_HISTORY, CAPABILITY_RECALL,
-    CAPABILITY_REMOVE_MEMBER, CAPABILITY_ROOM_LIVE, CAPABILITY_ROOM_MEMBERS, CAPABILITY_ROOMS,
-    CAPABILITY_SAY, CAPABILITY_TRANSFER_OWNER, CAPABILITY_TYPING, CAPABILITY_VERIFY_RECALLED,
-    CAPABILITY_VERIFY_SAID, CAPABILITY_WRITE_PRESENTATION, IM_APP_ID, ImApp, MAX_HISTORY_LIMIT,
-    MAX_MENTION_TARGETS, MAX_SAY_FILE_BYTES, MAX_VERIFY_PAGES, PARAM_ATTACHMENT,
-    PARAM_ATTACHMENT_OFFSET, PARAM_BEFORE, PARAM_BODY, PARAM_FILE_NAME, PARAM_LIMIT,
-    PARAM_MENTIONS, PARAM_MESSAGE, PARAM_NAME, PARAM_REPLY_TO, PARAM_ROOM, PARAM_SINCE,
+    ATTACHMENT_LINE_CHARS, ATTACHMENT_WINDOW_BYTES, ATTACHMENT_WINDOW_LINES, ATTENTION_ALL,
+    ATTENTION_MENTIONS, CAPABILITY_ATTENTION, CAPABILITY_CREATE_GROUP, CAPABILITY_INVITE,
+    CAPABILITY_LEAVE_ROOM, CAPABILITY_MARK_READ, CAPABILITY_READ_ATTACHMENT,
+    CAPABILITY_READ_HISTORY, CAPABILITY_RECALL, CAPABILITY_REMOVE_MEMBER, CAPABILITY_ROOM_LIVE,
+    CAPABILITY_ROOM_MEMBERS, CAPABILITY_ROOMS, CAPABILITY_SAY, CAPABILITY_TRANSFER_OWNER,
+    CAPABILITY_TYPING, CAPABILITY_VERIFY_RECALLED, CAPABILITY_VERIFY_SAID,
+    CAPABILITY_WRITE_PRESENTATION, IM_APP_ID, ImApp, MAX_HISTORY_LIMIT, MAX_MENTION_TARGETS,
+    MAX_SAY_FILE_BYTES, MAX_VERIFY_PAGES, PARAM_ATTACHMENT, PARAM_ATTACHMENT_OFFSET, PARAM_BEFORE,
+    PARAM_BODY, PARAM_FILE_NAME, PARAM_LEVEL, PARAM_LIMIT, PARAM_MENTIONS, PARAM_MESSAGE,
+    PARAM_NAME, PARAM_REPLY_TO, PARAM_ROOM, PARAM_SINCE,
 };
 use celira_agent::im_channel::{
     ImAccess, MAX_FILE_PARAM_BYTES, MAX_ID_BYTES, PARAM_BASE_VERSION, PARAM_FILE,
@@ -755,7 +756,7 @@ fn strings(values: &[&str]) -> Vec<String> {
 /// **每个包的能力清单**（顺序 = 目录顺序）。2026-10-02 拆包：动词本身一条不改，只是换了拥有者。
 /// ⚠️ **2026-10-06**：通信面末尾多了一条 `im_typing`——它**不是拆包带来的**，是那一刀把
 /// "早就实现、早就写进文档、却没进能力面"的进行态动词接上（见 [`ADDED_AFTER_THE_SPLIT`]）。
-const IM_PACK: [&str; 17] = [
+const IM_PACK: [&str; 18] = [
     CAPABILITY_ROOMS,
     CAPABILITY_READ_HISTORY,
     CAPABILITY_READ_ATTACHMENT,
@@ -777,6 +778,9 @@ const IM_PACK: [&str; 17] = [
     CAPABILITY_WRITE_PRESENTATION,
     CAPABILITY_ROOM_LIVE,
     CAPABILITY_TYPING,
+    // 2026-10-23：提醒档（契约 §9.1 的 `PUT /v1/backend/rooms/{room}/attention`，服务端
+    // 2026-10-19 起就有；缺的一直是这一侧的动作）。
+    CAPABILITY_ATTENTION,
 ];
 const SOCIAL_PACK: [&str; 7] = [
     CAPABILITY_CONTACTS,
@@ -828,7 +832,7 @@ const DIRECTORY_BEFORE_THE_SPLIT: [&str; 20] = [
 /// ⇒ 将来谁再加一条，必须在这里写出来（而不是让"并集等于 20 条"那条断言静默失效）。
 // ⚠ **2026-10-13 起这一格不只一条**：`im_typing`（那一刀把"早就实现却没进能力面"的进行态接上）
 // 与房治理那两条（开群房 / 邀请）。名字保留原样——它说的是"拆包之后点名的那些"。
-const ADDED_AFTER_THE_SPLIT: [&str; 7] = [
+const ADDED_AFTER_THE_SPLIT: [&str; 8] = [
     CAPABILITY_TYPING,
     CAPABILITY_CREATE_GROUP,
     CAPABILITY_INVITE,
@@ -836,6 +840,7 @@ const ADDED_AFTER_THE_SPLIT: [&str; 7] = [
     CAPABILITY_END_CONTACT,
     CAPABILITY_REMOVE_MEMBER,
     CAPABILITY_TRANSFER_OWNER,
+    CAPABILITY_ATTENTION,
 ];
 
 /// **拆包前那 11 条写效应声明**（逐条同序）。
@@ -984,6 +989,7 @@ fn rooms_body() -> String {
                 "last_activity_at": "2026-09-16T05:20:00+00:00",
                 "preview": long,
                 "since_count": 150,
+                "attention": "all",
                 "read_state": {
                     "last_read_message_id": "6f0f4f3a-9999-4999-8999-999999999999",
                     "unread_count": 3
@@ -996,6 +1002,7 @@ fn rooms_body() -> String {
                 "last_activity_at": null,
                 "preview": null,
                 "since_count": 0,
+                "attention": "mentions",
                 "read_state": {"last_read_message_id": null, "unread_count": 0}
             }
         ],
@@ -1091,6 +1098,11 @@ fn the_directory_renders_what_the_endpoint_gave() {
         first.contains("\tunread = 3\tread = 6f0f4f3a-9999-4999-8999-999999999999\t"),
         "未读与位置照原值渲染: {first}"
     );
+    // 提醒档（契约 §9.1）：也是照原值渲染——两个词各自出现一次（本行 all、下一行 mentions）。
+    assert!(
+        first.contains("\tattention = all\t"),
+        "提醒档照原值渲染（all = 普通消息也叫醒）: {first}"
+    );
     assert!(
         first.contains("\tlast = 2026-09-16T05:20:00+00:00"),
         "{first}"
@@ -1108,6 +1120,10 @@ fn the_directory_renders_what_the_endpoint_gave() {
     assert!(
         second.contains("\tunread = 0\tread = -\t"),
         "未读为零与「还没读过」是两件事，分别写 0 与 -: {second}"
+    );
+    assert!(
+        second.contains("\tattention = mentions\t"),
+        "群房那一档照原值渲染（mentions = 只有被 @ 才叫醒）: {second}"
     );
     assert!(
         second.contains("带\\n换行的群名"),
@@ -1680,7 +1696,7 @@ fn the_app_declares_its_verbs_with_their_verifications() {
 
     // **2026-10-02 拆包**：动词一条不少，只是换了拥有者——每个包各自声明自己那一组，
     // 三个包的并集**逐条等于**拆包前那份目录（顺序也一样）。
-    assert_eq!(declared_ids(&app), strings(&IM_PACK), "通信面 17 条");
+    assert_eq!(declared_ids(&app), strings(&IM_PACK), "通信面 18 条");
     assert_eq!(declared_ids(&social), strings(&SOCIAL_PACK), "关系面 6 条");
     assert_eq!(
         declared_ids(&profile),
@@ -1794,6 +1810,13 @@ fn the_app_declares_its_verbs_with_their_verifications() {
                 "repeatable-write",
                 Some(CAPABILITY_ROOMS),
             ),
+            // 提醒档（2026-10-23）：**状态写**——同参第二次是同一个值的重写（200、零新事实）
+            // ⇒ 与 `im_mark_read` 同一先例 `repeatable-write`；复核 = 通讯录的 `attention` 栏。
+            (
+                CAPABILITY_ATTENTION,
+                "repeatable-write",
+                Some(CAPABILITY_ROOMS),
+            ),
         ],
     );
     // 关系面四个写动词同属"同参数第二次成功、零新事实"那一档（发起申请回到既有段 /
@@ -1864,6 +1887,7 @@ fn the_app_declares_its_verbs_with_their_verifications() {
     );
     // 拆包之后加的那些：房治理四条（2026-10-13）与「正在写」；最后一条是**翻记录的隐式写**
     // （2026-10-20 补声明——它从前被"未声明即只读"误读成读，而它读完之后会推进读位置）。
+    // 2026-10-23 末尾再添**提醒档**（状态写：同值重写天然幂等，复核 = 通讯录那一栏）。
     assert_eq!(
         im_effects[5..],
         [
@@ -1873,8 +1897,9 @@ fn the_app_declares_its_verbs_with_their_verifications() {
             CAPABILITY_TRANSFER_OWNER.to_string(),
             CAPABILITY_TYPING.to_string(),
             CAPABILITY_READ_HISTORY.to_string(),
+            CAPABILITY_ATTENTION.to_string(),
         ],
-        "拆包之后多了六条声明：房治理四条（2026-10-13）、「正在写」与翻记录的隐式写"
+        "拆包之后多了七条声明：房治理四条（2026-10-13）、「正在写」、翻记录的隐式写与提醒档"
     );
 
     // 准入：每个包只放行**自己**那几条；别人的动词与契约里有、本层**故意没做**的那件事
@@ -3328,6 +3353,304 @@ fn the_leave_room_failure_table_maps_its_own_codes() {
 }
 
 // ---------------------------------------------------------------------------
+// 6d. 提醒档（写，契约 §9.1）：形状、本地闭集、它自己那一套失败面，以及 im_rooms 的三态
+// ---------------------------------------------------------------------------
+//
+// 这一层只证明 App 的搬运（方法 / 路径 / 体 / 键）、参数网关与失败词表；"这一档到底叫不叫醒
+// 谁"由 Core 的门铃侧负责（契约 §9.1 通知条件），不在本文件射程内。
+
+fn attention(params: ActionParams) -> Action {
+    Action::with_params(ActionId::new(CAPABILITY_ATTENTION), params)
+}
+
+/// 提醒档回执体（真实形状：`attention` + `request_id`——**没有** `idempotency_replayed`，
+/// 因为这条端点不带幂等键）。
+fn attention_body(level: &str) -> String {
+    serde_json::json!({"attention": level, "request_id": "req-attention"}).to_string()
+}
+
+/// 一次写 = 恰好一次请求：PUT 打在那条既有端点上，体**只有 `level`**（没有主语 ⇒ 够不着
+/// 别人的行），而且**不带幂等键**（状态写、同值重写天然幂等）。回执搬世界写下的权威取值。
+#[test]
+fn the_attention_write_is_a_one_field_put_that_reports_the_worlds_value() {
+    let fake = FakeIm::spawn(vec![(200, attention_body(ATTENTION_MENTIONS))]);
+    let mut app = fake.app();
+
+    let outcome = call(
+        &mut app,
+        attention(
+            ActionParams::none()
+                .with(PARAM_ROOM, "r-1")
+                .with(PARAM_LEVEL, ATTENTION_MENTIONS),
+        ),
+    );
+    assert_eq!(outcome.state(), ResultState::Success, "{outcome:?}");
+
+    let request = fake.next_request();
+    assert!(
+        request.starts_with("PUT /v1/backend/rooms/r-1/attention "),
+        "方法必须是 PUT、路径必须打在提醒档端点上: {request}"
+    );
+    assert!(
+        request.contains("{\"level\":\"mentions\"}"),
+        "体只有 level（wire 名与参数名同名）: {request}"
+    );
+    assert!(
+        !request.to_ascii_lowercase().contains("participant"),
+        "体里没有主语——只写我自己那一行，够不着别人: {request}"
+    );
+    assert!(
+        !request.to_ascii_lowercase().contains("idempotency-key"),
+        "状态写：同值重写天然幂等 ⇒ 契约要求**不带键**: {request}"
+    );
+    assert_eq!(fake.connections(), 1, "一次写 = 恰好一次请求（绝不重发）");
+
+    let text = text_of(&outcome);
+    assert!(text.contains("room = r-1"), "{text}");
+    assert!(
+        text.contains("attention = mentions"),
+        "回执搬世界的权威取值: {text}"
+    );
+}
+
+/// 闭集的两端各走一次：`all` 与 `mentions` 都发得出去，且**原样**进体（不改写、不翻译）。
+#[test]
+fn both_attention_words_are_accepted_and_sent_verbatim() {
+    for level in [ATTENTION_ALL, ATTENTION_MENTIONS] {
+        let fake = FakeIm::spawn(vec![(200, attention_body(level))]);
+        let mut app = fake.app();
+        let outcome = call(
+            &mut app,
+            attention(
+                ActionParams::none()
+                    .with(PARAM_ROOM, "r-1")
+                    .with(PARAM_LEVEL, level),
+            ),
+        );
+        assert_eq!(
+            outcome.state(),
+            ResultState::Success,
+            "{level}: {outcome:?}"
+        );
+        let request = fake.next_request();
+        assert!(
+            request.contains(&format!("{{\"level\":\"{level}\"}}")),
+            "{level} 必须原样进体: {request}"
+        );
+        assert!(
+            text_of(&outcome).contains(&format!("attention = {level}")),
+            "{level}: {}",
+            text_of(&outcome)
+        );
+        assert_eq!(fake.connections(), 1, "{level}: 恰好一次请求");
+    }
+}
+
+/// 本地闭集：拼错 / 大小写不对 / 带空白 / 空串 / 缺参数 ⇒ `invalid-argument`，
+/// **一次都不出网**（不替主体 trim、不认同义词、不猜相近词）。
+#[test]
+fn an_attention_level_outside_the_two_word_closed_set_is_refused_locally() {
+    for params in [
+        // 缺 level。
+        ActionParams::none().with(PARAM_ROOM, "r-1"),
+        // 缺 room。
+        ActionParams::none().with(PARAM_LEVEL, ATTENTION_ALL),
+        // 闭集之外的词（同义词也不行）。
+        ActionParams::none()
+            .with(PARAM_ROOM, "r-1")
+            .with(PARAM_LEVEL, "everyone"),
+        ActionParams::none()
+            .with(PARAM_ROOM, "r-1")
+            .with(PARAM_LEVEL, "quiet"),
+        // 大小写不是这一档的词。
+        ActionParams::none()
+            .with(PARAM_ROOM, "r-1")
+            .with(PARAM_LEVEL, "ALL"),
+        // 空白不 trim。
+        ActionParams::none()
+            .with(PARAM_ROOM, "r-1")
+            .with(PARAM_LEVEL, " all"),
+        ActionParams::none()
+            .with(PARAM_ROOM, "r-1")
+            .with(PARAM_LEVEL, "mentions "),
+        // 空串不是"没说"。
+        ActionParams::none()
+            .with(PARAM_ROOM, "r-1")
+            .with(PARAM_LEVEL, ""),
+        // 空房号也拦在本地。
+        ActionParams::none()
+            .with(PARAM_ROOM, "")
+            .with(PARAM_LEVEL, ATTENTION_ALL),
+    ] {
+        let fake = FakeIm::spawn(vec![]);
+        let mut app = fake.app();
+        let outcome = call(&mut app, attention(params.clone()));
+        assert_eq!(outcome.state(), ResultState::Failure, "{params:?}");
+        assert_eq!(
+            outcome.failure_class(),
+            Some("invalid-argument"),
+            "{params:?}"
+        );
+        assert_eq!(fake.connections(), 0, "参数非法一次都不出网: {params:?}");
+    }
+}
+
+/// 失败面与其它 im 写动词**同一套类**：400 / 401 / 404 各归各的词（契约把"房不在 / 我不是
+/// 成员 / 不是群房"合成同一个 404，本层不分解）；其余非 2xx、读不懂、以及 2xx 却读不出
+/// 那一格 ⇒ 未确认（不猜、不重发）。
+#[test]
+fn the_attention_failure_table_uses_the_same_classes_as_the_other_im_writes() {
+    for (status, expected) in [
+        (400u16, "invalid-argument"),
+        (401, "credential-rejected"),
+        (404, "unknown-room"),
+    ] {
+        let fake = FakeIm::spawn(vec![(status, "{\"error\":\"synthetic\"}".to_string())]);
+        let mut app = fake.app();
+        let outcome = call(
+            &mut app,
+            attention(
+                ActionParams::none()
+                    .with(PARAM_ROOM, "r-1")
+                    .with(PARAM_LEVEL, ATTENTION_ALL),
+            ),
+        );
+        assert_eq!(outcome.state(), ResultState::Failure, "HTTP {status}");
+        assert_eq!(outcome.failure_class(), Some(expected), "HTTP {status}");
+        assert!(
+            text_of(&outcome).is_empty(),
+            "失败不带正文块（状态码与响应体不外泄）: HTTP {status}"
+        );
+        assert_eq!(fake.connections(), 1, "HTTP {status}: 恰好一次，绝不重发");
+    }
+
+    for (status, body) in [
+        (403u16, "{\"error\":\"synthetic\"}".to_string()),
+        (409, "{\"error\":\"synthetic\"}".to_string()),
+        (422, "{\"error\":\"synthetic\"}".to_string()),
+        (500, "{\"error\":\"synthetic\"}".to_string()),
+        (200, "this is not json".to_string()),
+        // 2xx 却读不出"现在的档"：不知道这次写到底被接受成什么 ⇒ 未确认。
+        (200, "{}".to_string()),
+        (200, "{\"attention\":\"everyone\"}".to_string()),
+        (200, serde_json::json!({"attention": 7}).to_string()),
+    ] {
+        let fake = FakeIm::spawn(vec![(status, body.clone())]);
+        let mut app = fake.app();
+        let outcome = call(
+            &mut app,
+            attention(
+                ActionParams::none()
+                    .with(PARAM_ROOM, "r-1")
+                    .with(PARAM_LEVEL, ATTENTION_MENTIONS),
+            ),
+        );
+        assert_eq!(
+            outcome.state(),
+            ResultState::Unknown,
+            "HTTP {status} / {body} 没有告诉我们这一次的提交结果"
+        );
+    }
+}
+
+/// 一份只有一间房的目录回执；`attention` 那一格由用例决定给不给、给什么形状。
+fn rooms_with_attention(attention: Option<serde_json::Value>) -> String {
+    let mut room = serde_json::json!({
+        "room_id": "6f0f4f3a-1111-4111-8111-111111111111",
+        "kind": "group",
+        "display_name": "值班室",
+        "last_activity_at": null,
+        "preview": null,
+        "since_count": 0,
+        "read_state": {"last_read_message_id": null, "unread_count": 0}
+    });
+    if let Some(value) = attention {
+        room["attention"] = value;
+    }
+    serde_json::json!({"rooms": [room], "request_id": "req"}).to_string()
+}
+
+/// `im_rooms` 的 `attention` 栏：两个词照原值；**缺格与形状读不懂都写 `?`**。
+///
+/// ⚠ **缺格不冒充 `all`**：契约那句「缺行 = all」是**服务端**的投影；这一侧看到"这一版世界
+/// 没给这一栏"（旧服务端）只能说读不到——把它写成 `all` 就是替世界编一个它没说的档。
+#[test]
+fn the_directory_renders_attention_as_two_words_or_a_question_mark() {
+    let render = |given: Option<serde_json::Value>| {
+        let fake = FakeIm::spawn(vec![
+            (200, rooms_with_attention(given)),
+            (200, me_body(IM_PARTICIPANT)),
+        ]);
+        let mut app = fake.app();
+        let outcome = call(&mut app, rooms(ActionParams::none()));
+        assert_eq!(outcome.state(), ResultState::Success);
+        text_of(&outcome)
+    };
+
+    for (value, expected) in [
+        (
+            Some(serde_json::json!(ATTENTION_ALL)),
+            "\tattention = all\t",
+        ),
+        (
+            Some(serde_json::json!(ATTENTION_MENTIONS)),
+            "\tattention = mentions\t",
+        ),
+        // 旧服务端：这一版没有这一格 ⇒ 读不到（不是 all）。
+        (None, "\tattention = ?\t"),
+        // 形状读不懂 / 闭集之外的词：同样是读不到。
+        (Some(serde_json::json!("everyone")), "\tattention = ?\t"),
+        (Some(serde_json::json!("ALL")), "\tattention = ?\t"),
+        (Some(serde_json::json!(7)), "\tattention = ?\t"),
+        (Some(serde_json::Value::Null), "\tattention = ?\t"),
+    ] {
+        let text = render(value.clone());
+        assert!(
+            text.contains(expected),
+            "attention = {value:?} 应渲染出 {expected:?}：{text}"
+        );
+    }
+}
+
+/// 目录里这一条把**两个词**写在 `level` 的参数说明上（主体照它选词），而且是必给参数；
+/// 房间号也是必给——与其它带房的动词同一条参数网关。
+#[test]
+fn the_attention_declaration_names_its_two_word_closed_set() {
+    let fake = FakeIm::spawn(vec![]);
+    let app = fake.app();
+    let declared = app.declared_capabilities();
+    let capability = declared
+        .items()
+        .iter()
+        .find(|capability| capability.id().as_str() == CAPABILITY_ATTENTION)
+        .expect("im_attention 必须在声明面里");
+
+    let level = capability
+        .params()
+        .iter()
+        .find(|spec| spec.name() == PARAM_LEVEL)
+        .expect("level 参数必须在参数表里");
+    assert!(level.is_required(), "不给档就没有这次写");
+    for word in [ATTENTION_ALL, ATTENTION_MENTIONS] {
+        assert!(
+            level.description().contains(word),
+            "参数说明要把闭集的两个词都写出来（{word}）: {}",
+            level.description()
+        );
+    }
+    assert!(
+        capability
+            .params()
+            .iter()
+            .any(|spec| spec.name() == PARAM_ROOM && spec.is_required()),
+        "room 是必给参数"
+    );
+    // 声明面不许残留未插值的占位符（本文件第 9 节那条通用用例也会查到它，这里就近钉一次）。
+    assert!(!capability.skeleton().contains('{'));
+    assert!(!capability.details().contains('{'));
+}
+
+// ---------------------------------------------------------------------------
 // 7. 只读投影（宿主那一侧用的入口——**不是主体的动词**）
 // ---------------------------------------------------------------------------
 
@@ -4748,8 +5071,10 @@ fn only_the_writes_declare_effects() {
             CAPABILITY_TYPING.to_string(),
             // 2026-10-20：翻记录是**隐式写**（读完推进读位置）——它不再被"未声明即只读"误读。
             CAPABILITY_READ_HISTORY.to_string(),
+            // 2026-10-23：提醒档是**状态写**（同值重写天然幂等，复核 = 通讯录那一栏）。
+            CAPABILITY_ATTENTION.to_string(),
         ],
-        "拆包之后多了六条声明：房治理四条（2026-10-13）、「正在写」与翻记录的隐式写"
+        "拆包之后多了七条声明：房治理四条（2026-10-13）、「正在写」、翻记录的隐式写与提醒档"
     );
     assert!(!declared.contains(&CAPABILITY_READ_ATTACHMENT.to_string()));
     // 三个只读动词**不**声明写效应（关系账 / 拉黑名单 / 我自己的资料）。
