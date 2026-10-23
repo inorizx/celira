@@ -100,7 +100,8 @@ pub const MANUAL_ADDRESS: &str = crate::orientation::MANUAL_FILE;
 /// ⚠ **2026-10-13 加**：它补的是主体自己列的第②条缺陷——「self_concept 写完不能核实」。在那之前
 /// `write_self_concept` 是全库**唯一一个写完读不回来的自持物**（笔记有 `notes_read`、格位有 `pins_board`、
 /// 约的时刻有 `timer_list`，而自识只有"下一场开场再读"）。⇒ 给它一条**现读**的路（手册那条路的
-/// 同款：不缓存、每次现读 ⇒ 写完立刻读得到写进去的那一份，**同一段里**就能核实）。
+/// 同款：不缓存、每次现读 ⇒ 开场时地址已在，读到的是最新一份；开场时还没有，写下的那一份
+/// 要下一次开场才出现）。
 ///
 /// 名字不在这里另写一遍：它就是环境根下那一份的文件名（[`crate::self_concept::SELF_CONCEPT_FILE`]）。
 pub const SELF_CONCEPT_ADDRESS: &str = crate::self_concept::SELF_CONCEPT_FILE;
@@ -233,8 +234,8 @@ fn manual_view(environment_root: &Path) -> Option<ManualView> {
 
 /// 派生自识的来源：**环境根下那一份文件**（只读）。
 ///
-/// 与手册同一条纪律：不复制正文、不缓存——每次 `files_read` 都现读那一份，因此**刚写下的自识
-/// 同一段里立刻读得到**（"写完能不能核实"这条判据就落在这里）。
+/// 与手册同一条纪律：不复制正文、不缓存——地址在开场时已存在 ⇒ 每次 `files_read` 都现读那一份；
+/// 开场时还没有 ⇒ 这个地址本段里不存在，刚写下的自识要下一次开场才出现。
 #[derive(Debug)]
 struct SelfConceptView {
     path: PathBuf,
@@ -481,8 +482,10 @@ impl FileView {
                  说明存储结构（开始/结束事实/封存），不是任务完成判定；经历段自带分段，对它给窗口\
                  参数会明确失败。派生手册：`manual.md` 是一份文件（你家里那份手册的正文），\
                  整份读、没有分段，对它给窗口参数同样明确失败。派生自识：`self_concept` 是你自己写下的\
-                 那一篇（`write_self_concept` 写的就是它）——同一条路整份读，写完立刻读得到，因此写完\
-                 想核实就再读它一次。若文件长、先把这一段的长度读成小一点更省事。",
+                 那一篇（`write_self_concept` 写的就是它）——同一条路整份读。注意：这个地址在**这一段\
+                 开场时**是否在场就已定下；开场时没有 ⇒ 本段里读不到，刚写下的那一份下一次开场才出现；\
+                 开场时已有 ⇒ 每次读都是现读最新内容。写入回执会给出长度，可先据此确认写成功。\
+                 若文件长、先把这一段的长度读成小一点更省事。",
             ),
             Capability::new(
                 ActionId::new(CAPABILITY_FIND_TEXT),
@@ -1024,8 +1027,9 @@ impl FileView {
     /// 与手册、与资料面的整份读取**共用同一条实现**（[`file_app::read_text_file`]）：同一个动词在
     /// 三个地址上不许有三套脾气。
     ///
-    /// ⚠ **它就是"写完能不能核实"那条判据的落点**（2026-10-13）：`write_self_concept` 落地之后，主体
-    /// 在**同一段**里 `files_read("self_concept")` 就能读到刚写进去的那一份——不缓存、每次现读。
+    /// ⚠ **它就是"写完能不能核实"那条判据的落点**（2026-10-13）：但"地址在不在"是**这一段开场时**
+    /// 拍下的；开场时已有 ⇒ `files_read("self_concept")` 每次现读最新；开场时没有 ⇒ 刚写下的那一份
+    /// 要下一次开场才出现。
     fn read_self_concept(&self) -> ActionOutcome {
         let Some(self_concept) = &self.self_concept else {
             return ActionOutcome::failure(FailureClass::NotFound.as_str());

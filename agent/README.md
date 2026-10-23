@@ -1902,7 +1902,7 @@ segment" 或把 hold 说明改回 "this segment"，用例立刻红。
 视图再加一个**派生单文件地址** `self_concept`，**不新增动词**（`files_read` 已经在手上）。
 
 **权威位置**：[`file_view.rs`](src/file_view.rs) 的 `//!`（白名单、`SELF_CONCEPT_ADDRESS`、
-`ReservedAddressTaken` 冲突拒绝、"不缓存 ⇒ 刚写下就同一段里读得到"）与 `write_self_concept` 那一侧
+`ReservedAddressTaken` 冲突拒绝、"开场时地址已在 ⇒ 每次读现读最新；开场时没有 ⇒ 下一次开场才出现"）与 `write_self_concept` 那一侧
 （[`self_concept.rs`](src/self_concept.rs)）；证明 → `tests/history_view.rs` 的
 `her_own_self_concept_is_readable_at_its_reserved_address`（它同时是
 `the_view_never_exposes_environment_internals` 的**另一半**：环境内部记录仍一律不可读，
