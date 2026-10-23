@@ -1,5 +1,7 @@
 # Celira Runtime 终局负责人裁决
 
+> 沙箱的分层与可插拔后端裁决，见 [SANDBOX_PROVIDER_DECISIONS.md](SANDBOX_PROVIDER_DECISIONS.md)。
+
 > 状态：终局修订前的负责人裁决稿。
 >
 > 用途：把多路评审收敛为少数必须定案的工程契约，作为后续修改四份终局文档和设计最小验证切片的依据。
