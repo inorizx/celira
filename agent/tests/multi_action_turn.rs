@@ -22,7 +22,7 @@ use celira_agent::core::{
 };
 use celira_agent::creation_grant::CreationGrant;
 use celira_agent::file_app::FILE_APP_ID;
-use celira_agent::foundation::{AgentId, Outcome, RunId, SubjectEnding, SystemEnding};
+use celira_agent::foundation::{AgentId, Outcome, RunId, SubjectEnding};
 use celira_agent::recovery;
 use celira_agent::store::Environment;
 
@@ -474,11 +474,11 @@ fn a_failed_action_does_not_stop_the_rest_of_the_turn() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. 结果无法确认 ⇒ 这一轮剩下的动作一个都不发出
+// 4. 回执未达 ⇒ 这一轮照常走完；收场由主体自己说（2026-10-24）
 // ---------------------------------------------------------------------------
 
 #[test]
-fn an_unconfirmed_result_stops_the_rest_of_the_turn() {
+fn an_unconfirmed_result_does_not_stop_the_rest_of_the_turn() {
     let dir = TempDir::new("unknown-stops-turn");
     // 盘上内容与复核参数不一致 ⇒ 复核既不能报成功、也不能报失败，只能报"无法确认"。
     std::fs::create_dir_all(dir.granted("draft.txt").parent().expect("有父目录")).expect("建目录");
@@ -498,23 +498,33 @@ fn an_unconfirmed_result_stops_the_rest_of_the_turn() {
     );
     assert_eq!(
         driven,
-        SessionDrive::Ended(Outcome::System(SystemEnding::Indeterminate)),
-        "结果无法确认时按既有规则收场"
+        SessionDrive::Ended(Outcome::Subject(SubjectEnding::Completed)),
+        "回执未达不终止活动：收场是主体自己说的"
     );
 
-    // 第 1 个（复核）有事实；第 2 个**一条都没有**——不准备、不派发。
+    // 两个动作**都有自己的事实**：没看见不是这一轮其他动作的判决。
     // TASK_69：轮次号按"这一轮要了几个业务动作"查回来（不写死）。
     let pair = business_turn(&dir, 2);
+    let facts = facts_of(&dir);
     for fact in ["action-prepared", "action-dispatched", "action-result"] {
-        assert_eq!(
-            indices_of(&dir, fact, pair),
-            vec![None],
-            "{fact}：这一轮只该有第 0 个动作的事实"
-        );
+        let count = facts
+            .iter()
+            .filter(|row| row.get("fact").and_then(|v| v.as_str()) == Some(fact))
+            .filter(|row| row.get("turn").and_then(|v| v.as_u64()) == Some(pair))
+            .count();
+        assert_eq!(count, 2, "{fact}：两个动作都该有自己的事实");
     }
+    // 第一个动作的结果仍然是"没看见"，一个字节都不许被改写成成功或失败。
+    let states: Vec<&str> = facts
+        .iter()
+        .filter(|row| row.get("fact").and_then(|v| v.as_str()) == Some("action-result"))
+        .filter(|row| row.get("turn").and_then(|v| v.as_u64()) == Some(pair))
+        .map(|row| row.get("state").and_then(|v| v.as_str()).unwrap_or("?"))
+        .collect();
+    assert_eq!(states, vec!["unknown", "success"]);
     assert!(
-        !dir.granted("later.txt").exists(),
-        "这一轮剩下的动作一个都不许发出"
+        dir.granted("later.txt").exists(),
+        "这一轮剩下的动作照常发出"
     );
 }
 

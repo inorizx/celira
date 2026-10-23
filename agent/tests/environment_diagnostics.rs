@@ -983,9 +983,9 @@ fn a_second_process_reads_back_what_the_first_process_recorded_and_changes_nothi
     assert_eq!(field_of(&second, "outcome"), "subject:silent");
     assert_eq!(field_of(&second, "prepared"), "0");
 
-    // 结果未知：系统收场，而且那次尝试必须留在"未确认"里——不得被猜成成功或失败。
+    // 回执未达：那次尝试必须留在"未确认"里——不得被猜成成功或失败；收场是主体自己说的。
     let unknown = pick("run-unknown");
-    assert_eq!(field_of(&unknown, "outcome"), "system:indeterminate");
+    assert_eq!(field_of(&unknown, "outcome"), "subject:silent");
     assert_eq!(field_of(&unknown, "unconfirmed"), "1");
     assert_eq!(field_of(&unknown, "unknown"), "1");
     assert_eq!(field_of(&unknown, "dispatched-without-result"), "0");

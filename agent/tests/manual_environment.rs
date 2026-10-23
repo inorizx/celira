@@ -530,13 +530,14 @@ fn the_existing_failure_paths_are_unchanged() {
     );
     assert_eq!(injected(&run).len(), 1, "模型失败不改接缝次数");
 
-    // (d) 无法确认：同样只有一次 Run 注入。
+    // (d) 回执未达：同样只有一次 Run 注入；活动不再由系统收场，主体自己决定。
     let mut environment = ActivityOrigin::new();
     let mut agent = Agent::new(AgentId::new("agent-unknown"));
     let mut ledger = Ledger::new(AgentId::new("agent-unknown"));
-    let mut model = InspectsFirst::new(ScriptedModel::new(vec![ModelOutput::act(Action::new(
-        ActionId::new("probe"),
-    ))]));
+    let mut model = InspectsFirst::new(ScriptedModel::new(vec![
+        ModelOutput::act(Action::new(ActionId::new("probe"))),
+        ModelOutput::finish(SubjectEnding::Silent),
+    ]));
     let mut os = MinimalOs::open(sandbox.path()).expect("可以装配");
     let mut expansion4 =
         RunExpansion::new(AgentId::new("agent-unknown"), RunId::new("run-unknown"));
@@ -558,10 +559,15 @@ fn the_existing_failure_paths_are_unchanged() {
     .expect("可以跑完");
     assert_eq!(
         run.outcome(),
-        Some(Outcome::System(SystemEnding::Indeterminate))
+        Some(Outcome::Subject(SubjectEnding::Silent)),
+        "收场是主体自己说的"
     );
     assert_eq!(injected(&run).len(), 1);
-    assert_eq!(model.inner().seen.len(), 1, "无法确认之后不得再调用模型");
+    assert_eq!(
+        model.inner().seen.len(),
+        2,
+        "没看见之后主体还得有一次机会（读数已经在视野里）"
+    );
 }
 
 /// 6. 不同活动各自独立：来源文本不跨活动自动复制。

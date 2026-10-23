@@ -350,10 +350,13 @@ fn every_ending_path_hands_the_activity_slot_back() {
     .expect("系统失败也是一次明确收场");
     assert_eq!(a.activity(), None, "Model 失败之后必须释放活动槽");
 
-    // 3) 结果无法确认，由系统收场。
+    // 3) 回执未达：不再由系统收场；主体看过读数之后自己收场（槽照样还回来）。
     let mut a = agent("agent-a");
     let mut ledger = ledger_for(&a);
-    let mut model = ScriptedModel::new(vec![ModelOutput::act(action("attempt"))]);
+    let mut model = ScriptedModel::new(vec![
+        ModelOutput::act(action("attempt")),
+        ModelOutput::finish(SubjectEnding::Silent),
+    ]);
     let mut actions = FixedActions::with(ResultState::Unknown);
     run_activity(
         &mut a,
@@ -364,7 +367,7 @@ fn every_ending_path_hands_the_activity_slot_back() {
         &mut ledger,
     )
     .expect("活动以明确收场结束");
-    assert_eq!(a.activity(), None, "无法确认的收场之后必须释放活动槽");
+    assert_eq!(a.activity(), None, "回执未达的收场之后必须释放活动槽");
 
     // 4) Turn 预算耗尽。
     let mut a = agent("agent-a");
@@ -817,7 +820,10 @@ fn after_a_failed_action_the_agent_can_choose_another_action() {
 fn unknown_is_never_rewritten_as_success_or_failure() {
     let mut a = agent("agent-a");
     let mut ledger = ledger_for(&a);
-    let mut model = ScriptedModel::new(vec![ModelOutput::act(action("attempt"))]);
+    let mut model = ScriptedModel::new(vec![
+        ModelOutput::act(action("attempt")),
+        ModelOutput::finish(SubjectEnding::Silent),
+    ]);
     let mut actions = FixedActions::with(ResultState::Unknown);
 
     let run = run_activity(
@@ -833,12 +839,13 @@ fn unknown_is_never_rewritten_as_success_or_failure() {
     assert_eq!(run.observed()[0].state(), ResultState::Unknown);
     assert_eq!(
         run.outcome(),
-        Some(Outcome::System(SystemEnding::Indeterminate))
+        Some(Outcome::Subject(SubjectEnding::Silent)),
+        "收场是主体自己说的，不是系统替它说的"
     );
     assert_eq!(
         model.seen.len(),
-        1,
-        "无法确认的结果不允许再发新效果，所以没有第二轮 Model——这与 Action Failure 不同"
+        2,
+        "回执未达要进视野：主体还有一次机会（系统仍不会自动重发同一个操作身份）"
     );
 
     let recorded = ledger.records().iter().find_map(|record| match record {

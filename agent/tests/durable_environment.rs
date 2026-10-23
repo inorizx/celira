@@ -33,7 +33,7 @@ use celira_agent::core::{
     RunInput, RunRequest, TraceEntry, View, no_cost, run_activity_with,
 };
 use celira_agent::foundation::{
-    ActionResult, AgentId, Ledger, OperationId, Outcome, Record, RunId, SubjectEnding,
+    ActionResult, AgentId, Ledger, OperationId, Outcome, Record, ResultState, RunId, SubjectEnding,
     SystemEnding, Turn,
 };
 use celira_agent::store::{
@@ -2098,10 +2098,10 @@ impl ActionPort for UnknownActions {
     }
 }
 
-/// 动作结果 Unknown 不等于"整个主体被永久封锁"。
+/// 动作结果 Unknown **不再收场**：它进视野，主体自己决定（2026-10-24）。
 ///
-/// 这种情况 Core 会如实收场（Indeterminate），终态被确认，因此之后仍可开始新活动。
-/// 把它和"没有收尾"、"存储故障"混为一谈，才是真正的问题。
+/// 这一条守两件事：① "没看见"之后主体还有一次机会（模型被再叫一次，且它看到的观察里带着读数）；
+/// ② 这样收场之后环境不锁——活动有可靠终态，下一位住户照常进门。
 #[test]
 fn an_unknown_action_result_does_not_lock_the_environment() {
     let dir = TempDir::new("admission-unknown-result");
@@ -2109,10 +2109,14 @@ fn an_unknown_action_result_does_not_lock_the_environment() {
 
     let mut env = Environment::create(&dir.env(), agent.clone()).expect("创建环境");
     let mut source = ScriptedSource::new(None, vec![None]);
-    let mut model = ScriptedModel::new(vec![ModelOutput::act(Action::with_params(
-        ActionId::new("probe"),
-        ActionParams::none().with("note", "踩一下"),
-    ))]);
+    let mut model = ScriptedModel::new(vec![
+        ModelOutput::act(Action::with_params(
+            ActionId::new("probe"),
+            ActionParams::none().with("note", "踩一下"),
+        )),
+        // 看见"没拿到回执"之后，主体自己决定收场。
+        ModelOutput::finish(SubjectEnding::Silent),
+    ]);
     let mut actions = UnknownActions;
     let mut commit = FlakyCommit::new(&mut env, None);
     {
@@ -2132,11 +2136,19 @@ fn an_unknown_action_result_does_not_lock_the_environment() {
             &mut actions,
             &mut ledger,
         )
-        .expect("无法确认的结果仍然是如实收场，不是失败");
+        .expect("没看见回执不终止活动");
         assert_eq!(
             run.outcome(),
-            Some(Outcome::System(SystemEnding::Indeterminate)),
-            "无法确认的结果由系统如实收场"
+            Some(Outcome::Subject(SubjectEnding::Silent)),
+            "收场是主体自己说的，不是系统替它说的"
+        );
+        assert_eq!(model.calls(), 2, "没看见之后，主体还得有一次机会");
+        let observed = run.observed();
+        assert_eq!(observed.len(), 1, "那一次尝试留下了一条观察");
+        assert_eq!(observed[0].state(), ResultState::Unknown);
+        assert!(
+            !observed[0].outcome().content().is_empty(),
+            "回执未达要带读数：它是什么、不是什么、下一步能做什么"
         );
     }
     drop(commit);

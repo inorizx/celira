@@ -131,18 +131,6 @@ impl ModelPort for CountingModel {
     }
 }
 
-/// 每次都选择行动、并数自己被调用次数的模型。
-struct ActingModel {
-    calls: usize,
-}
-
-impl ModelPort for ActingModel {
-    fn complete(&mut self, _view: &View) -> Result<ModelOutput, ModelError> {
-        self.calls += 1;
-        Ok(ModelOutput::act(Action::new(ActionId::new("probe"))))
-    }
-}
-
 /// 一直失败的模型。
 struct FailingModel;
 
@@ -757,11 +745,14 @@ fn every_terminal_path_has_exact_hook_counts() {
     );
     assert_eq!(source.calls.len(), 2);
 
-    // Unknown：一次 Turn 钩子，之后不额外调用。
+    // 回执未达：活动不终止（2026-10-24）⇒ 主体看过读数后自己收场，两次 Turn 钩子。
     let mut agent = Agent::new(AgentId::new("agent-c"));
     let mut ledger = Ledger::new(AgentId::new("agent-c"));
     let mut source = RecordingSource::new(batch("note", "opening"), Vec::new());
-    let mut model = ActingModel { calls: 0 };
+    let mut model = ScriptedModel::new(vec![
+        ModelOutput::act(Action::new(ActionId::new("probe"))),
+        ModelOutput::finish(SubjectEnding::Silent),
+    ]);
     let run = run_activity_with(
         &mut agent,
         RunRequest {
@@ -777,16 +768,13 @@ fn every_terminal_path_has_exact_hook_counts() {
         &mut ledger,
     )
     .expect("可以跑完");
-    assert_eq!(
-        run.outcome(),
-        Some(Outcome::System(SystemEnding::Indeterminate))
-    );
+    assert_eq!(run.outcome(), Some(Outcome::Subject(SubjectEnding::Silent)));
     assert_eq!(
         source.calls.len(),
-        2,
-        "Run 钩子 + 一次 Turn 钩子，之后不再注入"
+        3,
+        "Run 钩子 + 两次 Turn 钩子：没看见的那一轮之后还有一次"
     );
-    assert_eq!(model.calls, 1, "无法确认之后不得再调用模型");
+    assert_eq!(model.seen.len(), 2, "回执未达要进视野，主体还有一次机会");
 
     // 末轮预算耗尽：Turn 钩子等于轮数，不追加补偿调用。
     let mut agent = Agent::new(AgentId::new("agent-d"));

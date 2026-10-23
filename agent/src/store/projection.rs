@@ -158,7 +158,8 @@ impl RehydrateError {
 ///
 /// - `success`：分类必须缺席（成功不带分类）；
 /// - `failure`：分类**必须**在；**读数可有可无**（它是"随单读数"，与分类是两个独立分量）；
-/// - `unknown`：分类缺席，且今天没有"带读数的不知道"这个构造入口 ⇒ 有读数即拒绝（fail-closed）。
+/// - `unknown`：分类必须缺席；**读数可有可无**（`unknown_with` 是 2026-10-24 起的构造入口：
+///   回执未达时要带"等了多久、卡在哪一步"）。
 ///
 /// ⚠ 两侧会不会漂移，由**往返守卫**抓（`tests::every_shape_the_writer_can_write_reads_back_as_itself`
 /// 用 [`observed_payload`] 写、用本函数读，逐格比）。**新加一个构造入口就把守卫加一行**——
@@ -180,7 +181,7 @@ pub(super) fn outcome_of_observation(
         // **读路径唯一的开口**：盘上那根分类是 owned（别人写的），因此走 `recorded` 而不是
         // 写路径那两个只收 `&'static str` 的构造器（见 `core::ActionOutcome::recorded` 的文档）。
         (ResultState::Failure, Some(class)) => Ok(ActionOutcome::recorded(class.clone(), content)),
-        (ResultState::Unknown, None) if content.is_empty() => Ok(ActionOutcome::unknown()),
+        (ResultState::Unknown, None) => Ok(ActionOutcome::unknown_with(content)),
         _ => Err(RehydrateError::OutcomeNotProducible),
     }
 }
@@ -1110,13 +1111,20 @@ mod tests {
     /// **读侧不认识的形状仍然 fail-closed**（收窄只朝一个方向：多认一格写过的，不少拒一格读不懂的）。
     #[test]
     fn a_shape_the_writer_never_writes_is_still_refused() {
-        // 「不知道」今天没有带读数的构造入口 ⇒ 有读数即拒绝。
-        let refused = outcome_of_observation(
+        // 「不知道」带读数是合法的（`unknown_with`，2026-10-24 起）：回执未达要带时间与卡点。
+        let with_reading = outcome_of_observation(
             ResultState::Unknown,
             None,
             &[("read".to_string(), "读数".to_string())],
         );
-        assert!(refused.is_err(), "读不懂的形状不许被读成某一档");
+        assert!(with_reading.is_ok(), "回执未达可以带读数");
+        // 但「不知道」**带分类**仍然拒绝：那等于把它说成一次失败。
+        let classified = outcome_of_observation(
+            ResultState::Unknown,
+            Some(&"invalid-parameter".to_string()),
+            &[],
+        );
+        assert!(classified.is_err(), "不知道不带分类");
         // 失败却不带分类 ⇒ 同样拒绝。
         let classless = outcome_of_observation(ResultState::Failure, None, &[]);
         assert!(classless.is_err(), "失败必须带分类");

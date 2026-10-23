@@ -13,7 +13,7 @@ use celira_agent::core::{
 };
 use celira_agent::file_app::FILE_APP_ID;
 use celira_agent::foundation::{
-    AgentId, Ledger, OperationId, ResultState, RunId, SubjectEnding, SystemEnding,
+    AgentId, Ledger, OperationId, ResultState, RunId, SubjectEnding,
 };
 use celira_agent::os::{MinimalOs, RunExpansion};
 
@@ -496,9 +496,9 @@ fn a_second_run_never_inherits_the_previous_input_or_bodies() {
     );
 }
 
-/// 7（部分）+ 8：Unknown 仍按既有终态收场且不额外调用模型；事实里没有输入与正文。
+/// 7（部分）+ 8：回执未达不终止活动（2026-10-24），主体看过读数后自己收场；事实里没有输入与正文。
 #[test]
-fn an_unknown_result_still_ends_indeterminate_without_an_extra_call() {
+fn an_unknown_result_keeps_the_run_alive_and_leaves_no_input_in_facts() {
     /// 永远返回"无法确认"的执行端。
     struct UnknownActions {
         calls: usize,
@@ -525,7 +525,7 @@ fn an_unknown_result_still_ends_indeterminate_without_an_extra_call() {
         }
     }
 
-    /// 数调用次数的模型：只回答一次行动，之后不该再被问。
+    /// 数调用次数的模型：第一次请求行动，看见"没拿到回执"之后自己收场。
     struct CountingModel {
         calls: usize,
     }
@@ -533,7 +533,11 @@ fn an_unknown_result_still_ends_indeterminate_without_an_extra_call() {
     impl ModelPort for CountingModel {
         fn complete(&mut self, _view: &View) -> Result<ModelOutput, ModelError> {
             self.calls += 1;
-            Ok(ModelOutput::act(Action::new(ActionId::new("probe"))))
+            Ok(if self.calls == 1 {
+                ModelOutput::act(Action::new(ActionId::new("probe")))
+            } else {
+                ModelOutput::finish(SubjectEnding::Silent)
+            })
         }
     }
 
@@ -556,12 +560,15 @@ fn an_unknown_result_still_ends_indeterminate_without_an_extra_call() {
 
     assert_eq!(
         run.outcome(),
-        Some(celira_agent::foundation::Outcome::System(
-            SystemEnding::Indeterminate
+        Some(celira_agent::foundation::Outcome::Subject(
+            SubjectEnding::Silent
         )),
-        "无法确认时仍按既有事实与终态收场"
+        "回执未达不终止活动：收场是主体自己说的"
     );
-    assert_eq!(model.calls, 1, "不得为了让模型看一眼而额外调用");
+    assert_eq!(
+        model.calls, 2,
+        "没看见之后主体还得有一次机会（读数已经在视野里）"
+    );
     assert_eq!(actions.calls, 1);
     assert_eq!(run.observed()[0].state(), ResultState::Unknown);
     assert!(

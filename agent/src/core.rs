@@ -438,6 +438,17 @@ pub const INVALID_ARGUMENT: &str = "invalid-argument";
 /// 它是**内容**的标签，不是失败分类——分类那一格用中立的 [`INVALID_ARGUMENT`]。
 pub const SHAPE_READING_LABEL: &str = "shape";
 
+/// **回执未达**在观察内容里的块标签：这次尝试没拿到可确认的结果时，那句"它是什么、不是什么、
+/// 下一步能做什么"挂在它下面。
+pub const RECEIPT_LABEL: &str = "receipt";
+
+/// 回执未达时交给主体的那句读数。
+///
+/// 三条边界都写在字面里：不猜成成功、不猜成失败、不替主体决定下一步。
+pub const RECEIPT_MISSING: &str = "这次尝试没有拿到可确认的回执：它可能已经发生，也可能没有。\
+系统不猜，也不把它记成失败。
+要确认就自己查：读消息、读文件、看进程；查不到就问人。不要盲目重发同一个动作。";
+
 /// 一次行动请求是否被**接纳**：执行端在 Prepared **之前**给出的准入判断。
 ///
 /// 它与 [`ActionOutcome`] 是两件不同的事，混起来会说不清"到底发出去没有"：
@@ -586,10 +597,18 @@ impl ActionOutcome {
 
     /// 结果无法确认。执行端应当谨慎使用：普通错误不是未知。
     pub fn unknown() -> Self {
+        Self::unknown_with(vec![ContentBlock::new(RECEIPT_LABEL, RECEIPT_MISSING)])
+    }
+
+    /// 回执未达，**带这次尝试自己的读数**（用了多久、等到什么时候、卡在哪一步）。
+    ///
+    /// 与 [`unknown`](Self::unknown) 同一件事，区别只在"我知道多少"：知道得多的动作
+    /// （例如消息发送知道等待窗口）用这一条，把时间写进观察里。
+    pub fn unknown_with(content: Vec<ContentBlock>) -> Self {
         Self {
             state: ResultState::Unknown,
             failure: None,
-            content: Vec::new(),
+            content,
         }
     }
 
@@ -2831,15 +2850,17 @@ where
             // Action Failure 不是 Run Failure，系统不得因为一次行动失败替主体 结束活动，
             // 也不得自动重发同一个操作身份。**同轮里其余的动作照常处理**。
             //
-            // 只有结果无法确认时才由系统收场：再发一次可能重复已经发生的外部效果。**这一轮
-            // 剩下的动作一个都不发出**——它们还没有准备、没有派发，因此盘上零操作身份、零行动事实。
-            // Foundation 仍保留 `SystemEnding::ActionFailed` 这个词汇（本刀不得改 Foundation），
-            // 但 Core 不再生成它。
-            if state == ResultState::Unknown {
-                return Ok(DriveOutcome::Ending(Outcome::System(
-                    SystemEnding::Indeterminate,
-                )));
-            }
+            // **2026-10-24**（`AGENT_FAILURE_VISIBILITY.md`）：`Unknown` 也一样——它不再是
+            // 活动的终态。它说的是"我没看见"，不是"世界没发生"：系统没有资格替世界下判断，
+            // 也没有资格凭这一条替主体结束。它照常进视野，由主体自己决定去查（读消息、读文件、
+            // 看进程）、等，还是停。**系统保证的只有一条**：同一个操作身份永不自动重发。
+            //
+            // 真正必须收场的只剩两种：主体自己说结束；或者持久事实缺一块（重启恢复时盘上是
+            // "派发过、没结果"——那不是一次观察，是账本缺了一页，见 `recovery`）。
+            //
+            // Foundation 仍保留 `SystemEnding::ActionFailed` / `Indeterminate` 这两个词汇
+            // （本刀不得改 Foundation），但 Core 不再因为一次动作结果生成它们。
+            let _ = state;
         }
     }
 

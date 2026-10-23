@@ -602,9 +602,12 @@ fn worker_diagnose_seed(root: &Path) -> i32 {
         return 1;
     }
 
-    // 3) 结果未知的活动：外部是否真的发生过无法确认，系统以 Indeterminate 收场并封存。
-    let mut unknown_model =
-        ScriptedModel::new(vec![ModelOutput::act(Action::new(ActionId::new("probe")))]);
+    // 3) 回执未达的活动（2026-10-24 起它不再由系统收场）：那一次尝试留在"未确认"里，
+    //    主体看过读数之后自己收场。
+    let mut unknown_model = ScriptedModel::new(vec![
+        ModelOutput::act(Action::new(ActionId::new("probe"))),
+        ModelOutput::finish(SubjectEnding::Silent),
+    ]);
     let mut unknown_actions = UnknownActions;
     let mut unknown_agent = Agent::new(agent_a());
     let mut unknown_ledger = Ledger::new(agent_a());
