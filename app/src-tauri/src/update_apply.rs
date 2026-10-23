@@ -354,14 +354,30 @@ mod tests {
 
     #[test]
     fn apply_script_renames_old_first_and_has_a_way_back() {
-        let script = apply_script(
-            r"D:\celira-app",
-            r"D:\celira-app-new-0.1.4",
-            "1760000000",
-        );
+        // 输入路径按平台给：`Path::file_name` **在 Windows 认 `\`、在 Unix 只认 `/`** ——
+        // 要证的是脚本结构（先改旧、再改新、失败回退、最后起 exe），不是 `file_name` 的
+        // 平台差异。拿 `D:\celira-app` 在 Linux 上跑，`file_name()` 会把整串当成一个名字
+        // （带 `D:`），断言就红在平台形状上，而脚本生成本身没错（b540bdc 同一类）。
+        let install = if cfg!(windows) {
+            r"D:\celira-app"
+        } else {
+            "/opt/celira-app"
+        };
+        let payload = format!("{install}-new-0.1.4");
+        let script = apply_script(install, &payload, "1760000000");
+        // Windows 上再钉一遍真实形状（盘符路径）：目录名只取最后一段。
+        if cfg!(windows) {
+            let win = apply_script(r"D:\celira-app", r"D:\celira-app-new-0.1.4", "1760000000");
+            assert!(win.contains("celira-app.old-1760000000"));
+            assert!(win.contains("Rename-Item -LiteralPath $old -NewName 'celira-app'"));
+        }
         // 先改旧目录，再改新目录 —— 顺序反了就会"两个都没有"。
-        let old_at = script.find("Rename-Item -LiteralPath $install").expect("rename old");
-        let new_at = script.find("Rename-Item -LiteralPath $payload").expect("rename new");
+        let old_at = script
+            .find("Rename-Item -LiteralPath $install")
+            .expect("rename old");
+        let new_at = script
+            .find("Rename-Item -LiteralPath $payload")
+            .expect("rename new");
         assert!(old_at < new_at);
         // 失败时的回退：把 .old 改回去。
         assert!(script.contains("celira-app.old-1760000000"));

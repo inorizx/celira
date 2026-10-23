@@ -759,9 +759,14 @@ mod tests {
             None,
             "旗标后面没值 ⇒ 没有（不猜）"
         );
-        assert!(
-            same_path("D:\\h\\env\\", "d:/h/env"),
-            "分隔符与大小写按平台归一"
+        // 两条判据分开：**分隔符归一**两个平台都成立；**大小写归一只有 Windows**
+        // （`same_path` 的 `cfg!(windows)` 分支就是这条界线——Unix 上 `D:\h` 与 `d:\h`
+        // 是两个不同的名字，把它俩认成同一个才是错的）。
+        assert!(same_path("D:\\h\\env\\", "D:/h/env"), "分隔符按平台归一");
+        assert_eq!(
+            same_path("D:\\h\\env", "d:/h/env"),
+            cfg!(windows),
+            "大小写只有 Windows 归一（Unix 上不许把两个不同名字认成同一个）"
         );
         assert!(
             !same_path("D:\\h\\env", "D:\\h\\env-backup"),
