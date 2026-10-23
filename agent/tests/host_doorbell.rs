@@ -2647,9 +2647,13 @@ fn a_quiet_waking_states_her_pending_holdings_and_never_consumes_them() {
 /// 两条断言成对——**关着时快、开着时慢**——只量一条的话，"慢"也可能是别的原因。
 #[test]
 fn a_ring_waits_for_the_coalesce_window_only_when_it_is_open() {
+    // ⚠ 150ms → 600ms（2026-10-24 夜间巡检抓到）：这条判据要区分的是"等满窗口"与"不等窗口"，
+    // 而 150ms 的对照在满载机器上会被调度抖动吃掉——实测"窗口关着"那一支跑了 70.68ms 就红了，
+    // 它量到的是 CPU 排期，不是合并语义。对照窗口拉大之后，"误睡"仍然会被抓：真睡了 600ms
+    // 就绝不可能落在下面的 300ms 以内。
     for (window, must_wait) in [
         (std::time::Duration::ZERO, false),
-        (std::time::Duration::from_millis(150), true),
+        (std::time::Duration::from_millis(600), true),
     ] {
         let fixture = Fixture::new(if must_wait {
             "coalesce-on"
@@ -2680,7 +2684,7 @@ fn a_ring_waits_for_the_coalesce_window_only_when_it_is_open() {
             );
         } else {
             assert!(
-                waited < window.max(std::time::Duration::from_millis(60)),
+                waited < window.max(std::time::Duration::from_millis(300)),
                 "窗口关着就不该等（实际 {waited:?}）"
             );
         }
