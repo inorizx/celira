@@ -1293,6 +1293,10 @@ fn push_action_line(text: &mut String, capability: &Capability, writes: &BTreeSe
 ///   ⚠ 这一格**不走 `InjectionContext`**：投影从 Composition 自己的 [`Desktop`] 拿，`context` 只
 ///   提供能力面 —— Core 不知道"哪些 App 常开"这件事存在，也不该知道。
 /// - 每扇门**都在榜上**，不管开没开 —— 这正是"桌面先摆出几个 App，进 App 才看到工具"。
+/// - **最顶上一行是 App 索引**：`Apps：<id>（常开，N 个动作） · <id>（未打开） · …`。顺序照
+///   [`Desktop::doors`] 原样（不排序、不按重要性），未打开的门**不给动作数**——外部来源的 App
+///   在展开前动词清单为空，写 0 会被读成"零个动作"；一扇门都没有 ⇒ 这一行整行不出现。它是
+///   **机械事实**，不含任何建议。
 ///
 /// 动作目录那一块的标签（呈现时的区域名；TASK_71 前是内联字面量，现在两处引用——块与超限读数）。
 const ACTION_DIRECTORY_LABEL: &str = "available-actions";
@@ -1301,6 +1305,26 @@ const ACTION_DIRECTORY_LABEL: &str = "available-actions";
 /// （与 [`ActivityOrigin`] 的 `on_run_start` 同款处置）。
 fn action_directory_batch(capabilities: &Capabilities, desktop: &Desktop) -> ContentBatch {
     let mut text = String::new();
+    // **App 索引**（最顶上一行，`【系统】`之前）：榜上有哪几扇门、哪几扇常开、常开的各有几个动作。
+    //
+    // 它是**机械事实**，不是建议：顺序照 `desktop.doors` 原样（不排序、不按重要性），措辞里
+    // 不出现"建议/推荐/优先/应该"。未打开的门**不给动作数**——外部来源的 App（MCP）在展开前
+    // 动词清单为空，写 0 会被读成"零个动作"，那是假话。一扇门都没有 ⇒ 整行不印（空 `Apps：`
+    // 比不印更糟）。
+    if !desktop.doors.is_empty() {
+        text.push_str("Apps：");
+        for (position, door) in desktop.doors.iter().enumerate() {
+            if position > 0 {
+                text.push_str(" · ");
+            }
+            if door.preinstalled {
+                text.push_str(&format!("{}（常开，{} 个动作）", door.id, door.verbs.len()));
+            } else {
+                text.push_str(&format!("{}（未打开）", door.id));
+            }
+        }
+        text.push('\n');
+    }
     text.push_str("【系统】不归任何 App 的动作\n");
     for id in &desktop.system {
         if let Some(capability) = capabilities.find(&ActionId::new(id.clone())) {

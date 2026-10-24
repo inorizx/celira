@@ -495,11 +495,20 @@ fn the_activity_opens_with_one_reading_and_restates_it_before_every_turn() {
 // TASK_71 桌面 P0（①）——目录按 App 分组：**门牌是 App，门内是它的动词**
 // ---------------------------------------------------------------------------
 
+/// 目录顶部那行 **App 索引**的前缀（`Apps：…`）。它既不是组头，也不属于任何门。
+const APPS_INDEX: &str = "Apps：";
+
 /// 把目录正文切成**按门牌分的节**：每个 `【…】` 开头那一行是组头（零缩进），
 /// 它之后到下一个组头之前的所有行是**门内行**。
+///
+/// 顶部那一行 App 索引（[`APPS_INDEX`] 开头）是**唯一**被跳过的前导行：它在第一个组头之前，
+/// 但它不是任何门里的行。别的行出现在组头之前照旧 panic（形状变了就要有人看见）。
 fn directory_sections(text: &str) -> Vec<(&str, Vec<&str>)> {
     let mut sections: Vec<(&str, Vec<&str>)> = Vec::new();
     for line in text.lines() {
+        if sections.is_empty() && line.starts_with(APPS_INDEX) {
+            continue;
+        }
         match line.starts_with('【') {
             true => sections.push((line, Vec::new())),
             false => sections
@@ -510,6 +519,30 @@ fn directory_sections(text: &str) -> Vec<(&str, Vec<&str>)> {
         }
     }
     sections
+}
+
+/// 索引里某个 App 那一段（`<id>（…）`）。索引是一行：`Apps：a（…） · b（…）`。
+fn index_entry<'a>(index: &'a str, app: &str) -> &'a str {
+    index
+        .strip_prefix(APPS_INDEX)
+        .unwrap_or(index)
+        .split(" · ")
+        .find(|part| part.starts_with(&format!("{app}（")))
+        .unwrap_or_else(|| panic!("索引里没有 {app} 那一段: {index}"))
+}
+
+/// 索引里某个 App 的**动作数**（只对常开的门有意义）。
+fn index_count(index: &str, app: &str) -> usize {
+    let entry = index_entry(index, app);
+    let rest = entry
+        .strip_prefix(&format!("{app}（常开，"))
+        .unwrap_or_else(|| panic!("{app} 那一段不是「常开，N 个动作」: {entry}"));
+    let digits = rest
+        .strip_suffix(" 个动作）")
+        .unwrap_or_else(|| panic!("{app} 那一段缺动作数: {entry}"));
+    digits
+        .parse()
+        .unwrap_or_else(|_| panic!("{app} 的动作数不是数字: {entry}"))
 }
 
 /// 门内行的**动作标识**（行格式 `<标识> | <骨架>`；去缩进后取 ` | ` 之前那一段）。
@@ -538,6 +571,21 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
     assert_eq!(blocks.len(), 2, "首轮多一份目录: {blocks:?}");
     assert_eq!(blocks[1].0, "available-actions");
     let directory = blocks[1].1.as_str();
+
+    // **最顶上一行是 App 索引**：一行说清榜上有哪几扇门、哪几扇常开、哪几扇还没打开。
+    // 它排在【系统】之前，是这一块的**第一行**（也是 [`directory_sections`] 唯一跳过的前导行）。
+    let index = directory.lines().next().expect("目录至少有一行");
+    assert!(
+        index.starts_with(APPS_INDEX),
+        "目录第一行是 App 索引: {directory}"
+    );
+    assert!(
+        directory
+            .lines()
+            .nth(1)
+            .is_some_and(|line| line.starts_with("【系统】")),
+        "索引之后紧接着就是【系统】那一组（索引不许插进别的行）: {directory}"
+    );
 
     let sections = directory_sections(directory);
     assert_eq!(
@@ -618,6 +666,50 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
         vec!["web_fetch", "web_search"],
         "【web】门里是它声明的两条: {}",
         sections[4].1.join(" / ")
+    );
+
+    // **索引那一行的内容**（顺序照桌面原样 files / notes / timer / web；常开的给动作数、
+    // 未打开的只给状态）。它是一句机械事实，不是推荐。
+    assert!(
+        index.contains("notes（常开，") && index.contains(" 个动作）"),
+        "常开的门要带动作数: {index}"
+    );
+    assert!(index.contains("web（常开，"), "web 也预装常开: {index}");
+    assert!(
+        index.contains("files（未打开）"),
+        "未打开的门只给状态: {index}"
+    );
+    assert!(index.contains("timer（未打开）"), "timer 也没打开: {index}");
+    // 索引里的动作数**必须等于门内实际列出来的动词行数**（不写死 13 / 2）：
+    // 门里多一条、索引少一条，就是同一件事有两处在说、而且说岔了。
+    assert_eq!(
+        index_count(index, "notes"),
+        notes_verbs.len(),
+        "notes 的动作数要与门内实际动词行数一致: {index}"
+    );
+    assert_eq!(
+        index_count(index, "web"),
+        web_verbs.len(),
+        "web 的动作数要与门内实际动词行数一致: {index}"
+    );
+    // 反向：开没开由装配期事实决定，索引不许说反。
+    assert!(
+        !index.contains("notes（未打开）") && !index.contains("files（常开"),
+        "常开的门不许被印成未打开，未打开的也不许被印成常开: {index}"
+    );
+    // **顺序照桌面原样**（files / notes / timer / web）：索引里各段的先后就是 `desktop.doors` 的
+    // 先后，不排序、不按重要性重排。
+    let positions: Vec<usize> = ["files", "notes", "timer", "web"]
+        .iter()
+        .map(|app| {
+            index
+                .find(&format!("{app}（"))
+                .unwrap_or_else(|| panic!("索引里没有 {app}: {index}"))
+        })
+        .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "索引顺序照桌面原样（不排序）: {index}"
     );
 
     // **未展开的门也上榜**：门牌在，门后只有一句提示，而且它的**动词一条都不出现**。
