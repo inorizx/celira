@@ -28,14 +28,17 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Stdio};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 use super::wire::{as_object, describe_error, read_result, read_tool};
-use super::{CallFault, CallReply, MAX_TOOLS, McpDeclaration, McpFailure, RawTool, Transport};
+use super::{
+    CallFault, CallReply, MAX_TOOLS, McpDeclaration, McpFailure, McpNotification, RawTool,
+    Transport,
+};
 
 /// 我们在 **legacy 代**说的协议版本（`initialize` 的 `protocolVersion`）。
 ///
@@ -187,6 +190,17 @@ fn result_type(result: &Value) -> ResultType {
     }
 }
 
+/// 从一条 JSON-RPC 消息里认出**我们接的变更通知**；其余一律 `None`。
+///
+/// 只认方法名，不读正文：`notifications/tools/list_changed` 的正文没有可用事实，
+/// 清单必须重新 `tools/list`。订阅 ack/结束（带 `method` 但无 id）也不在这里认。
+fn notification_from(value: &Value) -> Option<McpNotification> {
+    match value.get("method").and_then(Value::as_str) {
+        Some("notifications/tools/list_changed") => Some(McpNotification::ToolsListChanged),
+        _ => None,
+    }
+}
+
 /// 一条 stdio 通道。
 pub struct StdioTransport {
     child: Child,
@@ -226,6 +240,10 @@ pub struct StdioTransport {
     /// 探代之后改用现代框子接着说（[`Refusal::SpeakModern`]）⇒ **握手其实成了**，
     /// 这一格与那条路无关。
     refusal_detail: Option<String>,
+    /// 已经到达、还没被取走的变更通知（只存类型，不存正文）。
+    notifications: Vec<McpNotification>,
+    /// `subscriptions/listen` 那个长请求的 id（modern 代才有）。
+    subscription: Option<u64>,
 }
 
 impl StdioTransport {
@@ -274,6 +292,8 @@ impl StdioTransport {
             kill_answer: None,
             // 还没握过手 ⇒ 还没有"被拒时那句话"。
             refusal_detail: None,
+            notifications: Vec::new(),
+            subscription: None,
         })
     }
 
@@ -363,6 +383,18 @@ impl StdioTransport {
         }
     }
 
+    /// 把一条**无 id 的协议通知**收进待取队列；不认识的类型静默忽略。
+    ///
+    /// 只收“类型”，正文不落：`tools/list_changed` 的正文要客户端自己重新拉。
+    fn stash_notification(&mut self, value: &Value) {
+        if let Some(notification) = notification_from(value) {
+            // 同一类变更只需一个信号：重复通知在队列里不增值，也不让它无限长。
+            if !self.notifications.contains(&notification) {
+                self.notifications.push(notification);
+            }
+        }
+    }
+
     /// 等一条指定 `id` 的答复——**两条路共用的一份**（策略在调用点，循环只写一遍）。
     fn wait_for_reply(&mut self, id: u64, timeout: Duration) -> Waited {
         let deadline = Instant::now() + timeout;
@@ -377,6 +409,11 @@ impl StdioTransport {
                         self.noise += 1;
                         continue;
                     };
+                    // 通知没有 id：它是合法流量，先收起来，再继续等这一条的答复。
+                    if value.get("id").is_none() {
+                        self.stash_notification(&value);
+                        continue;
+                    }
                     if value.get("id").and_then(Value::as_u64) != Some(id) {
                         continue;
                     }
@@ -693,6 +730,58 @@ impl Transport for StdioTransport {
     fn credential_reading(&self) -> Option<(usize, Vec<String>)> {
         Some((self.scrubbed, self.unscrubbed.clone()))
     }
+
+    /// 订阅 `tools/list_changed`：只对 modern 代发；legacy 没有这条，不假装有。
+    ///
+    /// 请求发出去就返回，**不等答复**：`subscriptions/listen` 的答复是一条长流，等到它会
+    /// 把展开卡死。服务端若拒绝，后续的 `poll_notifications` 里会看到它的错误答复；本版
+    /// 不把“订阅被拒”升级成展开失败——清单本身已经拉到了，通知只是增量。
+    fn subscribe_tools_changed(&mut self, _timeout: Duration) -> Result<bool, CallFault> {
+        if self.era != ProtocolEra::Modern {
+            return Ok(false);
+        }
+        let id = self.take_id();
+        let params = self.with_meta(json!({
+            "notifications": { "toolsListChanged": true }
+        }));
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "subscriptions/listen",
+            "params": params,
+        });
+        self.write_line(&request).map_err(CallFault::Refused)?;
+        self.subscription = Some(id);
+        Ok(true)
+    }
+
+    /// 非阻塞地取走通知；只收类型，正文不落。
+    ///
+    /// ⚠ 它只在**没有请求在途**时调用（`McpApp::refresh` 持着通道锁）：否则会把另一条
+    /// 请求的答复从通道里取走。通知本身可以丢、可以重；正文由重新 `tools/list` 拉。
+    fn poll_notifications(&mut self) -> Vec<McpNotification> {
+        loop {
+            match self.incoming.try_recv() {
+                Ok(Incoming::Line(text)) => {
+                    let Some(value) = as_object(&text) else {
+                        self.noise += 1;
+                        continue;
+                    };
+                    if value.get("id").is_none() {
+                        self.stash_notification(&value);
+                        continue;
+                    }
+                    // 订阅的 ack/complete/拒绝都带订阅 id：只用来收掉订阅状态，不产生正文。
+                    if value.get("id").and_then(Value::as_u64) == self.subscription {
+                        self.subscription = None;
+                    }
+                }
+                Ok(Incoming::Closed) | Ok(Incoming::Broken) => break,
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+        std::mem::take(&mut self.notifications)
+    }
 }
 
 impl Drop for StdioTransport {
@@ -781,6 +870,31 @@ fn wait_within(child: &mut Child, window: Duration) -> Option<std::process::Exit
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 只认 `notifications/tools/list_changed` 这一条方法名；别的通知不冒充变更信号。
+    #[test]
+    fn only_the_tools_list_changed_method_is_turned_into_a_signal() {
+        assert_eq!(
+            notification_from(&json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/tools/list_changed",
+            })),
+            Some(McpNotification::ToolsListChanged)
+        );
+        assert_eq!(
+            notification_from(&json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/subscriptions/acknowledged",
+                "params": {"notifications": {"toolsListChanged": true}},
+            })),
+            None,
+            "订阅 ack 不是清单变更本身"
+        );
+        assert_eq!(
+            notification_from(&json!({"jsonrpc": "2.0", "method": "notifications/other"})),
+            None
+        );
+    }
 
     /// **"收干净了才是确定的那一格"——这条规则本身，与进程无关地钉住。**
     ///

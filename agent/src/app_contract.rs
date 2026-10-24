@@ -107,6 +107,24 @@ pub trait AppPort: ActionPort {
     /// **它不承载"可不可信"**：只说明这段回执从哪个口子进来。判断归主体。
     fn declared_sources(&self) -> Vec<SourceDeclaration>;
 
+    /// 处理**已经到达的外部变更**（当前只有 MCP 的 `tools/list_changed`）。
+    ///
+    /// 返回 `true` = 这个 App 的能力清单确实变了，OS 需要重新并一次归属与来源索引。
+    /// 默认 `false`：出厂内置件的能力是装配期写死的，没有增量。
+    ///
+    /// **它不碰模型上下文**：这里只更新 App 自己的清单；模型看见什么由 Runtime 的装配决定。
+    fn refresh_capabilities(&mut self) -> bool {
+        false
+    }
+
+    /// 取走“能力清单变过”的待拉标记（一次性）。
+    ///
+    /// 用途是**有范围的重取**：主体下一次展开这个 App 时，回当前清单，
+    /// 而不是旧门卡。默认 `false`；只有真的支持增量清单的 App 才有这一格。
+    fn take_capability_change(&mut self) -> bool {
+        false
+    }
+
     /// **展开那一下，请这个 App 把能力交出来**（懒展开的接缝）。
     ///
     /// 出厂内置的 App 能力在装配期就写死了，默认实现什么都不做——它们的清单早在归属索引里。

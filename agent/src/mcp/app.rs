@@ -61,8 +61,9 @@ use crate::foundation::{AgentId, OperationId, RunId};
 
 use super::{
     CallFault, CallReply, MAX_PARAM_DOC_BYTES, MAX_SKELETON_BYTES, MAX_TEXT_BYTES,
-    MAX_TIMEOUT_SECONDS, McpAccess, McpEffect, McpEndpoint, McpFailure, PARAM_TIMEOUT, RawTool,
-    RemoteTransport, StdioTransport, Transport, clip, fault_outcome, foreign_line, sanitize,
+    MAX_TIMEOUT_SECONDS, McpAccess, McpEffect, McpEndpoint, McpFailure, McpNotification,
+    PARAM_TIMEOUT, RawTool, RemoteTransport, StdioTransport, Transport, clip, fault_outcome,
+    foreign_line, sanitize,
 };
 
 /// 形状说明里最多列几个键；多的**如实报数**，不静默丢。
@@ -288,6 +289,8 @@ pub struct McpApp {
     specs: Vec<ToolSpec>,
     /// 给主体看的那一句话（名字与档位在装配时就定了）。
     description: String,
+    /// 清单变过、还没被主体“拉”过：下一次展开这个 App 回当前清单，而不是旧门卡。
+    tools_changed: bool,
 }
 
 impl McpApp {
@@ -307,6 +310,7 @@ impl McpApp {
             access,
             specs: Vec::new(),
             description,
+            tools_changed: false,
         }
     }
 
@@ -505,6 +509,12 @@ impl AppPort for McpApp {
         ) {
             Ok(specs) => {
                 self.specs = specs;
+                self.tools_changed = false;
+                // 订阅是**增量**，不是展开的必要条件：订阅不上（legacy / 远程一问一答 /
+                // 对面拒绝）不影响这次展开，清单已经拿到了。
+                if let Some(transport) = state.as_mut() {
+                    let _ = transport.subscribe_tools_changed(timeout);
+                }
                 Ok(())
             }
             Err(class) => {
@@ -513,6 +523,52 @@ impl AppPort for McpApp {
                 Err(ExpansionRefusal::classified(class.as_str()))
             }
         }
+    }
+
+    /// 处理已经到达的 `tools/list_changed`：重新拉清单，并标记“变过”。
+    ///
+    /// 返回 `true` = 清单确实换了；`false` = 没有通知、通道不在、或重拉失败（保留旧清单）。
+    /// **只处理类型，不把对面通知的正文搬进来**；新清单仍走 `tools/list`。
+    fn refresh_capabilities(&mut self) -> bool {
+        let declaration = self.access.declaration().clone();
+        let timeout = self.default_timeout();
+        let mut state = self
+            .access
+            .state()
+            .lock()
+            .expect("通道那一格只被短临界区持有");
+        let Some(transport) = state.as_mut() else {
+            return false;
+        };
+        if !transport
+            .poll_notifications()
+            .contains(&McpNotification::ToolsListChanged)
+        {
+            return false;
+        }
+        let raw = match transport.list_tools(timeout) {
+            Ok(raw) => raw,
+            Err(_) => return false,
+        };
+        let specs = match map_tools(
+            declaration.name(),
+            declaration.effect(),
+            declaration.timeout_seconds(),
+            &raw,
+        ) {
+            Ok(specs) => specs,
+            Err(_) => return false,
+        };
+        self.specs = specs;
+        self.tools_changed = true;
+        true
+    }
+
+    /// 有变更 ⇒ 下一次展开这个 App 回当前清单；取走即清。
+    fn take_capability_change(&mut self) -> bool {
+        let changed = self.tools_changed;
+        self.tools_changed = false;
+        changed
     }
 
     /// 每一条动词的效果类别：**整台一个档**（一台 server 一授权，不逐工具判）。

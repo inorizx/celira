@@ -30,8 +30,8 @@ use celira_agent::foundation::{
     AgentId, Ledger, OperationId, Outcome, ResultState, RunId, SubjectEnding, Turn,
 };
 use celira_agent::mcp::{
-    CallFault, CallReply, MAX_TOOLS, McpAccess, McpApp, McpDeclaration, McpFailure, RawTool,
-    StdioTransport, Transport, parse_declaration,
+    CallFault, CallReply, MAX_TOOLS, McpAccess, McpApp, McpDeclaration, McpFailure,
+    McpNotification, RawTool, StdioTransport, Transport, parse_declaration,
 };
 use celira_agent::os::{ExpansionFailure, MinimalOs, RunExpansion};
 
@@ -87,6 +87,9 @@ struct Watch {
     connects: Arc<Mutex<usize>>,
     lists: Arc<Mutex<usize>>,
     calls: Arc<Mutex<Vec<(String, Value, Duration)>>>,
+    subscribes: Arc<Mutex<usize>>,
+    tools: Arc<Mutex<Vec<RawTool>>>,
+    notifications: Arc<Mutex<Vec<McpNotification>>>,
 }
 
 impl Watch {
@@ -105,11 +108,25 @@ impl Watch {
     fn calls(&self) -> Vec<(String, Value, Duration)> {
         self.calls.lock().expect("读数格只被短临界区持有").clone()
     }
+
+    fn set_tools(&self, tools: Vec<RawTool>) {
+        *self.tools.lock().expect("读数格只被短临界区持有") = tools;
+    }
+
+    fn notify(&self, notification: McpNotification) {
+        self.notifications
+            .lock()
+            .expect("读数格只被短临界区持有")
+            .push(notification);
+    }
+
+    fn subscribes(&self) -> usize {
+        *self.subscribes.lock().expect("读数格只被短临界区持有")
+    }
 }
 
 /// 一条不起进程的通道。
 struct Fake {
-    tools: Vec<RawTool>,
     replies: Vec<Result<CallReply, CallFault>>,
     watch: Watch,
 }
@@ -117,9 +134,9 @@ struct Fake {
 impl Fake {
     fn new(tools: Vec<RawTool>, replies: Vec<Result<CallReply, CallFault>>) -> (Self, Watch) {
         let watch = Watch::new();
+        *watch.tools.lock().expect("短临界区") = tools;
         (
             Self {
-                tools,
                 replies,
                 watch: watch.clone(),
             },
@@ -136,7 +153,16 @@ impl Transport for Fake {
 
     fn list_tools(&mut self, _timeout: Duration) -> Result<Vec<RawTool>, CallFault> {
         *self.watch.lists.lock().expect("短临界区") += 1;
-        Ok(self.tools.clone())
+        Ok(self.watch.tools.lock().expect("短临界区").clone())
+    }
+
+    fn subscribe_tools_changed(&mut self, _timeout: Duration) -> Result<bool, CallFault> {
+        *self.watch.subscribes.lock().expect("短临界区") += 1;
+        Ok(true)
+    }
+
+    fn poll_notifications(&mut self) -> Vec<McpNotification> {
+        std::mem::take(&mut *self.watch.notifications.lock().expect("短临界区"))
     }
 
     fn call_tool(
@@ -216,6 +242,40 @@ fn failure(outcome: &celira_agent::core::ActionOutcome) -> String {
 // ---------------------------------------------------------------------------
 // 动词面
 // ---------------------------------------------------------------------------
+
+/// `tools/list_changed` 到达后：重拉一次清单，变过的标记只被取走一次。
+#[test]
+fn a_tools_list_changed_notification_refreshes_the_surface_once() {
+    let (fake, watch) = Fake::new(vec![plain("echo")], vec![]);
+    let mut app = McpApp::new(McpAccess::with_transport(
+        declaration("lab"),
+        Vec::new(),
+        Box::new(fake),
+    ));
+    app.present().expect("展开可以成功");
+    assert_eq!(watch.subscribes(), 1, "现代通道上展开时订阅一次");
+    assert_eq!(app.declared_capabilities().items().len(), 1);
+
+    // 对面换了清单，并送来一条“工具清单变了”的通知。
+    watch.set_tools(vec![plain("echo"), plain("new")]);
+    watch.notify(McpNotification::ToolsListChanged);
+    assert!(AppPort::refresh_capabilities(&mut app), "有通知就重拉清单");
+    assert!(app.take_capability_change(), "变过的标记只被取走一次");
+    assert_eq!(
+        app.declared_capabilities()
+            .items()
+            .iter()
+            .map(|each| each.id().as_str().to_string())
+            .collect::<Vec<_>>(),
+        vec!["lab_echo".to_string(), "lab_new".to_string()]
+    );
+    assert!(!app.take_capability_change(), "第二次取走是空的");
+    assert!(
+        !AppPort::refresh_capabilities(&mut app),
+        "通知已消费，不再重拉"
+    );
+    assert_eq!(watch.lists(), 2, "展开一次 + 通知后一次");
+}
 
 /// 一条动词就是 `<server 名>_<对面的名字>`；骨架取对面的说明（过卫生）；效果档整台一个。
 #[test]
@@ -1157,6 +1217,59 @@ fn the_discovered_verbs_join_the_os_tables_after_the_expansion() {
     ));
 }
 
+/// 通知到达后：OS 的归属表跟着刷新，`open_app` 回的是**当前清单**而不是旧门卡。
+#[test]
+fn a_notified_tool_change_reaches_the_os_and_the_expansion_reports_current_verbs() {
+    let (fake, watch) = Fake::new(vec![plain("echo")], vec![]);
+    let access = McpAccess::with_transport(declaration("lab"), Vec::new(), Box::new(fake));
+    let mut os = MinimalOs::assemble_preinstalled(vec![Box::new(McpApp::new(access))], &[])
+        .expect("可以装配");
+    let agent = AgentId::new("agent-a");
+    let run = RunId::new("run-1");
+    let mut expansion = RunExpansion::new(agent.clone(), run.clone());
+    {
+        let mut scope = os.scope(&mut expansion);
+        let opened = scope.execute(&agent, &operation("run-1"), &with(EXPAND, "target", "lab"));
+        assert_eq!(opened.state(), ResultState::Success, "{}", receipt(&opened));
+        assert!(
+            scope
+                .capabilities(&agent, &run)
+                .items()
+                .iter()
+                .any(|each| each.id().as_str() == "lab_echo"),
+            "展开后目录里有旧动词"
+        );
+    }
+
+    // 对面换清单并送来通知；下一轮 refresh 把它并进 OS。
+    watch.set_tools(vec![plain("echo"), plain("new")]);
+    watch.notify(McpNotification::ToolsListChanged);
+    {
+        let mut scope = os.scope(&mut expansion);
+        assert_eq!(
+            ActionPort::refresh(&mut scope, &agent, &run),
+            vec!["lab".to_string()],
+            "这一轮刷新了 lab"
+        );
+        assert!(
+            scope
+                .capabilities(&agent, &run)
+                .items()
+                .iter()
+                .any(|each| each.id().as_str() == "lab_new"),
+            "刷新后的能力面必须包含新动词"
+        );
+
+        let again = scope.execute(&agent, &operation("run-1"), &with(EXPAND, "target", "lab"));
+        assert_eq!(again.state(), ResultState::Success, "{}", receipt(&again));
+        let text = receipt(&again);
+        assert!(
+            text.contains("lab_new") && text.contains("lab_echo"),
+            "变过之后展开回当前清单：{text}"
+        );
+    }
+}
+
 /// 展开那一下发现的撞名：**整台不上场**，而且一格都不落。
 #[test]
 fn a_discovered_name_that_would_shadow_an_os_verb_refuses_the_whole_server() {
@@ -1209,6 +1322,55 @@ fn real_access(name: &str, sandbox: &Sandbox, secret: Option<&str>, suffix: &str
     }
     text.push_str(suffix);
     McpAccess::new(parse_declaration(&text).expect("声明可以解析"), Vec::new())
+}
+
+/// 真进程：modern server 发来 `tools/list_changed` 后，下一轮重拉清单并出现新动词。
+///
+/// 这是通知链的**真通道**证据：假通道证明适配层判据，这里证明 stdio 读循环真的把一条
+/// 无 id 的通知交了上来，而且我们重新 `tools/list` 拿到的是**新清单**。
+#[test]
+fn a_real_stdio_notification_makes_the_next_refresh_see_the_new_tool() {
+    let sandbox = Sandbox::new("notify");
+    let access = real_access(
+        "lab",
+        &sandbox,
+        None,
+        " --era modern-and-ours --tools-change",
+    );
+    let mut app = McpApp::new(access);
+    app.present().expect("modern 展开可以成功");
+    assert!(
+        app.declared_capabilities()
+            .items()
+            .iter()
+            .any(|each| each.id().as_str() == "lab_echo"),
+        "展开拿到旧清单"
+    );
+    assert!(
+        !app.declared_capabilities()
+            .items()
+            .iter()
+            .any(|each| each.id().as_str() == "lab_after"),
+        "订阅之后才出现的动词，展开时还没有"
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut changed = false;
+    while std::time::Instant::now() < deadline {
+        if AppPort::refresh_capabilities(&mut app) {
+            changed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(changed, "读循环必须在 5 秒内把通知交上来");
+    assert!(
+        app.declared_capabilities()
+            .items()
+            .iter()
+            .any(|each| each.id().as_str() == "lab_after"),
+        "重拉之后必须看见新动词"
+    );
 }
 
 /// **懒展开**：声明 `--mcp` 不等于起了子进程——主体不动那台 server，它就一个字节都不花。

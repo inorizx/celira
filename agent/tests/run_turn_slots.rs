@@ -40,6 +40,8 @@ struct RecordingSource {
     turns: VecDeque<ContentBatch>,
     /// (阶段, Agent, Run, Turn)
     calls: Vec<(String, String, String, Option<u32>)>,
+    /// 每次被调用时拿到的“刚刷新过清单的 App”。
+    refreshed: Vec<Vec<String>>,
 }
 
 impl RecordingSource {
@@ -48,6 +50,7 @@ impl RecordingSource {
             run_start,
             turns: VecDeque::from(turns),
             calls: Vec::new(),
+            refreshed: Vec::new(),
         }
     }
 
@@ -58,6 +61,7 @@ impl RecordingSource {
             context.run().as_str().to_string(),
             context.turn().map(Turn::number),
         ));
+        self.refreshed.push(context.refreshed_apps().to_vec());
     }
 }
 
@@ -191,6 +195,76 @@ impl ActionPort for FailingOnceActions {
             ActionOutcome::success(Vec::new())
         }
     }
+}
+
+/// 每次刷新都声称 `lab` 变了的执行端；执行不该发生。
+struct RefreshingActions {
+    refreshes: usize,
+}
+
+impl ActionPort for RefreshingActions {
+    fn capabilities(&self, _agent: &AgentId, _run: &RunId) -> Capabilities {
+        Capabilities::none()
+    }
+
+    fn refresh(&mut self, _agent: &AgentId, _run: &RunId) -> Vec<String> {
+        self.refreshes += 1;
+        vec!["lab".to_string()]
+    }
+
+    fn admit(&self, _agent: &AgentId, _run: &RunId, _action: &Action) -> ActionAdmission {
+        ActionAdmission::Admitted
+    }
+
+    fn execute(
+        &mut self,
+        _agent: &AgentId,
+        _operation: &OperationId,
+        _action: &Action,
+    ) -> ActionOutcome {
+        panic!("这个用例不该执行动作")
+    }
+}
+
+/// 刷新信号交给注入来源，但**来源不写它，模型就看不到它**：信号不是正文。
+#[test]
+fn a_refreshed_app_is_handed_to_the_source_but_not_turned_into_text() {
+    let mut agent = Agent::new(AgentId::new("agent-refresh"));
+    let mut ledger = Ledger::new(AgentId::new("agent-refresh"));
+    let mut source = RecordingSource::new(
+        batch("opening", "opening-note"),
+        vec![batch("turn-fact", "turn-fact")],
+    );
+    let mut model = ScriptedModel::new(vec![ModelOutput::finish(SubjectEnding::Completed)]);
+    let mut actions = RefreshingActions { refreshes: 0 };
+    let run = run_activity_with(
+        &mut agent,
+        RunRequest {
+            cost: &no_cost,
+            run: RunId::new("run-refresh"),
+            limits: Limits::new(2),
+            input: RunInput::empty(),
+            source: &mut source,
+            commit: &mut NoCommit,
+        },
+        &mut model,
+        &mut actions,
+        &mut ledger,
+    )
+    .expect("可以跑完");
+
+    assert_eq!(
+        source.refreshed,
+        vec![vec!["lab".to_string()], vec!["lab".to_string()]],
+        "RunStart 与 Turn 各交一次"
+    );
+    assert_eq!(actions.refreshes, 2);
+    assert!(
+        !injection_texts(&run)
+            .iter()
+            .any(|text| text.contains("lab")),
+        "信号本身不写进模型文本；要不要写由来源决定"
+    );
 }
 
 /// 不该被调用的模型：被用到就 panic（用于证明"零模型调用"的路径）。

@@ -1236,6 +1236,13 @@ impl ContextSource for HostSource {
             None => self.origin.before_turn(context),
             Some(input) => combine(input, self.origin.before_turn(context)),
         };
+        // **App 清单刚变过**：只报“哪个 App 变了”，不抄新动作名；主体要细节就展开该 App 取。
+        // 这与展开回执同一条分工：push 报变化，pull 给内容。没有变化就一个字节都不加。
+        let base = if context.refreshed_apps().is_empty() {
+            base
+        } else {
+            combine(base, app_changed_batch(context.refreshed_apps()))
+        };
         // TASK_68 P2：**首轮带一份动作目录**（每个动作一行：标识 | 骨架）。
         //
         // 头部只剩入口之后，这是主体唯一一次自动知道自己有哪些动作；之后新展开的 App 由
@@ -1322,6 +1329,20 @@ fn push_action_line(text: &mut String, capability: &Capability, writes: &BTreeSe
 ///
 /// 动作目录那一块的标签（呈现时的区域名；TASK_71 前是内联字面量，现在两处引用——块与超限读数）。
 const ACTION_DIRECTORY_LABEL: &str = "available-actions";
+/// 这一轮变过清单的 App 的机械信号（不抄动作名）。
+const APP_CHANGED_LABEL: &str = "app-changed";
+
+/// 一行“哪个 App 的清单变了”的机械信号；不含新动作名。
+fn app_changed_batch(apps: &[String]) -> ContentBatch {
+    let names = apps.join("、");
+    ContentBatch::of_or_not_delivered(
+        vec![ContentBlock::new(
+            APP_CHANGED_LABEL,
+            format!("{names} 的能力清单有更新；需要时展开该 App 取当前清单。"),
+        )],
+        APP_CHANGED_LABEL,
+    )
+}
 
 /// 把一扇门的动词按 App 声明的**显示分组**排版；未进组的动词按声明顺序平铺补齐。
 ///
@@ -1356,7 +1377,7 @@ fn push_door_verbs(
         if !lines.is_empty() {
             text.push_str("  ");
             text.push_str(group.label);
-            text.push_str("：");
+            text.push('：');
             text.push('\n');
             text.push_str(&lines);
         }
@@ -2225,4 +2246,19 @@ fn assemble_machine(
         // TASK_68 P3：**这一条装配托着主体**，所以它知道 Agent 的环境根——自持物动作（pin/unpin）的去向。
         // 别的装配入口（`assemble*` 那些测试构造）没有它，那种舞台里相关动作会明确拒绝。
         .map(|os| os.with_environment_root(environment_root))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 变更信号只报 App，不把新动作名搬进模型文本。
+    #[test]
+    fn the_app_change_notice_names_only_the_app() {
+        let batch = app_changed_batch(&["lab".to_string()]);
+        let block = batch.blocks().first().expect("一行信号");
+        assert_eq!(block.label(), APP_CHANGED_LABEL);
+        assert!(block.text().contains("lab"));
+        assert!(!block.text().contains("lab_after"));
+    }
 }

@@ -1098,6 +1098,23 @@ impl RunScope<'_> {
         };
 
         if self.is_open(target) {
+            // **清单变过 ⇒ 这是主体主动来取当前清单的一次 pull**，不是重复展开。
+            // 只在这个 App 真的有变更标记时重列；没有变更照旧回旧门卡。
+            let changed = AppPort::refresh_capabilities(&mut *self.os.apps[index])
+                || self.os.apps[index].take_capability_change();
+            if changed {
+                if let Err(failure) = self.os.absorb(index) {
+                    return ActionOutcome::failure(failure.as_str());
+                }
+                let current = self.os.apps[index].declared_capabilities();
+                let lines = capability_lines(&current);
+                let text = if lines.trim().is_empty() {
+                    format!("{target} 的工具清单已经更新；它现在没有暴露任何动作。")
+                } else {
+                    format!("{target} 的工具清单已经更新；当前动作：\n{lines}")
+                };
+                return ActionOutcome::success(vec![ContentBlock::new("expanded", text)]);
+            }
             // 重复展开（含**预装常开**的 App）：回一张**门卡**——已开、动作数、目录位置。
             //
             // ⚠ **不重注入动词表**（2026-10-14 裁决）：动作数取自**装配期声明表**
@@ -1183,6 +1200,29 @@ impl ActionPort for RunScope<'_> {
             return Capabilities::none();
         }
         self.available_capabilities()
+    }
+
+    /// 每轮开始前，给**已开 App** 一次处理外部变更的机会（当前是 MCP 的
+    /// `tools/list_changed`）。变了就重新并一次归属索引，下一句 `capabilities` 才是真的。
+    ///
+    /// 它**不产生模型内容**：只更新 OS 的事实表；模型看见什么是 Runtime 装配的事。
+    fn refresh(&mut self, agent: &AgentId, run: &RunId) -> Vec<String> {
+        if !self.matches(agent, run) {
+            return Vec::new();
+        }
+        let mut refreshed = Vec::new();
+        for index in 0..self.os.apps.len() {
+            let id = self.os.apps[index].app_id().to_string();
+            if !self.is_open(&id) {
+                continue;
+            }
+            if AppPort::refresh_capabilities(&mut *self.os.apps[index])
+                && self.os.absorb(index).is_ok()
+            {
+                refreshed.push(id);
+            }
+        }
+        refreshed
     }
 
     /// 准入：在 Core 准备这次行动**之前**判断"要不要发出去"。

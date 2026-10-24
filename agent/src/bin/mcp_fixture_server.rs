@@ -11,8 +11,12 @@
 //!    没展开之前那个文件不该存在）；
 //! 3. 一组刻意做坏的动词（超长正文、非文本块、`isError`、错误对象、噪声行、慢、掉线）。
 //!
-//! 用法：`mcp_fixture_server [--secret <值>] [--marker <路径>] [--era <世代>] [--input-required]`，
+//! 用法：`mcp_fixture_server [--secret <值>] [--marker <路径>] [--era <世代>] [--input-required] [--tools-change]`，
 //! 读标准输入、写标准输出，每行一条 JSON。
+//!
+//! `--tools-change`（2026-10-25）：modern 代收到 `subscriptions/listen` 时先回
+//! `notifications/subscriptions/acknowledged`，再发一条 `notifications/tools/list_changed`；
+//! 与此同时 `tools/list` 多出一条 `after` 动词。它只给“通知到达后重拉清单”这条真进程用例当演员。
 //!
 //! `--era`（2026-10-13，给"两代的话都会说"当演员）：
 //! - **不给** ＝ legacy：答 `initialize`；`server/discover` 走"不认识的 method"（`-32601`）
@@ -44,6 +48,10 @@ fn main() -> ExitCode {
     let era = argument(&arguments, "--era").unwrap_or_default();
     // `--input-required`：每一次 `tools/call` 都回 `input_required`（MRTR）。
     let input_required = arguments.iter().any(|each| each == "--input-required");
+    // `--tools-change`：订阅后发一条清单变更通知，并让后续 `tools/list` 多一条动词。
+    let tools_change = arguments.iter().any(|each| each == "--tools-change");
+    // 订阅是否已经发生：只有发生之后，`tools/list` 才换成新清单（展开那一次仍旧拿旧清单）。
+    let mut tools_changed = false;
 
     if let Some(path) = &marker {
         // 起没起过，**只有起了才知道**：这一行就是那个证据。
@@ -127,11 +135,58 @@ fn main() -> ExitCode {
             }
             "tools/list" => {
                 if modern_without_meta(&era, &message) {
-                    // modern 代：每个请求**必须**带 `_meta`。⇒ 不带就是形状不符的请求，
-                    // 这条读数**证明**"我们真的发了 `_meta`"，而不是"夹具没看"。
                     error(&mut stdout, id, -32602, "fixture: modern 请求缺 `_meta`");
                 } else {
-                    reply(&mut stdout, id, json!({"tools": catalogue()}));
+                    let tools = if tools_changed {
+                        catalogue_changed()
+                    } else {
+                        catalogue()
+                    };
+                    reply(&mut stdout, id, json!({"tools": tools}));
+                }
+            }
+            "subscriptions/listen" => {
+                if era.starts_with("modern") {
+                    let subscription = id.clone().unwrap_or(Value::Null);
+                    let meta = json!({
+                        "io.modelcontextprotocol/subscriptionId": subscription,
+                    });
+                    // spec：ack 是第一条带订阅 id 的消息；通知只能排在它后面。
+                    if !send(
+                        &mut stdout,
+                        json!({
+                            "jsonrpc": "2.0",
+                            "method": "notifications/subscriptions/acknowledged",
+                            "params": {
+                                "_meta": meta,
+                                "notifications": {"toolsListChanged": true},
+                            },
+                        }),
+                    ) {
+                        return ExitCode::SUCCESS;
+                    }
+                    if tools_change {
+                        tools_changed = true;
+                        if !send(
+                            &mut stdout,
+                            json!({
+                                "jsonrpc": "2.0",
+                                "method": "notifications/tools/list_changed",
+                                "params": {"_meta": {
+                                    "io.modelcontextprotocol/subscriptionId": subscription,
+                                }},
+                            }),
+                        ) {
+                            return ExitCode::SUCCESS;
+                        }
+                    }
+                } else {
+                    error(
+                        &mut stdout,
+                        id,
+                        -32601,
+                        "fixture: legacy 没有 subscriptions/listen",
+                    );
                 }
             }
             "tools/call" => {
@@ -171,6 +226,17 @@ fn argument(arguments: &[String], name: &str) -> Option<String> {
         .position(|each| each == name)
         .and_then(|index| arguments.get(index + 1))
         .cloned()
+}
+
+/// 清单变更通知之后的那份清单：原清单 ＋ 一条 `after`。
+fn catalogue_changed() -> Value {
+    let mut tools = catalogue().as_array().cloned().unwrap_or_default();
+    tools.push(json!({
+        "name": "after",
+        "description": "订阅之后才出现的动词。",
+        "inputSchema": {"type": "object", "properties": {}},
+    }));
+    Value::Array(tools)
 }
 
 /// 这台 server 暴露的动词。

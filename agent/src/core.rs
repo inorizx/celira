@@ -1084,6 +1084,8 @@ pub struct InjectionContext {
     /// 让贡献者能产出"主体有哪些动作"这类内容——能力每轮都可能变（展开会追加），
     /// 所以每一轮都随上下文重新交一份；Run 级那一轮给的是**开场时**的能力。
     capabilities: Capabilities,
+    /// 这一轮刚刚刷新过清单的 App 标识（机械信号；没有变化就是空）。
+    refreshed_apps: Vec<String>,
 }
 
 impl InjectionContext {
@@ -1111,6 +1113,11 @@ impl InjectionContext {
     /// 能不能产出、产出什么，仍由外层自己决定（读不到不等于必须写点什么）。
     pub fn capabilities(&self) -> &Capabilities {
         &self.capabilities
+    }
+
+    /// 这一轮刚刚刷新过清单的 App 标识（机械信号；没有变化就是空）。
+    pub fn refreshed_apps(&self) -> &[String] {
+        &self.refreshed_apps
     }
 
     /// 这一轮是不是**首轮**（RunStart 之后第一次真正调用模型的那一轮）。
@@ -1994,6 +2001,15 @@ pub trait ActionPort {
     /// **能力目录不是安全门**：它只说明"现在有哪些动作可以被请求"，不决定某一次请求是否获准。
     fn capabilities(&self, agent: &AgentId, run: &RunId) -> Capabilities;
 
+    /// 在每轮取能力之前处理外部变更（当前是 MCP 的 `tools/list_changed`）。
+    ///
+    /// 返回**这一轮真的刷新过清单的 App 标识**；没有变化就是空。默认什么都不做：
+    /// 出厂内置件的能力在装配期就定了。实现者只更新自己的事实表，不许在这里产生模型内容；
+    /// 模型看见什么由 Runtime 的注入决定。
+    fn refresh(&mut self, _agent: &AgentId, _run: &RunId) -> Vec<String> {
+        Vec::new()
+    }
+
     /// 这次行动请求是否**被接纳**（在 Prepared 之前问一次）。
     ///
     /// 它**没有默认实现**：默认无条件允许会让"忘了接线"看起来像"一切正常"，而这一层正是
@@ -2131,10 +2147,12 @@ impl Run {
     /// 交给注入来源的**只读**上下文：身份、轮次与资源边界。
     ///
     /// 这里刻意只给读的东西：来源拿不到 `&mut` 历史、行动端口、模型端口或账本。
-    pub(crate) fn injection_context(
+    /// 带上**这一轮刚刷新过清单的 App**；没有变化就是空。
+    pub(crate) fn injection_context_with_changes(
         &self,
         turn: Option<Turn>,
         capabilities: Capabilities,
+        refreshed_apps: Vec<String>,
     ) -> InjectionContext {
         InjectionContext {
             agent: self.agent.clone(),
@@ -2142,6 +2160,7 @@ impl Run {
             turn,
             limits: self.limits,
             capabilities,
+            refreshed_apps,
         }
     }
 
@@ -2684,8 +2703,10 @@ where
         // Run 级注入：登记成功之后、第一个 Turn 之前，恰好一次。
         // 登记失败（含重复 RunId）在上面就已经返回，所以那时注入还没被调用。
         // TASK_68 P2：这一轮的处境里也带**开场时**的能力面（此后每一轮重新取）。
+        let refreshed = actions.refresh(run.agent(), run.id());
         let opening = actions.capabilities(run.agent(), run.id());
-        let start_batch = source.on_run_start(&run.injection_context(None, opening));
+        let start_batch =
+            source.on_run_start(&run.injection_context_with_changes(None, opening, refreshed));
         let start_entry = run.accept_injection(InjectionStage::RunStart, None, start_batch)?;
 
         // Run 级注入一旦被接受，就确认进经历存储。**空批次零新增、零提交**：
@@ -2704,12 +2725,16 @@ where
         // 每一轮重新取当前可用的能力：展开会追加能力，所以不能固定成开局快照。
         // TASK_68 P2：它现在读在**注入之前**——注入的处境里要带它（"主体此刻有哪些动作"）。
         // 读到前面不改变注入内容：产不产出由来源自己决定，空来源仍然是空（谁都不许替谁补块）。
+        let refreshed = actions.refresh(run.agent(), run.id());
         let capabilities = actions.capabilities(run.agent(), run.id());
 
         // Turn 级注入：这一轮真的要调用模型了，恰好一次；不为没有发生的下一轮预先注入。
         let turn = run.last_turn();
-        let turn_batch =
-            source.before_turn(&run.injection_context(Some(turn), capabilities.clone()));
+        let turn_batch = source.before_turn(&run.injection_context_with_changes(
+            Some(turn),
+            capabilities.clone(),
+            refreshed,
+        ));
         let turn_entry = run.accept_injection(InjectionStage::Turn, Some(turn), turn_batch)?;
 
         // 这一轮的注入同样在模型调用之前确认；同样是空批次零新增、零提交。

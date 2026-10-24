@@ -785,13 +785,22 @@ agent_run run ... --notes-create
 （`mcp::credential_names`）。判据在 [`mcp/mod.rs`](src/mcp/mod.rs) 的 `declarations_for_run`。
 
 **两条通道**：`stdio:`（本机子进程）与**网络端点**（加密地址；本机回环可用明文）。两者走同一份
-`Transport` 契约（`connect` / `list_tools` / `call_tool`），因此"换一条通道"没有变成"核心也能发请求"：
+`Transport` 契约（`connect` / `list_tools` / `call_tool`；另有两个**可选**的通知钩子
+`subscribe_tools_changed` / `poll_notifications`），因此"换一条通道"没有变成"核心也能发请求"：
 网络只在 `mcp/remote.rs`。<br>
 远程那一档的墙与本地**不一样**：地址在解析期就拒（非加密、私网/回环/链路本地、地址里带凭据）——
 运行期**不跟随重定向**、答复超过 1 MiB 直接拒、每次请求一个窗口；凭据只从**环境变量**取
 （声明里存的是变量名，`credential-env=`），只进请求头，不进日志与回执。
 ⚠ **远程端点只许人声明**（`--mcp` 那一半）：主体自己的 `mcp.conf` 只接受本机子进程——那一行若写远程
 地址，**跳过并记一句**。判据：给自己加一个网络端点不是"多一只手"，是"多一条把数据送出去的路"。
+
+**工具清单变更（2026-10-25，最小切片）**：modern stdio 在展开成功后会发一次
+`subscriptions/listen`，只订阅 `toolsListChanged`；`notifications/tools/list_changed` 到达时，
+通道只把它当**变更信号**（正文不落），Runtime 在下一轮重拉一次 `tools/list`、更新归属索引。
+给模型只摆一行 `app-changed`（哪个 App 变了），不抄新动作名——主体要细节就自己再展开那个 App 取
+（push 报变化，pull 给内容）。legacy stdio 与远程一问一答**不订阅**；测试替身默认也不订阅，专门的
+用例可显式模拟。展开照旧成功；订阅被服务端拒绝也只丢这条增量，不升级成展开失败。本切片**不做**
+断线重订阅、`prompts`/`resources` 通知、多订阅解复用与插件通用事件总线；这些等真实需求再裁。
 
 **权威位置（本节不再重复它们的内容）**：
 

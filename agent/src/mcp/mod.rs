@@ -682,10 +682,22 @@ pub(crate) fn credential_reading(declared: &[String]) -> (usize, Vec<String>) {
     (scrubbed, unscrubbed)
 }
 
-/// 通道的**窄接口**：三个方法，不多不少。
+/// 通道送上来的**变更通知**（当前只接一条）。
+///
+/// 它不是“对面推了一段上下文”，而是“对面说某类事实变了”；真正的内容仍由客户端重新拉取。
+/// 这条区分是 MCP 最新协议 `2026-07-28` 的 `subscriptions/listen` 形状：通知只报变更类型，
+/// 清单/资源正文走普通请求。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpNotification {
+    /// `notifications/tools/list_changed`：工具清单变了，客户端应重新 `tools/list`。
+    ToolsListChanged,
+}
+
+/// 通道的**窄接口**：三个协议动作 ＋ 两个可选的通知钩子。
 ///
 /// 它只说"怎么跟对面说话"，不知道任何 App 的事；[`McpApp`] 只说"暴露哪些动词、墙在哪里"，
-/// 不知道对面是 stdio 还是别的。两个方向都只有一个实现，因此这条缝今天不花任何运行代价。
+/// 不知道对面是 stdio 还是别的。通知钩子有默认实现：不支持通知的通道（远程一问一答、
+/// 测试替身）不需要为了编译而写空壳。
 pub trait Transport: Send {
     /// 起通道并握手（stdio：起进程 + `initialize`）。
     fn connect(&mut self, timeout: std::time::Duration) -> Result<(), CallFault>;
@@ -700,6 +712,25 @@ pub trait Transport: Send {
         arguments: serde_json::Value,
         timeout: std::time::Duration,
     ) -> Result<CallReply, CallFault>;
+
+    /// 订阅**工具清单变更**（`subscriptions/listen`）。
+    ///
+    /// 返回 `Ok(true)` = 订阅请求已经发出（服务端是否答应由后续通知/回执体现）；
+    /// `Ok(false)` = 这条通道不支持通知（legacy 代、远程一问一答、测试替身）。
+    /// **不把“不支持”当失败**：展开照旧成功，只是没有这条增量。
+    fn subscribe_tools_changed(
+        &mut self,
+        _timeout: std::time::Duration,
+    ) -> Result<bool, CallFault> {
+        Ok(false)
+    }
+
+    /// 取走**已经到达**的通知（不阻塞）。没有就是空。
+    ///
+    /// 通道只存“变更类型”，不存任何正文；正文由调用方按类型重新拉取。
+    fn poll_notifications(&mut self) -> Vec<McpNotification> {
+        Vec::new()
+    }
 
     /// 这条通道自己起的那个子进程的洗凭据读数（`(洗掉几个, 洗不掉的键名)`）。
     ///
