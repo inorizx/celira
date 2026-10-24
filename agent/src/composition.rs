@@ -1210,6 +1210,11 @@ struct HostSource {
     desktop: Desktop,
     /// 宿主显式交出、还没被呈现的那一段文本。
     pending: Option<ContentBatch>,
+    /// 首轮动作目录**已经该发、但那一拍装不下**：把那一份**原样**留到下一轮补一次。
+    ///
+    /// 目录是**一次性**的（不是每轮重摆的读数）；而且它必须**冻结在首轮那一拍**，
+    /// 不能延后重渲染——那之后 App 可能已展开，`preinstalled` 会把已开的门说成没开。
+    directory_pending: Option<ContentBatch>,
 }
 
 impl ContextSource for HostSource {
@@ -1237,15 +1242,32 @@ impl ContextSource for HostSource {
         // **展开回执**自带（既有行为，不另做机制）。只在首轮发，是为了不让目录在长 Run 里
         // 每轮重复进历史。
         //
-        // 让位规则沿用上面那条：目录是"自己的读数"（下一轮还会重摆），因此它是 `other`——
-        // 合并超容量时让位给宿主输入与状态行，而不是把它们挤掉。
-        match context.is_opening_turn() {
-            true => combine(
-                base,
-                action_directory_batch(context.capabilities(), &self.desktop),
-            ),
-            false => base,
+        // 目录是**一次性**的，不是“下一轮还会重摆”的状态读数。它和宿主输入/状态行合起来
+        // 超过一批的容量时，先让位；但不能静默丢——把首轮那一份**原样**留下，下一轮（或
+        // 再下一轮）装得下时补一次。不在后续轮重渲染：那之后 App 可能已展开，重渲染会把
+        // `preinstalled` 的“还没打开”说错。宿主输入仍然永不放弃。
+        let wants_directory = context.is_opening_turn() || self.directory_pending.is_some();
+        if !wants_directory {
+            return base;
         }
+        let directory = match self.directory_pending.take() {
+            Some(pending) => pending,
+            None => action_directory_batch(context.capabilities(), &self.desktop),
+        };
+        if base.is_source_failure() {
+            // 这一拍连自己的读数都读不出来：目录先冻住，等下一拍再把那一份补出去。
+            self.directory_pending = Some(directory);
+            return base;
+        }
+        if base.bytes().saturating_add(directory.bytes()) > ContentBatch::MAX_BYTES {
+            // 让位可以，无声消失不行：原地留一句读数（报到目录原本多大），下一轮再补。
+            let notice =
+                ContentBatch::not_delivered_bytes(ACTION_DIRECTORY_LABEL, directory.bytes());
+            let with_notice = combine(base, notice);
+            self.directory_pending = Some(directory);
+            return with_notice;
+        }
+        combine(base, directory)
     }
 }
 
@@ -1776,6 +1798,7 @@ impl<'a> RunSession<'a> {
                     },
                 ),
                 pending: None,
+                directory_pending: None,
             },
             // 唤醒缘由随 `run-start` 经历入账（见 `EnvironmentCommit::with_origin`）：
             // 这一格是**结构化**的「谁叫醒的」（词表值），与处境链里那条渲染出来的

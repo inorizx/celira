@@ -1519,21 +1519,32 @@ fn the_action_directory_is_rendered_only_on_the_opening_turn() {
     let line_at = |offset: usize| text[..offset].lines().count();
     let call_line = line_at(at);
     let opening_line = line_at(
-        text.find("match context.is_opening_turn()")
-            .expect("composition.rs 里找不到 `match context.is_opening_turn()` —— 形状变了"),
+        text.find("context.is_opening_turn()")
+            .expect("composition.rs 里找不到 `context.is_opening_turn()` —— 形状变了"),
     );
     assert!(
-        call_line > opening_line && call_line <= opening_line + 8,
-        "那一处调用**不在** `is_opening_turn()` 为真的分支里（第 {call_line} 行 vs 第 {opening_line} 行）\
-         —— 而门后「还没打开」的判据（`AppDoor::preinstalled`）只在首轮等于「开着的」。\
-         要么把判据换成活的展开状态（`RunScope::is_open`），要么别在别的轮次渲染目录。"
+        call_line > opening_line && call_line <= opening_line + 30,
+        "那一处调用**不在**首轮门附近（第 {call_line} 行 vs 第 {opening_line} 行）—— \
+         门后「还没打开」的判据（`AppDoor::preinstalled`）只在首轮等于「开着的」。"
     );
+    // 新的形状：目录可能在首轮装不下，于是把**首轮那一份**冻住、下一轮原样补出去。
+    // 因此渲染点只在 `directory_pending.take()` 的 `None` 分支；`Some` 分支必须原样取出，
+    // 绝不能在后续轮拿 `preinstalled` 重渲染（那会把已展开的门说成没开）。
     assert!(
-        text[at..]
+        text[..at]
             .lines()
-            .take(8)
-            .any(|line| line.contains("false =>")),
-        "那一处调用后面 8 行里没有 `false =>` 那一支 —— 形状变了，这条守卫看不见它了"
+            .rev()
+            .take(4)
+            .any(|line| line.contains("None =>")),
+        "那一处调用不是冻结待补的 `None` 分支 —— 形状变了，这条守卫看不见它了"
+    );
+    assert!(
+        text.contains("Some(pending) => pending"),
+        "待补目录必须原样取出，不能在后续轮重渲染"
+    );
+    assert!(
+        text.contains("self.directory_pending = Some(directory)"),
+        "装不下时要把首轮那一份冻住"
     );
 }
 

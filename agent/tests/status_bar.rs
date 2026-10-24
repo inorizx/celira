@@ -1300,6 +1300,64 @@ fn a_host_input_near_the_batch_limit_is_still_delivered() {
     );
 }
 
+/// **首轮目录不是“下一轮还会重摆”的读数**：它和接近上限的宿主输入撞在一起时，
+/// 这一拍先让位，但必须记下待补；下一轮装得下时补一次，不能静默丢。
+#[test]
+fn a_directory_that_does_not_fit_on_the_opening_turn_is_delivered_next_turn() {
+    let host_text = "x".repeat(64_500);
+    let dir = TempDir::new("directory-deferred");
+    let mut environment = dir.environment();
+    let mut session = open(&dir, &mut environment, 2);
+    session
+        .provide(RunInput::text(host_text.clone()).expect("在输入上限内"))
+        .expect("排入应当被接受");
+    let mut model = ScriptedModel::new(vec![
+        ModelOutput::say("先看看"),
+        ModelOutput::finish(SubjectEnding::Completed),
+    ]);
+    assert!(session.drive(&mut model).expect("驱动").is_unsettled());
+    assert!(matches!(
+        session.drive(&mut model).expect("驱动"),
+        SessionDrive::Ended(_)
+    ));
+
+    let (_, first_injections) = &model.seen[0];
+    let first: Vec<(&str, &str)> = first_injections
+        .iter()
+        .flat_map(|(_, blocks)| blocks.iter())
+        .map(|(label, text)| (label.as_str(), text.as_str()))
+        .collect();
+    assert!(
+        first.iter().any(|(_, text)| *text == host_text.as_str()),
+        "宿主输入这一份必须真的递进视野"
+    );
+
+    let (_, second_injections) = &model.seen[1];
+    let second: Vec<(&str, &str)> = second_injections
+        .iter()
+        .flat_map(|(_, blocks)| blocks.iter())
+        .map(|(label, text)| (label.as_str(), text.as_str()))
+        .collect();
+    assert!(
+        !first
+            .iter()
+            .any(|(label, body)| *label == "available-actions" && body.contains("notes_list")),
+        "这一拍装不下 ⇒ 完整目录先让位: {first:?}"
+    );
+    assert!(
+        first
+            .iter()
+            .any(|(label, body)| *label == "available-actions" && !body.contains("notes_list")),
+        "让位不能无声：原地要留一句读数: {first:?}"
+    );
+    assert!(
+        second
+            .iter()
+            .any(|(label, body)| *label == "available-actions" && body.contains("notes_list")),
+        "下一轮装得下 ⇒ 目录补一次: {second:?}"
+    );
+}
+
 #[test]
 fn combining_two_batches_keeps_both_sides_in_order() {
     let inner = ContentBatch::of(vec![ContentBlock::new("activity-origin", "来源")]).expect("合法");
