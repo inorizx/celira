@@ -1013,8 +1013,13 @@ fn expansion_and_re_expansion_do_not_touch_the_filesystem() {
     assert_eq!(
         second.content()[0].label(),
         "already-expanded",
-        "重复展开只留一条明确痕迹"
+        "重复展开只留一张门卡"
     );
+    let door = second.content()[0].text();
+    assert!(door.contains("【files】"), "门卡缺目录位置：{door}");
+    for verb in ["files_list", "files_read"] {
+        assert!(!door.contains(verb), "重复展开不得回动词表：{door}");
+    }
 
     // 反证：文件能力此时必然失败（沙盒已经不在了）。
     let read_after = scope.execute(&agent, &operation("run-1"), &read("alpha.txt"));

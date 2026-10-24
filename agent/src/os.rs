@@ -35,8 +35,8 @@
 //! 因此不需要跨边界写授权。
 //!
 //! **预装常开**：装配期可以声明若干 App "从第一轮起就在场"（预装）——它们的能力不需要
-//! `open_app` 展开就在目录里，`open_app` 对它们只会回答"本来就在场"。预装是**装配决定**，
-//! 不是 App 的自述；它只改"什么时候在场"，不改任何动词语义。
+//! `open_app` 展开就在目录里，`open_app` 对它们回一张**门卡**（已开、动作数、目录位置）。
+//! 预装是**装配决定**，不是 App 的自述；它只改"什么时候在场"，不改任何动词语义。
 //!
 //! 另一件属于环境层、不属于 Core 的事是**提供处境事实**：那一组显示区各自交自己的一块，
 //! 处境链的最内层是活动起源那一件。本模块**不**提供任何处境内容——它只管"醒、看、点、收场"
@@ -294,8 +294,8 @@ pub struct MinimalOs {
     /// **预装常开**的 App 标识（装配期声明）。
     ///
     /// 它是**装配事实**，不是展开状态：不随活动变化、不写任何地方、也不撤销。预装的 App
-    /// 的能力从第一轮起就在场（预装 = 永在已开清单），因此 `open_app` 对它们只会说一句
-    /// "本来就在场"。选择谁在这里归 Composition——本模块不认识任何具体 App。
+    /// 的能力从第一轮起就在场（预装 = 永在已开清单），因此 `open_app` 对它们回一张门卡
+    /// （已开、动作数、目录位置）。选择谁在这里归 Composition——本模块不认识任何具体 App。
     preinstalled: BTreeSet<String>,
     /// 自己的环境根（**装配事实**，TASK_68 P3）。
     ///
@@ -889,8 +889,8 @@ impl RunScope<'_> {
     /// 入口能力：说明已装配了哪些 App、它们各自做什么，以及"展开能力"。
     ///
     /// 刻意**不**出现任何 App 的内部能力、参数模式、文件名或正文——那些要等展开之后才出现。
-    /// 预装常开的 App 在这里被标注出来：它们的能力已经在场，`open_app` 对它们只会回答
-    /// "本来就在场"——这件事必须在**入口**就说清，否则那句话看起来像故障。
+    /// 预装常开的 App 在这里被标注出来：它们的能力已经在场，`open_app` 对它们回一张门卡
+    /// （已开、动作数、目录位置）——这件事必须在**入口**就说清，否则门卡看起来像故障。
     fn entry_capabilities(&self) -> Capabilities {
         let described: Vec<String> = self
             .os
@@ -907,14 +907,14 @@ impl RunScope<'_> {
         Capabilities::of(vec![
             Capability::new(
                 ActionId::new(CAPABILITY_EXPAND),
-                "展开一个已装配 App 的能力；展开之后它的能力才会出现在可用能力里",
+                "展开一个已装配 App 的能力；展开之后它的能力才会出现在可用能力里；已开的再调回一张门卡",
                 vec![ParamSpec::new(PARAM_TARGET, true, "要展开的 App 标识")],
             )
             .exempt_from_inspection()
             .with_details(format!(
-                "给一个 App 标识：它的能力随后进入你的可用能力（重复展开是明确的成功结果，不重读、\
-                 不复制正文）。装了什么：{}。没装的名字会被拒（unknown-target），不猜近似名。\
-                 详情卡片用 `{CAPABILITY_INSPECT}` 取。",
+                "给一个 App 标识：它的能力随后进入你的可用能力（重复展开不重读、不复制动词表；\
+                 回一张门卡：名字、已开、动作数、目录位置）。装了什么：{}。没装的名字会被拒\
+                 （unknown-target），不猜近似名。详情卡片用 `{CAPABILITY_INSPECT}` 取。",
                 described.join("；")
             )),
             Capability::new(
@@ -1074,7 +1074,8 @@ impl RunScope<'_> {
     /// 展开某个已装配 App 的能力。
     ///
     /// 只展开：不列目录、不读文件、不替模型选择下一步——路由在这里就返回了，**根本不会走到**
-    /// 那个 App 的业务动作。重复展开不重读、不复制之前正文，只追加一条明确的"已展开"结果。
+    /// 那个 App 的业务动作。重复展开不重读、不复制动词表；回一张**门卡**（已开、动作数、
+    /// 目录位置），主体要动词就去看目录那一格。
     ///
     /// **出厂内置件的展开是纯记账**（它们的能力早在装配期就在索引里）；**外部来源的 App**
     /// （装在这一层的 MCP server）在这一步才真的被请出来：`present()` 起通道、拉清单，
@@ -1090,15 +1091,22 @@ impl RunScope<'_> {
         };
 
         if self.is_open(target) {
-            // 重复展开（含**预装常开**的 App）：只留一条明确痕迹，不重读、不复制正文、
-            // 不重新列出能力说明。
-            return ActionOutcome::success(vec![ContentBlock::new(
-                "already-expanded",
+            // 重复展开（含**预装常开**的 App）：回一张**门卡**——已开、动作数、目录位置。
+            //
+            // ⚠ **不重注入动词表**（2026-10-14 裁决）：动作数取自**装配期声明表**
+            // （`declared_capabilities`），不读 App 存储、不 `present()`、不 `absorb()`、
+            // 不改展开状态——这一条只是把已经在场的事实念一遍，不是再开一次。
+            // 主体要动词就去看目录那一格（那里逐条列着），回执不再抄一遍。
+            let count = self.os.apps[index].declared_capabilities().items().len();
+            let door = if count == 0 {
+                format!("{target} 本次 Run 已经开着；它没有暴露任何动作。没有重读。")
+            } else {
                 format!(
-                    "the capabilities of {target} were already expanded in this run; \
-                     nothing was read again"
-                ),
-            )]);
+                    "{target} 本次 Run 已经开着；共 {count} 个动作，\
+                     列在动作目录的【{target}】下。没有重读。"
+                )
+            };
+            return ActionOutcome::success(vec![ContentBlock::new("already-expanded", door)]);
         }
 
         // **展开那一下的真动作**：请它把能力交出来。出厂内置件的默认实现什么都不做

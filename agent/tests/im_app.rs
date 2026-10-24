@@ -1972,7 +1972,7 @@ fn the_credential_never_leaves_the_request_header() {
 }
 
 /// **预装常开**：装配期声明 im 常开之后，它的六个动词**从第一轮起就在场**——不需要
-/// `open_app`；`open_app` 对它只回答"本来就在场"，而且**一次网都不出**（在场 ≠ 说过话）。
+/// `open_app`；`open_app` 对它回一张门卡（已开、动作数、目录位置），而且**一次网都不出**（在场 ≠ 说过话）。
 #[test]
 fn preinstalled_im_is_open_from_the_first_turn_and_says_nothing_to_anyone() {
     let fake = FakeIm::spawn(vec![]);
@@ -1999,7 +1999,7 @@ fn preinstalled_im_is_open_from_the_first_turn_and_says_nothing_to_anyone() {
         );
     }
 
-    // 展开机制原样保留：只回答"本来就在场"。
+    // 展开机制原样保留：回一张门卡（已开、动作数、目录位置）。
     let op = OperationId::new(run.clone(), Turn::FIRST);
     let expanded = scope.execute(
         &agent,
@@ -2011,6 +2011,10 @@ fn preinstalled_im_is_open_from_the_first_turn_and_says_nothing_to_anyone() {
     );
     assert_eq!(expanded.state(), ResultState::Success);
     assert_eq!(expanded.content()[0].label(), "already-expanded");
+    let door = expanded.content()[0].text();
+    for expected in ["本次 Run 已经开着", "【im】"] {
+        assert!(door.contains(expected), "门卡缺 {expected}：{door}");
+    }
 
     // **在场不等于说过话**：这一整套都没有让 im 出过一次网。
     assert_eq!(fake.connections(), 0, "预装/展开本身不得产生任何出网");

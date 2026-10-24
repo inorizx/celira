@@ -175,7 +175,8 @@ fn preinstalled_notes_are_open_from_the_first_turn_and_need_no_grant() {
         );
     }
 
-    // 展开机制原样保留：对预装的 App 只回答"本来就在场"，不重读、不复制说明。
+    // 展开机制原样保留：对预装的 App 回一张门卡（已开、动作数、目录位置），
+    // 不重读、不复制说明、不重复动词表。
     let expanded = scope.execute(&agent_a(), &op("run-1"), &expand(NOTES_APP_ID));
     assert_eq!(expanded.state(), ResultState::Success);
     assert_eq!(
@@ -183,6 +184,14 @@ fn preinstalled_notes_are_open_from_the_first_turn_and_need_no_grant() {
         "already-expanded",
         "{:?}",
         expanded.content()
+    );
+    let door = expanded.content()[0].text();
+    for expected in ["本次 Run 已经开着", "【notes】"] {
+        assert!(door.contains(expected), "门卡缺 {expected}：{door}");
+    }
+    assert!(
+        !door.contains("notes_create"),
+        "重复展开不得回动词表：{door}"
     );
 
     // **免授权可写**：没有任何 flag、没有任何授权对象，创建照样接纳并成功。
@@ -547,7 +556,7 @@ fn a_note_written_in_one_run_is_read_back_by_a_later_independent_process() {
     let text = "留给下一次的正文（中文）";
 
     // Run A：宿主**什么都不声明**（笔记本来就不需要授权），Agent 自己选择创建一条笔记。
-    // `open_app` 保留在这条脚本里：预装常开之后它仍然成立，只回答"本来就在场"。
+    // `open_app` 保留在这条脚本里：预装常开之后它仍然成立，回一张已开门的门卡。
     // ⚠ 2026-10-10：`notes_create` **不再开箱免查**（出厂精选已删——常驻只能是主体自己 pin 的）
     // ⇒ 先 `inspect_action` 看一次，再调。**门语义一个字没动**（TASK_69），只是它现在对**每一条**都成立。
     let a = Fixture::new(&env_root, "agent-alpha", &materials, "run-a")

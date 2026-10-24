@@ -256,12 +256,17 @@ fn two_apps_from_one_contract_expand_independently() {
         assert!(after_both.contains(&expected.to_string()), "{after_both:?}");
     }
 
-    // 重复展开 B：只留一条痕迹，不重读、不重复注入能力说明。
+    // 重复展开 B：回一张门卡（已开、动作数、目录位置），不重读、不重复注入能力说明。
     let again = scope.execute(&agent, &operation("run-1"), &expand("counter"));
     assert_eq!(again.state(), ResultState::Success);
     assert_eq!(again.content()[0].label(), "already-expanded");
+    let door = again.content()[0].text();
+    for expected in ["counter", "本次 Run 已经开着", "共 1 个动作", "【counter】"] {
+        assert!(door.contains(expected), "门卡缺 {expected}：{door}");
+    }
+    assert!(!door.contains("测试替身"), "门卡不该抄门牌正文：{door}");
     assert_eq!(
-        again.content()[0].text().matches("echo").count(),
+        door.matches("echo").count(),
         0,
         "重复展开不得重新注入能力说明"
     );
