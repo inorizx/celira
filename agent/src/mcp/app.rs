@@ -62,8 +62,7 @@ use crate::foundation::{AgentId, OperationId, RunId};
 use super::{
     CallFault, CallReply, MAX_PARAM_DOC_BYTES, MAX_SKELETON_BYTES, MAX_TEXT_BYTES,
     MAX_TIMEOUT_SECONDS, McpAccess, McpEffect, McpEndpoint, McpFailure, McpNotification,
-    PARAM_TIMEOUT, RawTool, RemoteTransport, StdioTransport, Transport, clip, fault_outcome,
-    foreign_line, sanitize,
+    PARAM_TIMEOUT, RawTool, RmcpTransport, Transport, clip, fault_outcome, foreign_line, sanitize,
 };
 
 /// 形状说明里最多列几个键；多的**如实报数**，不静默丢。
@@ -451,37 +450,20 @@ impl AppPort for McpApp {
             .expect("通道那一格只被短临界区持有");
 
         if state.is_none() {
-            // 通道由声明的 kind 决定：本机子进程，还是网络端点。两条路的握手形状不同
-            // （一条是"起进程 + 按行说"，一条是网络端点上的 initialize），因此**分流在这里**，
-            // 而不是让某一条通道假装成另一条。
+            // 生产通道由 `rmcp` 宿主承担；stdio 与 Streamable 网络通道在宿主内部按声明的
+            // endpoint 分流，上层只看见同一份同步 `Transport`。
             let transport: Box<dyn Transport> = match declaration.endpoint() {
-                McpEndpoint::Stdio { .. } => {
-                    let mut transport =
-                        match StdioTransport::spawn(&declaration, self.access.scrub()) {
-                            Ok(transport) => transport,
-                            Err(class) => return Err(ExpansionRefusal::classified(class.as_str())),
-                        };
+                McpEndpoint::Stdio { .. } | McpEndpoint::Remote { .. } => {
+                    let mut transport = match RmcpTransport::new(&declaration, self.access.scrub())
+                    {
+                        Ok(transport) => transport,
+                        Err(class) => return Err(ExpansionRefusal::classified(class.as_str())),
+                    };
                     if let Err(fault) = transport.connect(timeout) {
-                        // 握手没成：**先取走对面那句话**（通道马上被丢弃，它的 `Drop` 会把树收掉）。
-                        // 取不到（对面没留话）⇒ 只报分类；判空在 `ExpansionRefusal` 那一处收口。
                         return Err(ExpansionRefusal::from_detail(
                             fault.class().as_str(),
                             transport.refusal_detail(),
                         ));
-                    }
-                    Box::new(transport)
-                }
-                McpEndpoint::Remote {
-                    address,
-                    credential_env,
-                } => {
-                    let mut transport =
-                        match RemoteTransport::new(address, credential_env.as_deref()) {
-                            Ok(transport) => transport,
-                            Err(class) => return Err(ExpansionRefusal::classified(class.as_str())),
-                        };
-                    if let Err(fault) = transport.connect(timeout) {
-                        return Err(ExpansionRefusal::classified(fault.class().as_str()));
                     }
                     Box::new(transport)
                 }

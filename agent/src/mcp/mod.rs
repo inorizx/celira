@@ -18,6 +18,17 @@
 //! 但"换一条通道"从此只是换一个实现——**不为想象中的远程 server 预建实现**（走网络那种通道
 //! 不在本刀，真出现那天再说）。
 //!
+//! ## 2026-10-25：生产通道换成 `rmcp` SDK
+//!
+//! 上面的三件事（connect / list_tools / call_tool）**没有变**；变的只是通道的实现。
+//! 生产路径现在由 [`rmcp_host::RmcpTransport`] 承担：MCP 的版本协商、现代/legacy 生命周期、
+//! stdio 子进程、Streamable 网络、订阅通知全部交给 `rmcp` 3.7.0；异步 I/O 被关在一条独立的
+//! tokio 宿主线程里，Core / Run / Turn / Trace / Ledger 仍然是同步、确定性状态机。
+//!
+//! [`stdio::StdioTransport`] 与 [`remote::RemoteTransport`] 保留为**失败诊断与既有用例的基线**：
+//! 生产展开只在 rmcp 握手失败时用旧 stdio 读一次"对面到底说了什么"；成功路径不走手写协议栈。
+//! 通知仍然只是**变更信号**——正文由 Runtime 重新 `tools/list` 拉取，本层不把它写进模型上下文。
+//!
 //! ## 授权 = 装配期事实（装/卸要重启宿主）
 //!
 //! `--mcp` 一给，这台 server 就进了**授权面**：展开动作认得这个名字。不给就是没装——
@@ -150,6 +161,7 @@ use std::path::Path;
 
 pub mod app;
 pub mod remote;
+pub mod rmcp_host;
 pub mod scheme;
 pub mod stdio;
 pub mod wire;
@@ -157,6 +169,7 @@ pub mod wire_tokens;
 
 pub use app::McpApp;
 pub use remote::RemoteTransport;
+pub use rmcp_host::RmcpTransport;
 pub use stdio::StdioTransport;
 
 /// 转发窗口的缺省值（秒）。与 terminal 同一量级：这是"慢工具的世界"。

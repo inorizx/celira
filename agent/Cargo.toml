@@ -10,11 +10,18 @@ license = "MIT"
 # 且不需要改动根 Cargo.toml。
 [workspace]
 
-# 这些依赖**只**被 `src/provider_adapter.rs` 的传输层与 wire 序列化使用：
-# - reqwest：HTTPS 传输；用例与配置对齐本仓库 host/ 里已验证过的组合（json + rustls）。
-# - serde / serde_json：wire 结构与决定契约的序列化。
-# Core（core.rs / foundation.rs）不得引用它们，由 tests/minimal_agent.rs 的边界守卫机械检查。
+# 这些依赖分两类：
+# - reqwest / serde / serde_json：Provider Adapter 的 wire 与传输，以及 MCP App 的外部协议搬运；
+# - rmcp / tokio：MCP 边缘的协议客户端与异步宿主（Core / Foundation 不得引用它们）。
+# 边界由 tests/minimal_agent.rs 的依赖与分层守卫机械检查。
 [dependencies]
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rmcp = { version = "3.7.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+axum = "0.8"
+rmcp = { version = "3.7.0", default-features = false, features = ["server", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }

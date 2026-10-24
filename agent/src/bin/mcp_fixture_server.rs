@@ -126,7 +126,19 @@ fn main() -> ExitCode {
                     reply(
                         &mut stdout,
                         id,
-                        json!({"supportedVersions": supported_versions(&era)}),
+                        json!({
+                            "resultType": "complete",
+                            "supportedVersions": supported_versions(&era),
+                            "capabilities": {"tools": {}},
+                            "ttlMs": 0,
+                            "cacheScope": "private",
+                            "_meta": {
+                                "io.modelcontextprotocol/serverInfo": {
+                                    "name": "celira-mcp-fixture",
+                                    "version": "0",
+                                },
+                            },
+                        }),
                     );
                 } else {
                     // legacy 的真实行为：对未知的 pre-`initialize` 请求回**实现自定义**的码。

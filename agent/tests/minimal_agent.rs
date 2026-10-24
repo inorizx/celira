@@ -2103,7 +2103,7 @@ const FACADE_MODULE_NAME: &str = "provider_adapter";
 /// 阶段八没有新增任何**依赖**：身份环境与只追加存储用 `std::fs`，序列化复用已有的
 /// `serde_json`。“复用已有依赖”因此不改变这份名单；`serde_json` 的使用范围另由
 /// `SERDE_JSON_SOURCES` 单独约束（见下）。
-const ADAPTER_DEPENDENCIES: [&str; 3] = ["reqwest", "serde", "serde_json"];
+const ADAPTER_DEPENDENCIES: [&str; 6] = ["axum", "reqwest", "rmcp", "serde", "serde_json", "tokio"];
 
 /// 允许使用 `serde_json` 的源文件。
 ///
@@ -2114,7 +2114,7 @@ const ADAPTER_DEPENDENCIES: [&str; 3] = ["reqwest", "serde", "serde_json"];
 /// 阶段八把 `serde_json` 的使用从“只有 Adapter”扩到“Adapter + 身份环境存储”：
 /// 存储把经历与事实写成 NDJSON，**不引入新依赖**。这是一次必须被人看见的变化，
 /// 所以它是一条显式、封闭的名单，而不是让 `serde_json` 变成随处可用。
-const SERDE_JSON_SOURCES: [&str; 23] = [
+const SERDE_JSON_SOURCES: [&str; 24] = [
     "provider_adapter.rs",
     "store.rs",
     // 2026-10-08（同上那一刀）：NDJSON 的编解码跟着**分卷**走，因此新文件也显式列入。
@@ -2143,6 +2143,9 @@ const SERDE_JSON_SOURCES: [&str; 23] = [
     "mcp/mod.rs",
     "mcp/stdio.rs",
     "mcp/app.rs",
+    // 2026-10-25：生产 MCP 通道由 `rmcp` 宿主承载，它把 SDK 的答复转成我们既有的有界回执形状
+    // （`serde_json::Value`）——与上面三件同族，按同一份纪律显式列入。
+    "mcp/rmcp_host.rs",
     // 2026-10-20：两条通道共用的 **wire 形状**（JSON-RPC 的答复/清单/错误 → 有界回执）从
     // `stdio.rs` 搬到这里，于是它也开始读 JSON。它与三条同族：不是"让 serde_json 随处可用"，
     // 是又一次必须被人看见的变化（两条通道共用一份，正是那次搬家的理由）。
@@ -2275,9 +2278,10 @@ const FILE_SYSTEM_MARKERS: [&str; 6] = [
 /// 起进程路径的共同出口，因此必须与它们一样被看见），以及**沙箱后端端口**
 /// （`sandbox_backend.rs`：它的探针必须**真跑一次** bwrap，「`bwrap` 在不在、命名空间建没建」
 /// 不可能靠读代码回答；它只起**探针**这一种进程——主体那条命令仍由 terminal 窗起）。
-const PROCESS_SOURCES: [&str; 4] = [
+const PROCESS_SOURCES: [&str; 5] = [
     "terminal_app.rs",
     "mcp/stdio.rs",
+    "mcp/rmcp_host.rs",
     "platform.rs",
     "sandbox_backend.rs",
 ];
@@ -2317,7 +2321,7 @@ const FORBIDDEN_WORD_EXCEPTIONS: [&str; 1] = ["json"];
 ///
 /// 放行方式是"把这短语从待扫描文本里去掉再扫"——因此同一个词在**别处**出现（别的文件、别的
 /// 形态、别的短语）仍然照旧违规，整个词与整份文件都没有被豁免。
-const CORE_ALLOWED_PHRASES: [(&str, &str); 20] = [
+const CORE_ALLOWED_PHRASES: [(&str, &str); 22] = [
     // 2026-10-20：远程 MCP 端点的两个 scheme 记号（`mcp/scheme.rs` 里各写一次）。
     // 放行的是**带引号的字面量**：同一个词作为标识符、注释或别的形态出现照旧违规；
     // 别的文件一个都不放行——地址墙要用它，就只许在那个文件里说它。
@@ -2334,6 +2338,11 @@ const CORE_ALLOWED_PHRASES: [(&str, &str); 20] = [
     // 同一天：`bearer_auth` 是请求库的**方法名**（外部协议的凭据头写法），不是我们的标识符。
     // 放行的是这一条**调用写法**；别的词、别的文件照旧违规。
     ("mcp/remote.rs", "bearer_auth"),
+    // 2026-10-25：生产 MCP 通道由 `rmcp` SDK 承载，下面两个是 **SDK 自己的类型名/方法名**
+    // （Streamable 网络 transport 的模块路径与凭据头设置方法）。放行的是这两条完整短语；
+    // `http` / `auth` 作为我们自己的标识符、注释或别的形态出现照旧违规。
+    ("mcp/rmcp_host.rs", "streamable_http_client"),
+    ("mcp/rmcp_host.rs", "auth_header"),
     // 2026-10-20：`credential_names()` 搬进本件后，那个**环境变量名**第一次出现在被扫描的
     // 源码里（它里面带着 `auth` 这个短词）。放行的是**带引号的字面量**：它是"要洗掉的键名"，
     // 不是我们的词；别的形态、别的文件照旧违规。
@@ -4426,11 +4435,11 @@ fn the_skeleton_declares_only_the_adapter_dependencies() {
 fn the_lockfile_guard_reads_package_names_with_optional_versions() {
     let expected = ADAPTER_DEPENDENCIES.map(String::from).to_vec();
 
-    let bare = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"reqwest\",\n \"serde\",\n \"serde_json\",\n]\n";
+    let bare = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"axum\",\n \"reqwest\",\n \"rmcp\",\n \"serde\",\n \"serde_json\",\n \"tokio\",\n]\n";
     assert_eq!(locked_direct_dependencies(bare), expected);
 
     // 同一 crate 有多版本时，锁文件会写成 `name version`。
-    let versioned = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"reqwest\",\n \"serde 1.0.229\",\n \"serde_json 1.0.151\",\n]\n";
+    let versioned = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"axum 0.8.9\",\n \"reqwest\",\n \"rmcp 3.7.0\",\n \"serde 1.0.229\",\n \"serde_json 1.0.151\",\n \"tokio 1.53.1\",\n]\n";
     assert_eq!(
         locked_direct_dependencies(versioned),
         expected,
@@ -4438,7 +4447,7 @@ fn the_lockfile_guard_reads_package_names_with_optional_versions() {
     );
 
     // 未知直接依赖：必须造成与封闭集合的不一致。
-    let unknown = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"reqwest\",\n \"serde\",\n \"serde_json\",\n \"some-new-crate 2.0.0\",\n]\n";
+    let unknown = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"axum\",\n \"reqwest\",\n \"rmcp\",\n \"serde\",\n \"serde_json\",\n \"tokio\",\n \"some-new-crate 2.0.0\",\n]\n";
     let parsed = locked_direct_dependencies(unknown);
     assert_ne!(parsed, expected, "未知直接依赖必须被拦住");
     assert!(

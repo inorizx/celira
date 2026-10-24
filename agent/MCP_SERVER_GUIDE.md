@@ -17,7 +17,7 @@
 
 - **你不是在给 celira 写插件**，你是在**提供一个进程**。celira 侧的壳（`mcp/app.rs`）把它包成一个 `AppPort`
   ——与出厂内置件**走同一份窄契约**，所以 **OS 一行不用认识 MCP**。
-- ⇒ 你的代码**不进 Agent 的进程**。你们之间只有 **stdio + JSON-RPC**（MCP 协议）。
+- ⇒ 你的代码**不进 Agent 的进程**。你们之间是 **MCP over stdio + JSON-RPC**，或 **Streamable HTTP**（网络端点）。
 - ⇒ 推论：**你不需要读 Rust、不需要学我们的 ABI、不需要跟我们的版本号对齐。** 这是这一格的全部好处。
 
 ## 二、怎么声明
@@ -185,14 +185,19 @@
 
 ## 九、工具清单会变的话（可选）
 
-modern（`2026-07-28`）server 可以在 `subscriptions/listen` 的 ack 之后发
-`notifications/tools/list_changed`。celira 在**展开成功时**只订阅 `toolsListChanged`；通知到达后，
-它会在下一轮重新 `tools/list`，更新自己的归属索引，并只给 Agent 一行“某个 App 的清单变了”的信号
-——**新工具名不会直接从你的通知里搬进模型上下文**。Agent 要细节，会自己再展开那台 App 取当前清单。
+现代（`2026-07-28`）server 可以在 `subscriptions/listen` 的 ack 之后发
+`notifications/tools/list_changed`。celira 的 MCP 客户端由 `rmcp` 标准 SDK 承载；它在**拿到初始
+`tools/list` 之后**才订阅 `toolsListChanged`，通知到达后会在下一轮重新 `tools/list`，更新自己
+的归属索引，并只给 Agent 一行“某个 App 的清单变了”的信号——**新工具名不会直接从你的通知里
+搬进模型上下文**。Agent 要细节，会自己再展开那台 App 取当前清单。
 
 - 不支持这条通知**完全可以**：不订阅、不发送，展开与调用照旧。
 - 通知只报“变了”，不要塞工具定义或提示词；正文一律以你下一次 `tools/list` 的答复为准。
-- celira 今天**不做断线重订阅**；进程重连后，下一次显式展开会重新订阅。
+- 现代 server 会先收到 `server/discover`；只支持 legacy 的 server 会走 `initialize`，两种都能接。
+- 网络端点走 Streamable HTTP（含 SSE 会话）；本机回环允许明文，其余地址仍按地址墙检查。
+- `resources` / `prompts` 是 MCP 的可选原语；celira 当前只把 **tools** 映射成 App 动词，
+  不会把它们偷偷变成隐藏动作。它们不会阻断 tools 的展开与调用。
+- celira 今天**不做 stdio 断线自动重连**；进程重连后，下一次显式展开会重新握手与订阅。
 
 ## 十、失败长什么样（如实登记，别猜）
 
@@ -236,18 +241,22 @@ modern（`2026-07-28`）server 可以在 `subscriptions/listen` 的 ack 之后�
 2. Agent **展开**那一下：成功就拿到门户卡片；失败会给一个**稳定分类字符串**（进 Agent 的回执，也进宿主诊断）；
 3. 调一次，看回执落在哪一格（`refused-by-server` / `isError` 读数 / `failure`）。
 
-## 十一、这是一版**冻结**的接缝
+## 十一、这是一版**已解冻的协议边界**（2026-10-25）
 
-MCP 适配**第一版已冻结、不再扩**（`agent/README.md` §6 冻结区）。
+MCP 适配**不再是冻结区**：生产通道换成 **`rmcp` 3.7.0** 标准客户端，由它承担版本协商、
+现代/legacy 生命周期、stdio 与 Streamable HTTP transport、订阅通知。Celira 只保留产品边界
+（授权、懒展开、效果档、回执墙、凭据洗、模型视野准入）。
 
 ⇒ 对你的两面含义，都写清楚：
-- **好的一面**：形状**不会变**——你照着这一页写，不必追我们的版本。
-  （2026-10-13 参数那一格**放宽**过：对象/数组从"**整条动词作废**"变成"**能用**"。
-  ⇒ **旧写法一个字不用改**；放宽不是收紧。）
-- **要接受的一面**：它**不会因为你的需求而扩**。这一版认**两种通道**：本机 `stdio:` 与
-  一个网络端点（加密地址，本机回环可用明文）；采样式交互、服务端主动推送这些**今天都没有**，
-  而且**不是排期问题**。
-  （想接别的形状，正确做法是**在你那一侧翻译成这两种之一**——那本来就落在你自己的进程里。）
+- **稳定的一面**：动词名、参数表、回执形状、两档效果、四堵墙**没有变**——你照着这一页写，
+  不必追我们的版本；旧 server 继续走 legacy `initialize`，现代 server 走 `server/discover`。
+- **协议能力**：本机 `stdio:` 与网络端点（Streamable HTTP；本机回环可用明文）都支持；
+  `tools/list` / `tools/call` / `notifications/tools/list_changed` 是今天真正的动作面。
+- **明确不在动作面**：`resources` / `prompts` 不会变成 Agent 动词；sampling / elicitation /
+  roots / tasks 等需要宿主交互或额外授权的原语也不默认开启。它们不是排期问题，是**产品边界**。
+  （想接别的形状，正确做法是**在你那一侧翻译成 tools**——那本来就落在你自己的进程里。）
+- **今天不承诺**：stdio 进程死后自动重连（下一次显式展开会重新握手）；远程 HTTP 的过期会话
+  重建由 SDK 配置负责，但订阅的自动恢复不在承诺内。
 
 ## 十二、已知边界（如实登记）
 
