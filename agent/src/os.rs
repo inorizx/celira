@@ -44,7 +44,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::app_contract::{AppPort, AssemblyFailure, EffectClass, SourceClass, SourceTable};
+use crate::app_contract::{
+    AppPort, AssemblyFailure, EffectClass, SourceClass, SourceTable, VerbGroup,
+};
 use crate::core::{
     Action, ActionAdmission, ActionId, ActionOutcome, ActionParams, ActionPort, Capabilities,
     Capability, ContentBlock, ParamSpec,
@@ -352,6 +354,10 @@ pub struct AppDoor {
     pub description: String,
     /// 它声明的动词标识（**声明顺序**，与展开状态无关）。
     pub verbs: Vec<String>,
+    /// App 自己声明的**显示分组**（只影响动作目录的排列；空 = 平铺）。
+    ///
+    /// 分组不是能力声明：`verbs` 仍是唯一清单，未进组的动词由渲染者平铺补齐。
+    pub verb_groups: Vec<VerbGroup>,
     /// 这个 App 是不是**预装常开**（`assemble_preinstalled` 声明的那几个）。
     pub preinstalled: bool,
 }
@@ -406,6 +412,7 @@ impl MinimalOs {
                         .iter()
                         .map(|capability| capability.id().as_str().to_string())
                         .collect(),
+                    verb_groups: app.verb_groups(),
                     // **在场那一格派生自唯一权威**（本模块那份预装集合），不是另抄一份。
                     preinstalled: self.preinstalled.contains(app.app_id()),
                 })

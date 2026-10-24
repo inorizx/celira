@@ -49,7 +49,7 @@ use crate::mcp::{McpAccess, McpApp};
 use crate::model_retry::{ModelRetry, RetryingModel, TRANSIENT_RETRY_ATTEMPTS};
 use crate::notes_app::{NOTES_APP_ID, NotesApp};
 use crate::notification_bar::NotificationBar;
-use crate::os::{Desktop, MachineFailure, MinimalOs, RunExpansion};
+use crate::os::{AppDoor, Desktop, MachineFailure, MinimalOs, RunExpansion};
 use crate::pinned_actions::PinnedActions;
 use crate::pins_board::PinsBoard;
 use crate::previous_activity::{PreviousActivity, PreviousReading, UnsettledOperation};
@@ -1301,6 +1301,56 @@ fn push_action_line(text: &mut String, capability: &Capability, writes: &BTreeSe
 /// 动作目录那一块的标签（呈现时的区域名；TASK_71 前是内联字面量，现在两处引用——块与超限读数）。
 const ACTION_DIRECTORY_LABEL: &str = "available-actions";
 
+/// 把一扇门的动词按 App 声明的**显示分组**排版；未进组的动词按声明顺序平铺补齐。
+///
+/// 分组只是视图：`door.verbs` 仍是唯一清单，任何没被组覆盖的动词都会在最后出现，
+/// 所以组写漏了也不会把一条能力藏掉。组头与组序由 App 给，平台不解释语义。
+fn push_door_verbs(
+    text: &mut String,
+    door: &AppDoor,
+    capabilities: &Capabilities,
+    writes: &BTreeSet<String>,
+) {
+    if door.verb_groups.is_empty() {
+        for id in &door.verbs {
+            if let Some(capability) = capabilities.find(&ActionId::new(id.clone())) {
+                push_action_line(text, capability, writes);
+            }
+        }
+        return;
+    }
+
+    let mut printed: BTreeSet<String> = BTreeSet::new();
+    for group in &door.verb_groups {
+        let mut lines = String::new();
+        for id in group.verbs {
+            if !printed.insert((*id).to_string()) {
+                continue;
+            }
+            if let Some(capability) = capabilities.find(&ActionId::new((*id).to_string())) {
+                push_action_line(&mut lines, capability, writes);
+            }
+        }
+        if !lines.is_empty() {
+            text.push_str("  ");
+            text.push_str(group.label);
+            text.push_str("：");
+            text.push('\n');
+            text.push_str(&lines);
+        }
+    }
+
+    // 显示分组不是能力清单：没进任何组的动词仍按声明顺序出现。
+    for id in &door.verbs {
+        if printed.contains(id.as_str()) {
+            continue;
+        }
+        if let Some(capability) = capabilities.find(&ActionId::new(id.clone())) {
+            push_action_line(text, capability, writes);
+        }
+    }
+}
+
 /// 超限时**留下一句读数**（"目录超限未给"），而不是退成空批次：目录没了与"这一轮没摆"必须分得开
 /// （与 [`ActivityOrigin`] 的 `on_run_start` 同款处置）。
 fn action_directory_batch(capabilities: &Capabilities, desktop: &Desktop) -> ContentBatch {
@@ -1333,11 +1383,7 @@ fn action_directory_batch(capabilities: &Capabilities, desktop: &Desktop) -> Con
     }
     for door in &desktop.doors {
         text.push_str(&format!("【{}】{}\n", door.id, door.description));
-        for id in &door.verbs {
-            if let Some(capability) = capabilities.find(&ActionId::new(id.clone())) {
-                push_action_line(&mut text, capability, &desktop.writes);
-            }
-        }
+        push_door_verbs(&mut text, door, capabilities, &desktop.writes);
         // **门后那句提示由"在不在场"决定，不由"数动词"反推**（2026-10-08）。
         // 唯一判据在 `os.rs`（`is_preinstalled || is_expanded`）；而这里只在首轮渲染，那时还没有任何
         // 展开 ⇒ `preinstalled` **就是**此刻的 `is_open`。见 [`AppDoor`] 的文档与钉住那条前提的守卫。

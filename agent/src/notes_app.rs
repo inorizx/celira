@@ -1697,6 +1697,43 @@ impl crate::app_contract::AppPort for NotesApp {
         self.available_capabilities()
     }
 
+    /// 动作目录里的显示分组：读 / 写 / 钉 / 复核。
+    ///
+    /// 只改排列，不增删能力、不设上限；`declared_capabilities` 仍是唯一权威。
+    /// 组里用的都是本模块的能力常量，避免另抄一份标识。
+    fn verb_groups(&self) -> Vec<crate::app_contract::VerbGroup> {
+        use crate::app_contract::VerbGroup;
+        vec![
+            VerbGroup {
+                label: "读",
+                verbs: &[CAPABILITY_LIST_NOTES, CAPABILITY_READ_NOTE],
+            },
+            VerbGroup {
+                label: "写",
+                verbs: &[
+                    CAPABILITY_CREATE_NOTE,
+                    CAPABILITY_APPEND,
+                    CAPABILITY_EDIT,
+                    CAPABILITY_DELETE,
+                ],
+            },
+            VerbGroup {
+                label: "钉",
+                verbs: &[CAPABILITY_PIN, CAPABILITY_UNPIN],
+            },
+            VerbGroup {
+                label: "复核",
+                verbs: &[
+                    CAPABILITY_VERIFY_NOTE,
+                    CAPABILITY_VERIFY_APPENDED,
+                    CAPABILITY_VERIFY_EDIT,
+                    CAPABILITY_VERIFY_DELETED,
+                    CAPABILITY_VERIFY_PINNED,
+                ],
+            },
+        ]
+    }
+
     /// `notes_create` 的真实类别是**可重复写**，不是独占创建：它抢的是**笔记身份**（`note-<n>`）
     /// 而不是内容，所以**同参数第二次会成功**（拿到一个新身份、多出一条内容相同的笔记）。
     /// 由此它的复核语义天生更弱（无法归因到那一次操作），见

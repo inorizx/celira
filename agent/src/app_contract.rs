@@ -33,6 +33,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::{ActionId, ActionPort, Capabilities};
 
+/// 动作目录里的**显示分组**：App 自己说“这些动词属于同一类”，平台只按它给的标签和顺序排版。
+///
+/// 它**不是能力声明**：不增删能力、不改变路由或可用性、不设上限；[`AppPort::declared_capabilities`]
+/// 仍是唯一权威。没有列进任何组的动词仍会在组后按声明顺序平铺出现——**分组不能藏能力**。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerbGroup {
+    /// 组头（例如“读”）；App 自己的词，平台不解释。
+    pub label: &'static str,
+    /// 这一组里要显示的动词标识；只影响排列，匹配不到能力的标识不会凭空造出能力。
+    pub verbs: &'static [&'static str],
+}
+
 /// OS 对「一个已装配 App」的全部要求。
 pub trait AppPort: ActionPort {
     /// 这个 App 的稳定标识：装配时用它，展开动作的目标也是它。
@@ -56,6 +68,15 @@ pub trait AppPort: ActionPort {
     /// 装配时用它建立唯一归属索引，运行时用它给出能力目录；两处用的是同一份声明，
     /// 因此不存在"目录里出现的行动却路由不到，或路由得到却没在目录里"的情况。
     fn declared_capabilities(&self) -> Capabilities;
+
+    /// 动作目录里的**显示分组**（可选）；默认空 = 按声明顺序平铺。
+    ///
+    /// 只影响排列：不增删能力、不改变路由或可用性、不设上限。组里的标识必须落在
+    /// [`Self::declared_capabilities`] 里才有动作可显示；未列进任何组的动词仍会平铺出现，
+    /// 因此分组漂移不会把一条能力藏掉。组头词与组序由 App 自己给，平台不解释语义。
+    fn verb_groups(&self) -> Vec<VerbGroup> {
+        Vec::new()
+    }
 
     /// 这个 App 对**它自己能力的写效应**说出来的声明（`行动 → 类别 + 复核能力`）。
     ///

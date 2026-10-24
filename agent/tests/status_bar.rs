@@ -546,8 +546,9 @@ fn index_count(index: &str, app: &str) -> usize {
 }
 
 /// 门内行的**动作标识**（行格式 `<标识> | <骨架>`；去缩进后取 ` | ` 之前那一段）。
-fn verb_of(line: &str) -> &str {
-    line.trim().split(" | ").next().expect("每行都有标识")
+/// 组头（如 `读：`）没有 ` | `，返回 `None`——它不是动词。
+fn verb_of(line: &str) -> Option<&str> {
+    line.trim().split_once(" | ").map(|(verb, _)| verb)
 }
 
 /// **分组形状**（TASK_71 桌面 P0 第 1 件的验收②）：组头在场、门内动词归属正确、
@@ -620,7 +621,11 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
     }
 
     // 门之外那组：恰好 OS 自有那六件，一个不多一个不少。
-    let system_verbs: Vec<&str> = sections[0].1.iter().map(|line| verb_of(line)).collect();
+    let system_verbs: Vec<&str> = sections[0]
+        .1
+        .iter()
+        .filter_map(|line| verb_of(line))
+        .collect();
     assert_eq!(
         system_verbs,
         vec![
@@ -635,7 +640,11 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
     );
 
     // 门内动词**归属正确**：notes 那 13 条落在【notes】门里、web 那 2 条落在【web】门里。
-    let mut notes_verbs: Vec<&str> = sections[2].1.iter().map(|line| verb_of(line)).collect();
+    let mut notes_verbs: Vec<&str> = sections[2]
+        .1
+        .iter()
+        .filter_map(|line| verb_of(line))
+        .collect();
     notes_verbs.sort_unstable();
     assert_eq!(
         notes_verbs,
@@ -659,7 +668,51 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
         "【notes】门里是它声明的全部动词（预装常开 ⇒ 一条都不缺）: {}",
         sections[2].1.join(" / ")
     );
-    let mut web_verbs: Vec<&str> = sections[4].1.iter().map(|line| verb_of(line)).collect();
+
+    // **notes 的显示分组**：读 / 写 / 钉 / 复核。只改排列，13 条一条不少，每条只出现一次。
+    let notes_body = sections[2].1.join("\n");
+    let label_positions: Vec<usize> = ["  读：", "  写：", "  钉：", "  复核："]
+        .iter()
+        .map(|label| {
+            notes_body
+                .find(label)
+                .unwrap_or_else(|| panic!("notes 目录缺组头 {label}: {notes_body}"))
+        })
+        .collect();
+    assert!(
+        label_positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "notes 组头顺序应是读 / 写 / 钉 / 复核: {notes_body}"
+    );
+    let ordered_notes: Vec<&str> = sections[2]
+        .1
+        .iter()
+        .filter_map(|line| verb_of(line))
+        .collect();
+    assert_eq!(
+        ordered_notes,
+        vec![
+            "notes_list",
+            "notes_read",
+            "notes_create",
+            "notes_append",
+            "notes_edit",
+            "notes_delete",
+            "notes_pin",
+            "notes_unpin",
+            "notes_verify_note",
+            "notes_verify_appended",
+            "notes_verify_edited",
+            "notes_verify_deleted",
+            "notes_verify_pinned",
+        ],
+        "notes 目录按读 / 写 / 钉 / 复核排列: {notes_body}"
+    );
+
+    let mut web_verbs: Vec<&str> = sections[4]
+        .1
+        .iter()
+        .filter_map(|line| verb_of(line))
+        .collect();
     web_verbs.sort_unstable();
     assert_eq!(
         web_verbs,
@@ -768,7 +821,7 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
         !sections
             .iter()
             .flat_map(|(_, body)| body.iter())
-            .map(|line| verb_of(line))
+            .filter_map(|line| verb_of(line))
             .any(|verb| verb.starts_with("files_") || verb.starts_with("timer_")),
         "没展开的 App 的**动词行**一条都不许出现（不把未展开的动作伪装成能调的）: {directory}"
     );
