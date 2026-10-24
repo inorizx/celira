@@ -1362,6 +1362,26 @@ impl FileApp {
         )])
     }
 
+    /// 写面找不到目标时，把"为什么找不到"说全。
+    ///
+    /// 改写的落点是**授权目录**，而读的落点是资料根：同一个相对名字，在只读侧存在、
+    /// 在写侧不存在，是完全正常的。若只报 `not-found`，主体会以为路径写错、反复重试；
+    /// 所以这里补一句只有系统知道的事实——它在只读侧，不在这只手能改的范围里。
+    fn missing_write_target(&self, relative: &str, class: FailureClass) -> ActionOutcome {
+        if class == FailureClass::NotFound && self.resolve_existing(relative).is_ok() {
+            return ActionOutcome::failure_with_content(
+                class.as_str(),
+                vec![ContentBlock::new(
+                    "write-scope",
+                    format!(
+                        "{relative} 在只读侧存在，但写面只在授权目录内——读得到，不等于改得到。"
+                    ),
+                )],
+            );
+        }
+        ActionOutcome::failure(class.as_str())
+    }
+
     /// 把授权目录里一份已存在文本文件中 `old_text` 的**唯一一处**出现换成 `new_text`。
     ///
     /// 顺序是固定的：复核身份/授权 → 参数形状 → 解析路径 → 读取全文 → **唯一性判定** →
@@ -1404,12 +1424,12 @@ impl FileApp {
         };
         let target = match Self::write_target(anchor, relative) {
             Ok(target) => target,
-            Err(class) => return ActionOutcome::failure(class.as_str()),
+            Err(class) => return self.missing_write_target(relative, class),
         };
 
         let current = match read_text_file(&target) {
             Ok(text) => text,
-            Err(class) => return ActionOutcome::failure(class.as_str()),
+            Err(class) => return self.missing_write_target(relative, class),
         };
 
         // 唯一性：先取第一处，再多看一处。两处都只在**内存里**判定，盘上一个字节都没动。

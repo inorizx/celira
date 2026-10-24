@@ -531,6 +531,49 @@ fn editing_refuses_an_absent_or_ambiguous_old_text_and_changes_nothing() {
     assert_eq!(sandbox.snapshot(), before, "两种拒绝都不许动盘上一个字节");
 }
 
+/// 读得到、改不到：文件在资料根（只读侧），写面只在授权目录里。
+///
+/// 回执必须把这个事实说出来——只说 `not-found`，主体会以为路径写错，然后原样重试。
+#[test]
+fn editing_a_file_that_only_exists_on_the_read_side_says_so() {
+    let sandbox = Sandbox::new("edit-read-only-side");
+    let mut view = file_view(&sandbox, "run-1");
+    // 资料根顶层有这份文件（读得到），但它在授权目录 `workman/` 之外（改不到）。
+    fs::write(
+        sandbox.materials().join("draft.txt"),
+        "标题：季度计划\n正文：第一版\n",
+    )
+    .expect("预置只读侧材料");
+
+    let outcome = view.execute(
+        &agent(),
+        &operation("run-1"),
+        &call(
+            EDIT,
+            &[
+                ("path", "draft.txt"),
+                ("old_text", "季度计划"),
+                ("new_text", "季度计划 v2"),
+            ],
+        ),
+    );
+
+    assert_eq!(outcome.state(), ResultState::Failure, "写不到就是明确失败");
+    assert_eq!(outcome.failure_class(), Some("not-found"));
+    assert!(
+        outcome
+            .content()
+            .iter()
+            .any(|block| block.text().contains("只读侧存在")),
+        "回执要说清它在只读侧，不能只说没找到"
+    );
+    assert_eq!(
+        fs::read_to_string(sandbox.materials().join("draft.txt")).expect("读回"),
+        "标题：季度计划\n正文：第一版\n",
+        "拒绝时一个字节都不许动"
+    );
+}
+
 /// 空串语义：`old_text` 空串**拒绝**（空串匹配一切，那不是替换）；`new_text` 空串**合法**（删掉那一段）。
 #[test]
 fn an_empty_old_text_is_refused_while_an_empty_new_text_deletes_the_snippet() {
