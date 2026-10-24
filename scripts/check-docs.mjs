@@ -124,6 +124,7 @@ const INTERNAL_DOCS = [
   ['AGENTS.md', '每轮自动注入的工作区指令'],
   ['ARCHITECTURE.md', '唯一 C4 系统地图，维护者读'],
   ['agent/README.md', '当前实现事实的活文档'],
+  ['scripts/model-soak/README.md', '真模型 soak 的口径与跑法（维护者工具）'],
   ['app/README.md', '桌面壳的实现状态'],
   ['client/README.md', '前端实现边界'],
   // ⚠ 第三格是**可选标记**（2026-10-18 加）：`true` ＝「这一条**可以不在盘上**」。
