@@ -2780,7 +2780,7 @@ node home.js up → 人在页面上说一句 → 铃 → 她醒 → 读世界 �
 
 围绕这条主回路保留：im 通信面、自持物（`notes` / `self_concept` / `pins` / `timer`）、处境件（状态行 / 通知栏 / 机器处境 / 持有物 / 上一段怎么了）、两条线协议、模型配置门、家侧只读状态口、诊断与宿主状态命令。
 
-**冻结（不再投入、不宣传、只修安全缺陷）**：MCP（`--mcp`）、terminal（`--terminal`）、web（`search` 端点是配置，`--search-endpoint`）、im 社交面与表达面（`im-social` / `im-profile`）。
+**冻结（不再投入、不宣传、只修安全缺陷）**：terminal（`--terminal`）、web（`search` 端点是配置，`--search-endpoint`）、im 社交面与表达面（`im-social` / `im-profile`）。MCP 的**授权 / 懒展开 / 动作面**仍按 §3.29；它的**协议通道已整条解冻**，见下面的 2026-10-25 条目。
 
 **⚠ 已登记的解冻（2026-10-13）——三格，仅此三格**：
 **① MCP 的参数形状**——「**不再削对面的参数形状**」（第四刀）。
@@ -2830,7 +2830,27 @@ node home.js up → 人在页面上说一句 → 铃 → 她醒 → 读世界 �
   ＋ `store/projection.rs` ＋ `bin/{agent_host,agent_run}.rs`；用例在 `tests/im_app.rs`、两个 wire
   的单元用例与 `store::projection` 的形状守卫。
 
-⚠ **其余部分照旧**：上面那行"只修安全缺陷"对 MCP 的**其他**一切仍然成立——SSE / HTTP 通道、采样式交互、服务端主动推送、`resources` / `prompts`、`subscriptions/listen`、结果缓存（`ttlMs` / `cacheScope`）、**MRTR 的实现**、`DiscoverResult` 的 `instructions` **都不在这三格解冻里**。
+**⚠ 已登记的解冻（2026-10-25）——MCP 协议边整条**：
+
+**⑤ MCP 客户端协议栈**——「**用标准 SDK 承载协议，Celira 只保留产品边界**」。
+
+- **判据**（主人 2026-10-25）：MCP 是对外协议，长期手写全量协议栈是重复造 SDK；她要的是
+  **以后不用再反复提 MCP**，不是再补一个通知特例。
+- **射程**：生产通道从手写 stdio / 单次远程 POST 换成 `rmcp` 3.7.0：现代 `server/discover`
+  与 legacy `initialize`、stdio、Streamable HTTP（含 SSE 会话）、`tools/list` /
+  `tools/call`、`notifications/tools/list_changed` 都归 SDK；异步 I/O 收在一条独立 tokio
+  宿主线程里，Core / Run / Turn / Trace / Ledger **仍是同步确定性状态机**。授权、懒展开、
+  效果档、回执墙、词表、凭据洗与 `app-changed` 准入**一个字没变**。
+- **仍未解冻（明确不做）**：`resources` / `prompts` 变成 Agent 动作；sampling / elicitation /
+  roots / tasks；stdio 进程死后的自动重连（下一次显式展开会重新握手）；订阅自动恢复。
+  这些是**产品边界**，不是 “MCP 还没做完”。
+- **落地**：§3.29、`agent/src/mcp/rmcp_host.rs`、`agent/tests/mcp_http.rs`、
+  `agent/tests/mcp_app.rs`；真实 Playwright MCP 的 stdio 清单探针已手工跑过（未进仓库）。
+
+⚠ **其余部分照旧**：上面那行“只修安全缺陷”对 MCP **动作面**仍然成立——`resources` / `prompts`
+不会变成 Agent 动作；sampling / elicitation / roots / tasks、stdio 自动重连、订阅自动恢复、
+结果缓存（`ttlMs` / `cacheScope`）与 `DiscoverResult` 的 `instructions` 都不在本次解冻里。
+
 
 **明确不做**：
 
