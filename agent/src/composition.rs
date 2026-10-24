@@ -19,6 +19,7 @@
 //! - [`run_activity_in_environment`]：**一次性**——装配、驱动一次、把结果交回；
 //! - [`RunSession`]：**会话**——装配一次、驱动多次，等待之后由宿主显式继续（见类型文档）。
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -1252,17 +1253,22 @@ impl ContextSource for HostSource {
 ///
 /// - 标识**就是**工具名（本 crate 不做名称映射表）；主体照着目录就能经入口调用它们；
 /// - 骨架本来就是一行，这里再压一次（防它带换行、破坏"一行一个动作"的形状）；
-/// - **参数表默认不进这里**：要走"先看格式"那条路的动作，看格式是自己的动作
-///   （`inspect_action` 的回执）。**例外**只有一个，而且它是自洽性要求：
-///   由声明方标了"**免查**"的那几条**自带参数名**（`名称 = 说明（必填）`）——
+/// - **参数表只随两种动作出现**（自洽性要求）：一是声明方标了"**免查**"的那几条；
+///   二是**准入时不会先给卡**的动作（读动作，`desktop.writes` 之外的那些）。
 ///   一个动作既然不走"先看格式"，调用前就没有别的地方能知道它的参数名；
-///   目录若不给出，就等于要求对方凭空知道（TASK_69 真机四证的实测缺口）。
-fn push_action_line(text: &mut String, capability: &Capability) {
+///   目录若不给出，就等于要求对方凭空知道（TASK_69 真机四证的实测缺口；
+///   2026-10-24 真模型 soak 复现：`notes_read` 41% 的调用在猜参数名）。
+fn push_action_line(text: &mut String, capability: &Capability, writes: &BTreeSet<String>) {
     text.push_str("  ");
     text.push_str(capability.id().as_str());
     text.push_str(" | ");
     text.push_str(capability.skeleton().lines().next().unwrap_or("").trim());
-    if capability.is_exempt_from_inspection() && !capability.params().is_empty() {
+    // **可调就必须看得见参数名**：不需要先看卡的动作（读动作），调用前没有别的地方能知道参数叫什么；
+    // 目录若不给出，就等于要求主体凭空知道。写动作由准入时的卡承担，不在这里重复。
+    let admits_without_card = !writes.contains(capability.id().as_str());
+    if (capability.is_exempt_from_inspection() || admits_without_card)
+        && !capability.params().is_empty()
+    {
         text.push_str("（参数：");
         text.push_str(&capability.params_line());
         text.push('）');
@@ -1298,14 +1304,14 @@ fn action_directory_batch(capabilities: &Capabilities, desktop: &Desktop) -> Con
     text.push_str("【系统】不归任何 App 的动作\n");
     for id in &desktop.system {
         if let Some(capability) = capabilities.find(&ActionId::new(id.clone())) {
-            push_action_line(&mut text, capability);
+            push_action_line(&mut text, capability, &desktop.writes);
         }
     }
     for door in &desktop.doors {
         text.push_str(&format!("【{}】{}\n", door.id, door.description));
         for id in &door.verbs {
             if let Some(capability) = capabilities.find(&ActionId::new(id.clone())) {
-                push_action_line(&mut text, capability);
+                push_action_line(&mut text, capability, &desktop.writes);
             }
         }
         // **门后那句提示由"在不在场"决定，不由"数动词"反推**（2026-10-08）。

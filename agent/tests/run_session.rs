@@ -1248,6 +1248,14 @@ fn the_first_request_of_a_real_session_already_carries_her_own_verbs() {
         "目录里要有那一行动作: {}",
         redacted(first)
     );
+    // 2026-10-24：**可调就必须看得见参数名**。读动作不受"先看格式"约束，
+    // 调用前没有别的地方能知道参数叫什么——目录行必须自带（真模型 soak 里 41% 的
+    // `notes_read` 调用都在猜参数名）。
+    assert!(
+        first.contains("notes_read | 读一条自己笔记的标题与正文（参数：id"),
+        "读动作的参数名必须在目录行里: {}",
+        redacted(first)
+    );
     // TASK_71 桌面 P0（①）：目录按 App 分组 —— 门牌行（`【<App 标识>】<描述>`）在，门内动词行在。
     // ①b：`open_app` 骨架里那份"当前装配了：…"**移进了组头** ⇒ 首轮请求体里不该再出现它
     //（信息量不增、只重排；清单只活在组头一处）。

@@ -369,6 +369,10 @@ pub struct Desktop {
     pub opener: Option<String>,
     /// 已装配 App 的门（按装配顺序）。
     pub doors: Vec<AppDoor>,
+    /// **写动作**的标识（装配期从效果声明收一次）：准入时它们要先给卡。
+    ///
+    /// 呈现面用同一条事实：不在这一格里的动作**不先看卡就能调**，所以目录行必须自带参数名。
+    pub writes: BTreeSet<String>,
 }
 
 impl MinimalOs {
@@ -384,6 +388,12 @@ impl MinimalOs {
                 .find(|id| id.as_str() == CAPABILITY_EXPAND)
                 .cloned(),
             system,
+            writes: self
+                .effects
+                .iter()
+                .filter(|(_, effect)| effect.is_write())
+                .map(|(id, _)| id.clone())
+                .collect(),
             doors: self
                 .apps
                 .iter()
