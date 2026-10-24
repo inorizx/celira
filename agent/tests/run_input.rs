@@ -12,9 +12,7 @@ use celira_agent::core::{
     RunInputError, View, run_activity_with_input,
 };
 use celira_agent::file_app::FILE_APP_ID;
-use celira_agent::foundation::{
-    AgentId, Ledger, OperationId, ResultState, RunId, SubjectEnding,
-};
+use celira_agent::foundation::{AgentId, Ledger, OperationId, ResultState, RunId, SubjectEnding};
 use celira_agent::os::{MinimalOs, RunExpansion};
 
 mod common;
