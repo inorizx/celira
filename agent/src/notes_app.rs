@@ -1689,7 +1689,7 @@ impl crate::app_contract::AppPort for NotesApp {
     }
 
     fn description(&self) -> &str {
-        "这个 Agent 自己的笔记：读得到旧笔记，也随时能新建一条，还能给某几条标上 `pinned`（标上的那几条，预览会出现在每次清醒期开场；标与取消只动标记、不碰内容；笔记存在自己的环境里、跨清醒期保留，不需要任何授权）"
+        "你自己的笔记：读写、钉选、复核；存在自己的环境里，跨清醒期保留，不需要授权。"
     }
 
     fn declared_capabilities(&self) -> Capabilities {

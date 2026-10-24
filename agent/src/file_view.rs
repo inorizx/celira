@@ -1368,7 +1368,7 @@ impl crate::app_contract::AppPort for FileView {
     }
 
     fn description(&self) -> &str {
-        "一个只读文件视图：授权资料目录里的真实文件，加上保留逻辑目录 `history`（这个身份环境已确认的经历，按活动机械呈现）、保留单文件地址 `manual.md`（你自己家里那份手册），以及你自己作品目录 `projects/` 的读写动作"
+        "宿主授权的只读资料视图：资料、history、manual.md、projects；写只发生在 projects。"
     }
 
     fn declared_capabilities(&self) -> Capabilities {

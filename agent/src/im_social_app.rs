@@ -450,7 +450,7 @@ impl crate::app_contract::AppPort for ImSocialApp {
     }
 
     fn description(&self) -> &str {
-        "Celira IM 的关系面：看我的联系人与拉黑名单，可以主动申请加人、回答别人给我的申请、拉黑与解除（只碰 im 自己的关系账与黑名单，不能改任何别的东西）"
+        "Celira IM 的关系面：联系人、加人申请、拉黑；只碰 im 自己的关系账。"
     }
 
     fn declared_capabilities(&self) -> Capabilities {

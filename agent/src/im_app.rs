@@ -2648,7 +2648,7 @@ impl crate::app_contract::AppPort for ImApp {
     }
 
     fn description(&self) -> &str {
-        "Celira IM：看我参与的房间与房内记录、读房内消息的附件，可以在我参与的那些房间里说一句话（也可以引用某一条、点名成员、附上一份文件），也可以自己开一间群房、把有来往的人拉进来，还可以撤掉自己刚说出的那条（只能碰 im 自己的消息、附件与房间，不能改任何别的东西）"
+        "Celira IM：看你参与的房间、消息与附件，在房间里说话、开群、拉人、撤回自己的消息；只碰 im 自己的房间、消息与附件。"
     }
 
     fn declared_capabilities(&self) -> Capabilities {

@@ -1850,7 +1850,7 @@ impl AppPort for TerminalApp {
     }
 
     fn description(&self) -> &str {
-        "在你的环境根里执行一条命令：一次性，跑完即散。`sandbox` 档只能写自己的环境根、系统只读、默认断网；`full` 档是整机执行（break-glass），`keep` 只在那一档有。限制全是机械的——洗凭据、超时尽力杀进程树、输出有界且截断带标记，不是命令黑白名单"
+        "在你的环境根里执行一次性命令；sandbox 默认，full 是整机 break-glass；细节在动作卡。"
     }
 
     fn declared_capabilities(&self) -> Capabilities {

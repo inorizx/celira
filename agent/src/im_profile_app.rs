@@ -317,7 +317,7 @@ impl crate::app_contract::AppPort for ImProfileApp {
     }
 
     fn description(&self) -> &str {
-        "Celira IM 的表达面：读我自己写下的资料（短描述与公开描述），也可以写自己的资料、换自己的头像（只碰 im 里属于我自己的那一份，不能改任何别的东西）"
+        "Celira IM 的表达面：读/写你自己的资料与头像；只碰 im 里属于你的那一份。"
     }
 
     fn declared_capabilities(&self) -> Capabilities {

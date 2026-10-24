@@ -754,7 +754,7 @@ impl AppPort for TimerApp {
     }
 
     fn description(&self) -> &str {
-        "给自己约时间：到点之后你会被叫醒一次（自持物，住在你自己的环境根里）"
+        "给自己约时间：到点会叫你一次；住在你自己的环境根里。"
     }
 
     fn declared_capabilities(&self) -> Capabilities {

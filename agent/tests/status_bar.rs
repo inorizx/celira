@@ -712,6 +712,30 @@ fn the_action_directory_groups_verbs_under_their_app_and_keeps_unopened_doors_on
         "索引顺序照桌面原样（不排序）: {index}"
     );
 
+    // **门牌是招牌，不是说明书**：每张 ≤ 200 字节，且不点自己那节的动词名。
+    // 这是“有需求时判断这里有没有我要的”那一条的机械守卫；谁再把动作卡抄进门牌，这里会红。
+    for (header, body) in sections.iter().skip(1) {
+        let (app, description) = header
+            .strip_prefix('【')
+            .and_then(|rest| rest.split_once('】'))
+            .unwrap_or_else(|| panic!("门牌形如【app】描述: {header}"));
+        assert!(
+            description.len() <= 200,
+            "{app} 的门牌超过 200 字节（{}）：{description}",
+            description.len()
+        );
+        for line in body {
+            if !line.contains(" | ") {
+                continue;
+            }
+            let verb = line.trim().split(" | ").next().unwrap_or_default();
+            assert!(
+                !description.contains(verb),
+                "{app} 的门牌不该点动词名 {verb}：{description}"
+            );
+        }
+    }
+
     // **未展开的门也上榜**：门牌在，门后只有一句提示，而且它的**动词一条都不出现**。
     let files = &sections[1];
     assert_eq!(
