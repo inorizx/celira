@@ -27,31 +27,60 @@ cd "$AGENT" || { say "找不到 agent 目录：$AGENT"; exit 1; }
 
 # ---- 环境体检 ---------------------------------------------------------------
 disk_pct=$(df --output=pcent /data 2>/dev/null | tail -1 | tr -dc '0-9')
+free_gb=$(df --output=avail -BG /data 2>/dev/null | tail -1 | tr -dc '0-9')
 mem_pct=$(free | awk '/Mem:/ {printf "%d", $3 * 100 / $2}')
 userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)
 landlock=$(awk '/landlock/ {found=1} END {print found ? "available" : "absent"}' /proc/kallsyms 2>/dev/null || echo n/a)
 
+# 一次全量编译实测要 ~12G：曾经 68% 起步、编到一半写满，所有套件变成
+# "0 个用例"，而旧版只认 FAILED ⇒ 报成绿。所以按**剩余空间**预判，不按百分比。
+MIN_FREE_GB="${SOAK_MIN_FREE_GB:-14}"
+
 say "【夜间巡检 $(date '+%Y-%m-%d %H:%M')】"
 
-# 磁盘太满就先说话：夜里把盘写满，第二天的构建会以完全无关的报错炸掉。
-if [ "${disk_pct:-0}" -ge 90 ]; then
-    say "环境：/data 已用 ${disk_pct}%（低于 10% 余量）——**先清盘再跑**，本轮跳过门禁与压测。"
-    exit 0
+# 空间不够就先腾：agent/target 是纯构建产物，删掉只会让本轮重编一次。
+if [ "${free_gb:-0}" -lt "$MIN_FREE_GB" ]; then
+    say "环境：/data 仅剩 ${free_gb}G（< ${MIN_FREE_GB}G）——先清 agent/target 再跑。"
+    cargo clean >/dev/null 2>&1 || true
+    free_gb=$(df --output=avail -BG /data 2>/dev/null | tail -1 | tr -dc '0-9')
+    disk_pct=$(df --output=pcent /data 2>/dev/null | tail -1 | tr -dc '0-9')
+    say "  清理后剩余 ${free_gb}G。"
+fi
+if [ "${free_gb:-0}" -lt 6 ]; then
+    say "环境：清理后仍只有 ${free_gb}G，放不下一次编译——本轮**红**（不是通过），先清盘。"
+    exit 1
 fi
 
 # ---- 门禁（一次） -----------------------------------------------------------
 line
-gate_test=$(timeout 1200 cargo test 2>&1 | tee "$WORK/gate.log" | grep -E '^test result:' || true)
+red=0
+gate_log="$WORK/gate.log"
+timeout 1200 cargo test >"$gate_log" 2>&1
+gate_rc=$?
+gate_test=$(grep -E '^test result:' "$gate_log" || true)
 gate_pass=$(printf '%s\n' "$gate_test" | grep -oE 'ok\. [0-9]+ passed' | awk '{s+=$2} END {print s+0}')
 gate_fail=$(printf '%s\n' "$gate_test" | grep -c 'FAILED' || true)
 gate_clippy=$(timeout 600 cargo clippy --all-targets -- -D warnings 2>&1 | grep -cE '^(warning|error)' || true)
 gate_fmt="ok"
 timeout 120 cargo fmt --check >/dev/null 2>&1 || gate_fmt="**失败**"
 
-say "门禁：test ${gate_pass} 通过 / ${gate_fail} 组失败 · clippy ${gate_clippy} 条 · fmt ${gate_fmt}"
+# 编译失败 / 一个用例都没跑起来，都是**空跑**，不是绿。
+gate_build="ok"
+if [ "$gate_rc" -ne 0 ] && [ -z "$gate_test" ]; then gate_build="**编译失败**"; fi
+if [ "${gate_pass:-0}" -eq 0 ] && [ "$gate_build" = "ok" ]; then gate_build="**0 个用例**"; fi
+
+say "门禁：test ${gate_pass} 通过 / ${gate_fail} 组失败 · clippy ${gate_clippy} 条 · fmt ${gate_fmt} · 构建 ${gate_build}"
+if [ "$gate_build" != "ok" ]; then
+    red=1
+    say "  ⚠ 门禁没跑起来（passed=0 是空跑，不是通过）："
+    grep -m5 -E '^error' "$gate_log" | sed 's/^/  - /'
+fi
+[ "${gate_clippy:-0}" -ne 0 ] && red=1
+[ "$gate_fmt" != "ok" ] && red=1
 if [ "${gate_fail:-0}" -ne 0 ]; then
+    red=1
     say "  ⚠ 失败用例："
-    awk '/^failures:$/ {buf=""; flag=1; next} /^test result:/ {flag=0; printf "%s", buf} flag && /^    [^ ]/ {buf = buf "  - " $1 "\n"}' "$WORK/gate.log" | sort -u | head -20
+    awk '/^failures:$/ {buf=""; flag=1; next} /^test result:/ {flag=0; printf "%s", buf} flag && /^    [^ ]/ {buf = buf "  - " $1 "\n"}' "$gate_log" | sort -u | head -20
 fi
 
 # ---- 动作面反复跑（重点：群聊与终端） --------------------------------------
@@ -72,6 +101,11 @@ for suite in $soak_list; do
         passed=$(grep -oE 'test result: ok\. [0-9]+ passed' "$out" | awk '{s+=$4} END {print s+0}')
         failed=$(grep -c 'test result: FAILED' "$out" || true)
         total=$((total + passed))
+        # 0 个用例 = 没跑起来（编译失败/环境失败），不是"没有失败"。
+        if [ "$passed" -eq 0 ] && [ "${failed:-0}" -eq 0 ]; then
+            printf '%s\t%s\n' "$suite" "<没跑起来：0 个用例>" >> "$WORK/failures.tsv"
+            red=1
+        fi
         if [ "${failed:-0}" -ne 0 ]; then
             # ⚠ 只为**失败用例名**这一块取值：cargo 会打两次 `failures:`——第一次是
             # `---- 用例 stdout ----` 的正文（panic 原文），第二次才是名字表。取最后一次。
@@ -101,11 +135,19 @@ if [ -s "$WORK/failures.tsv" ]; then
     say "  ⚠ 有失败的用例（这就是要找的\"概率性报错\"）："
     sort "$WORK/failures.tsv" | awk -F'\t' '{count[$1"::"$2]++} END {for (k in count) printf "  - %s：%d 次\n", k, count[k]}' | sort
     say "  复现：cd agent && cargo test --test <套件> <用例名> -- --nocapture"
-else
+elif [ "$red" -eq 0 ]; then
     say "  ✓ 没有偶发，也没有红。"
 fi
 
 # ---- 环境读数 ---------------------------------------------------------------
+# 重新取一次：上面的值停在"清理之后、编译之前"，会把"编译又吃掉 12G"藏起来。
+disk_pct=$(df --output=pcent /data 2>/dev/null | tail -1 | tr -dc '0-9')
+free_gb=$(df --output=avail -BG /data 2>/dev/null | tail -1 | tr -dc '0-9')
 line
-say "环境：/data 已用 ${disk_pct}% · 内存 ${mem_pct}% · 无特权 userns 限制=${userns} · landlock=${landlock}"
+say "环境：/data 已用 ${disk_pct}%（剩 ${free_gb}G）· 内存 ${mem_pct}% · 无特权 userns 限制=${userns} · landlock=${landlock}"
 say "（全绿时这就是全部；红了才展开上面那几行。）"
+
+if [ "$red" -ne 0 ]; then
+    say "结论：**红** —— 上面有失败项，本轮不算通过。"
+    exit 1
+fi
