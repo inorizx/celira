@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """把一次 soak 的账本与轨迹折成成功率表。
 
-口径分三层，不混：
-  1. 执行成功率：被派发的动作，回执是 success / failure / unknown 各多少；
-  2. 每个动作的分布：动作名取自轨迹里的 observed（每次真正执行一条）；
-  3. 门禁：模型想调、但被拦下先看文档的次数——这不是失败。
+口径分四栏，不混：
+  1. 成功：动作真的做成了；
+  2. 如实拒绝：世界说不（不存在 / 没权限 / 重名 / 该地址不支持）——系统照实说"不"，这不是故障；
+  3. 调用有误：参数名或形状错——调用方的问题，不是世界的问题；
+  4. 未确认：系统没看见结果（unknown）。"丢回执"单列，它才是真正的系统异常。
+
+  门禁（needs-inspection）单列：模型想调、但被拦下先看文档，下一轮会重试——不是失败。
 
 用法：analyze.py <环境根> [...]
 """
@@ -12,6 +15,13 @@ import json
 import os
 import sys
 from collections import Counter, defaultdict
+
+# 世界说不：目标不存在、没权限、重名、类型不对、超上限、不是文本、链接——系统照实拒绝。
+WORLD_NO = {"not-found", "denied", "permission-denied", "already-exists", "wrong-kind",
+            "too-large", "not-utf8", "link"}
+# 调用有误：参数名/形状不对——调用方给错了，不是世界的问题。
+CALLER_ERROR = {"invalid-argument", "invalid-parameter", "invalid-path",
+                "missing-parameter", "unknown-parameter", "unknown-capability"}
 
 
 def load(path):
@@ -105,13 +115,21 @@ def main(roots):
                 failures[obs.get("failure") or "未标明"] += 1
 
     executed = states["success"] + states["failure"] + states["unknown"]
-    print(f"活动 {len(runs)} 次 · 动作 {executed} 次 · "
-          f"成功 {states['success']} · 失败 {states['failure']} · 未确认 {states['unknown']}")
+    print(f"活动 {len(runs)} 次 · 动作 {executed} 次")
     if executed:
         print(f"执行成功率 {states['success'] * 100.0 / executed:.1f}%")
+    world_no = sum(v for k, v in failures.items() if k in WORLD_NO)
+    caller_error = sum(v for k, v in failures.items() if k in CALLER_ERROR)
+    other = states["failure"] - world_no - caller_error
+    if executed:
+        print(f"  成功     {states['success']:4d} ({states['success'] * 100.0 / executed:5.1f}%)")
+        print(f"  如实拒绝 {world_no:4d} ({world_no * 100.0 / executed:5.1f}%)  ← 世界说不，不是故障")
+        print(f"  调用有误 {caller_error:4d} ({caller_error * 100.0 / executed:5.1f}%)  ← 参数名/形状错")
+        print(f"  未确认   {states['unknown']:4d} ({states['unknown'] * 100.0 / executed:5.1f}%)  ← 系统没看见结果")
+        print(f"  丢回执   {states['missing']:4d}  ← 真正的系统异常")
+        if other:
+            print(f"  其他失败 {other:4d}")
     print(f"门禁拦下先看文档 {gated} 次（不算失败）· 派发 {prepared} 次")
-    if states["missing"]:
-        print(f"⚠ 派发后无回执 {states['missing']} 次")
     print("结局：" + " · ".join(f"{k}={v}" for k, v in endings.most_common()))
     print(f"最后留下正文 {answered} 次 · 没留正文 {len(runs) - answered} 次")
 
