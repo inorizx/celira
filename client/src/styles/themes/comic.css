@@ -79,6 +79,7 @@
   --bubble-self-from: #ff7a66;
   --bubble-self-to: #ff9a8a;
   --bubble-self-foreground: #241612;
+  --bubble-quote-surface: rgb(0 0 0 / 0.08);
   --bubble-peer: #292521;
   --bubble-peer-foreground: #f5efe2;
   --presence-online: #5cc982;

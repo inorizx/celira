@@ -50,7 +50,7 @@ export function ReplyQuote({
       className={cn(
         'mb-2 cursor-pointer rounded-lg border-l-2 px-2.5 py-1.5 text-caption transition-opacity hover:opacity-75',
         onSelfBubble
-          ? 'border-bubble-self-foreground/45 bg-white/10 text-bubble-self-foreground'
+          ? 'border-bubble-self-foreground/45 bg-bubble-quote-surface text-bubble-self-foreground'
           : 'border-primary/60 bg-muted text-muted-foreground',
         recalled && 'opacity-60',
         unloaded && 'opacity-70',

@@ -46,6 +46,9 @@
   --bubble-self-from: #6a52d8;
   --bubble-self-to: #7059e0;
   --bubble-self-foreground: #ffffff;
+  /* 引用层：在气泡底色上「提亮还是加深」由主题决定——深底提亮、亮底加深。
+     默认（深色气泡）10% 白；亮底气泡的主题在各自文件里覆盖成 8% 黑。 */
+  --bubble-quote-surface: rgb(255 255 255 / 0.10);
   --bubble-peer: #ffffff;
   --bubble-peer-foreground: #1a1826;
   --presence-online: #2f7843;
@@ -158,6 +161,7 @@
   --color-bubble-self-from: var(--bubble-self-from);
   --color-bubble-self-to: var(--bubble-self-to);
   --color-bubble-self-foreground: var(--bubble-self-foreground);
+  --color-bubble-quote-surface: var(--bubble-quote-surface);
   --color-bubble-peer: var(--bubble-peer);
   --color-bubble-peer-foreground: var(--bubble-peer-foreground);
   --color-presence-online: var(--presence-online);
