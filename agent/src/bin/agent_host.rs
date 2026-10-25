@@ -85,7 +85,7 @@ const USAGE: &str = "\
   --im-endpoint     声明 Celira IM 的端点：门铃就来自它。必给——没有它就没有门铃。
   --context-window  声明这次清醒期的上下文窗口（状态行 `context` 段的分母）；
                     不给时取适配层当前模型档位的公开标称值。`0` 不是合法声明。
-  --terminal <tier> 声明 terminal 窗的档位：`none` = 明确不要这只手；**不给也等于 none**
+  --terminal <tier> 声明 terminal 窗的档位：`none` = 明确不要这只手；不给也等于 none
                     （没有手，不跑任何后端探针）；三档：`none` / `sandbox` / `full`；
                     `sandbox` = 只能写自己的环境根、系统只读、默认断网（Linux 上由 bwrap
                     或 identity 执行；显式要它但不可用 ⇒ 拒绝启动并报 `sandbox-unavailable`）；
@@ -96,7 +96,7 @@ const USAGE: &str = "\
                     这一档由主人给，不是 Agent 能申请的；未知档位直接拒绝，不静默降档。
   --skills <引用>   显式覆盖这一支的技能引用（一般不用给：读它自己的 `agent.conf` 的
                     `skills=`，再没有就 `all`）。`all` ＝ 全部；`none` ＝ 一项都不启用；
-                    或逗号分隔的**一级目录名**（不是 frontmatter 的显示名，也不是包里的
+                    或逗号分隔的一级目录名（不是 frontmatter 的显示名，也不是包里的
                     子技能名）。只过滤开场索引，不改 `files_*` 读面，也不授予能力；
                     显式名单是快照，之后新装的技能不会自动进来。改引用要重启本进程。
   --mcp <声明>      装一台外部来源的 App（MCP server），可重复（一台一条）。
