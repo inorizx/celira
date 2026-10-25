@@ -30,6 +30,15 @@
 //! 如实写 `skills: 0 项（技能区为空）`——`None ≠ Some(0)`，`0 项` 也不是"没有技能区"的另一种说法。
 //! ⚠ **`None` 这一格里仍合着三种情形**（`skills/` 不存在 / 不是目录 / 读不出来）——本件不区分。
 //!
+//! ## 引用（2026-10-25）：库是家的，引用是每支 Agent 的
+//!
+//! [`SkillRef`] 是**装配期的可见性声明**：`All`（缺省）＝ 库里的全部一级条目；`None` ＝ 一项都不
+//! 启用；`Only` ＝ 只启用名单里的**一级目录名**（不是 frontmatter 的显示名，也不是包里的子技能名）。
+//! 它只过滤**开场索引**；正文仍然走通用 `files_*`，所以这是**软引用**，不是访问控制。引用也**不
+//! 授予任何能力**——技能是方法，能力仍归 MCP / 终端那几份授权。
+//!
+//! 一个显式名单是**快照语义**：之后新装的技能不会自动进老 Agent 的索引；`All` 则跟随技能库。
+//!
 //! ## 物理约定（零机制，只定形状）
 //!
 //! - 技能根：`<材料根>/skills/`——只有这个目录下的才算；
@@ -96,9 +105,98 @@ pub fn skills_root(material_root: &Path) -> PathBuf {
     material_root.join(SKILLS_DIR)
 }
 
+/// **这一支启用了哪些技能**（宿主声明，装配期事实）。
+///
+/// 匹配的是**一级目录名**（[`SkillEntry::id`]）——稳定身份，不是可改的显示名，也不是包里的子技能名。
+/// 它只过滤开场索引：正文仍可由 `files_*` 读到（软引用），也不授予任何能力。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SkillRef {
+    /// 库里的全部一级条目（缺省；跟随技能库，新装的下一次装配会出现）。
+    #[default]
+    All,
+    /// 一项都不启用（开场索引如实写 0 项，并报技能区总数；不是假装技能区为空）。
+    None,
+    /// 只启用这些一级目录名；显式名单是快照，新装技能不会自动进。
+    Only(Vec<String>),
+}
+
+impl SkillRef {
+    /// 解析宿主给的引用：`all` / `none` / 逗号分隔的一级目录名。
+    ///
+    /// `all` 与 `none` 只能单独写；空项、路径分隔符、`.` / `..` 都拒绝——引用不是路径。
+    /// 重复名字按第一次出现保留；顺序不影响索引（索引仍按目录名排序）。
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err("技能引用不能为空（全部要写 all，一项都不要写 none）".to_string());
+        }
+        match trimmed.to_ascii_lowercase().as_str() {
+            "all" => return Ok(Self::All),
+            "none" => return Ok(Self::None),
+            _ => {}
+        }
+        let mut names: Vec<String> = Vec::new();
+        for part in trimmed.split(',') {
+            let name = part.trim();
+            if name.is_empty() {
+                return Err("技能引用里有空项".to_string());
+            }
+            if name.eq_ignore_ascii_case("all") || name.eq_ignore_ascii_case("none") {
+                return Err("技能引用里的 all / none 只能单独写".to_string());
+            }
+            if name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+                return Err(format!("技能引用只写一级目录名（不是路径）：{name}"));
+            }
+            if !names.iter().any(|existing| existing == name) {
+                names.push(name.to_string());
+            }
+        }
+        Ok(Self::Only(names))
+    }
+
+    /// 宿主读数里的稳定写法。
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::All => "all".to_string(),
+            Self::None => "none".to_string(),
+            Self::Only(names) => names.join(","),
+        }
+    }
+
+    /// 这个名字的一级条目是否启用。
+    pub fn permits(&self, id: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::None => false,
+            Self::Only(names) => names.iter().any(|name| name == id),
+        }
+    }
+}
+
+/// 一次读取的结果：**启用条目的索引** ＋ **技能区原有的总数**。
+///
+/// 两个数分开，是为了让「技能区为空」与「有技能、但这一支一项都没启用」不混成同一句话。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillIndex {
+    /// 启用的一级条目（已按目录名排序、已按引用过滤）。
+    pub entries: Vec<SkillEntry>,
+    /// 过滤前的总数（技能区里一级目录的个数）。
+    pub total: usize,
+}
+
+impl SkillIndex {
+    /// 全部启用（测试与 `All` 路径用）。
+    pub fn all(entries: Vec<SkillEntry>) -> Self {
+        let total = entries.len();
+        Self { entries, total }
+    }
+}
+
 /// 一个一级条目：显示名 ＋ 一句触发说明（正文不在里面）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillEntry {
+    /// **稳定身份 = 一级目录名**（引用按它匹配；显示名可以改，它不改）。
+    pub id: String,
     /// frontmatter `name:`，缺省回退目录名；已消毒（单行、≤ [`MAX_NAME_BYTES`]）。
     pub display: String,
     /// frontmatter `description:` 的一句触发（按预算取整句）；没有/不可解析 ⇒ `None`。
@@ -283,6 +381,7 @@ pub fn read_skills(material_root: &Path) -> Option<Vec<SkillEntry>> {
                     .unwrap_or_default();
                 let (name, hint) = read_manifest(&dir.join(MANIFEST_FILE));
                 SkillEntry {
+                    id: dir_name.clone(),
                     display: name
                         .or_else(|| one_line(&dir_name, MAX_NAME_BYTES))
                         .unwrap_or_default(),
@@ -293,41 +392,83 @@ pub fn read_skills(material_root: &Path) -> Option<Vec<SkillEntry>> {
     )
 }
 
+/// 按一支 Agent 的引用读技能索引。
+///
+/// `None` = 材料根上没有技能区（与 [`read_skills`] 同义）；`Some(index)` = 技能区在。
+/// `index.total` 是过滤前的总数，`index.entries` 只含启用条目——两个数分开，
+/// 「技能区为空」与「有技能但一项都没启用」因此说得清。
+pub fn read_skills_for(material_root: &Path, reference: &SkillRef) -> Option<SkillIndex> {
+    let entries = read_skills(material_root)?;
+    let total = entries.len();
+    Some(SkillIndex {
+        entries: entries
+            .into_iter()
+            .filter(|entry| reference.permits(&entry.id))
+            .collect(),
+        total,
+    })
+}
+
 /// 技能桌面（与纸条板同款：装配期读一次，开场摆一次）。
 pub struct SkillsDesktop<Inner> {
     /// 装配期读回来的索引：`None` = 没有技能区（**整块不出场**）。
-    entries: Option<Vec<SkillEntry>>,
+    index: Option<SkillIndex>,
     inner: Inner,
 }
 
 impl<Inner> SkillsDesktop<Inner> {
     /// 用装配期读回来的那一份装配：索引（可缺）＋ 内层来源。
+    ///
+    /// 这个构造点把一份 `Vec` 视为「全部启用」；按引用过滤过的路径用 [`Self::with_index`]。
     pub fn new(entries: Option<Vec<SkillEntry>>, inner: Inner) -> Self {
-        Self { entries, inner }
+        Self {
+            index: entries.map(SkillIndex::all),
+            inner,
+        }
+    }
+
+    /// 用已按引用过滤的索引装配（`total` 是过滤前的总数）。
+    pub fn with_index(index: Option<SkillIndex>, inner: Inner) -> Self {
+        Self { index, inner }
     }
 
     /// 本件那一条读数；`None` = 这一块不出场。
     ///
     /// **有界**：最多 [`MAX_LISTED`] 条，其余如实说"另 N 项"；每条只有名字与一句触发说明。
     pub fn reading(&self) -> Option<String> {
-        let entries = self.entries.as_ref()?;
-        if entries.is_empty() {
-            return Some("skills: 0 项（技能区为空）".to_string());
+        let index = self.index.as_ref()?;
+        if index.entries.is_empty() {
+            return Some(if index.total == 0 {
+                "skills: 0 项（技能区为空）".to_string()
+            } else {
+                format!(
+                    "skills: 0 项（没有启用任何技能；技能区共 {} 项）",
+                    index.total
+                )
+            });
         }
-        let mut out = format!(
-            "skills: {} 项（要翻看用 files_list，路径 {SKILLS_DIR}/）",
-            entries.len()
-        );
-        for entry in entries.iter().take(MAX_LISTED) {
+        let mut out = if index.entries.len() == index.total {
+            format!(
+                "skills: {} 项（要翻看用 files_list，路径 {SKILLS_DIR}/）",
+                index.entries.len()
+            )
+        } else {
+            format!(
+                "skills: {} 项（已启用；技能区共 {} 项；要翻看用 files_list，路径 {SKILLS_DIR}/）",
+                index.entries.len(),
+                index.total
+            )
+        };
+        for entry in index.entries.iter().take(MAX_LISTED) {
             out.push('\n');
             match &entry.hint {
                 Some(hint) => out.push_str(&format!("  {} — {hint}", entry.display)),
                 None => out.push_str(&format!("  {}", entry.display)),
             }
         }
-        if entries.len() > MAX_LISTED {
+        if index.entries.len() > MAX_LISTED {
             out.push('\n');
-            out.push_str(&format!("  …另 {} 项", entries.len() - MAX_LISTED));
+            out.push_str(&format!("  …另 {} 项", index.entries.len() - MAX_LISTED));
         }
         Some(out)
     }
@@ -379,6 +520,7 @@ mod tests {
         let hint = cue(&"说".repeat(200), MAX_HINT_BYTES).expect("非空");
         let entries: Vec<SkillEntry> = (0..MAX_LISTED)
             .map(|_| SkillEntry {
+                id: "one".to_string(),
                 display: display.clone(),
                 hint: Some(hint.clone()),
             })
@@ -456,6 +598,64 @@ mod tests {
         assert!(
             cut.trim_end_matches('…').chars().all(|ch| ch == '描'),
             "不许切出半个字"
+        );
+    }
+
+    #[test]
+    fn a_skill_reference_parses_all_none_and_a_directory_name_list() {
+        assert_eq!(SkillRef::parse("all"), Ok(SkillRef::All));
+        assert_eq!(SkillRef::parse(" ALL "), Ok(SkillRef::All));
+        assert_eq!(SkillRef::parse("none"), Ok(SkillRef::None));
+        assert_eq!(
+            SkillRef::parse("release-note, ops,release-note"),
+            Ok(SkillRef::Only(vec![
+                "release-note".to_string(),
+                "ops".to_string()
+            ])),
+            "逗号分隔、去空白、去重；顺序保持输入顺序"
+        );
+        assert_eq!(
+            SkillRef::parse("release-note").expect("单项").as_text(),
+            "release-note"
+        );
+        assert_eq!(SkillRef::All.as_text(), "all");
+        assert_eq!(SkillRef::None.as_text(), "none");
+
+        for bad in ["", "all,none", "a,,b", "a/b", ".."] {
+            assert!(SkillRef::parse(bad).is_err(), "应当拒绝：{bad}");
+        }
+    }
+
+    #[test]
+    fn a_filtered_index_says_enabled_count_and_catalog_total() {
+        let entries = vec![SkillEntry {
+            id: "alpha".to_string(),
+            display: "pretty-alpha".to_string(),
+            hint: None,
+        }];
+        let reading = SkillsDesktop::with_index(
+            Some(SkillIndex { entries, total: 2 }),
+            ActivityOrigin::new(),
+        )
+        .reading()
+        .expect("有索引就有读数");
+        assert_eq!(
+            reading,
+            "skills: 1 项（已启用；技能区共 2 项；要翻看用 files_list，路径 skills/）\n  pretty-alpha"
+        );
+
+        let empty = SkillsDesktop::with_index(
+            Some(SkillIndex {
+                entries: Vec::new(),
+                total: 2,
+            }),
+            ActivityOrigin::new(),
+        )
+        .reading()
+        .expect("有索引就有读数");
+        assert_eq!(
+            empty, "skills: 0 项（没有启用任何技能；技能区共 2 项）",
+            "有技能但一项都没启用，不许说成技能区为空"
         );
     }
 }

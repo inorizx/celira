@@ -55,7 +55,7 @@ use crate::pins_board::PinsBoard;
 use crate::previous_activity::{PreviousActivity, PreviousReading, UnsettledOperation};
 use crate::recovery::{self, RunState};
 use crate::self_concept::{IdentityClaim, SelfConceptBoard};
-use crate::skills_desktop::{SkillEntry, SkillsDesktop, read_skills};
+use crate::skills_desktop::{SkillIndex, SkillRef, SkillsDesktop, read_skills_for};
 use crate::status_bar::StatusBar;
 use crate::store::{Admission, Environment, EnvironmentReader, TracePayload, WakeOrigin};
 use crate::terminal_app::{TERMINAL_APP_ID, TerminalAccess, TerminalApp};
@@ -579,6 +579,12 @@ pub struct SessionDeclarations {
     /// 它由宿主按这一支的 `agent.conf`（`files=`）在**启动时**定，与 `terminal` 同一族：
     /// 换档的生效点是下一次装配，本层不猜、也不给"半开"的中间档。
     pub files: FilesScope,
+    /// **技能引用**（2026-10-25）：这一支的开场索引只出现这些一级条目；[`SkillRef::All`]（缺省）
+    /// ＝ 库里的全部。由宿主按 `agent.conf` 的 `skills=` 在装配期给出。
+    ///
+    /// ⚠ 它只过滤**开场索引**，不改通用 `files_*` 读面（正文仍读得到）——这是**软引用**，不是
+    /// 访问控制；也**不授予任何能力**。显式名单是快照，新装技能不会自动进；`All` 跟随技能库。
+    pub skills: SkillRef,
     /// 宿主给出的文本创建授权；`None` = 这一次活动不能新建文本。
     pub creation: Option<CreationGrant>,
     /// **这一次装配用的模型名**（2026-10-08）：开场那一行 `model` 的取值。
@@ -811,7 +817,7 @@ struct OpeningMaterials {
     /// 主体钉住的**动作详情**（自持物、跨 Run；`None` = 读不出来，不是"没钉"）。
     pinned_actions: Option<Vec<String>>,
     /// 技能索引（`None` = 材料区没有技能区 ⇒ 那一块整块不出场）。
-    skills: Option<Vec<SkillEntry>>,
+    skills: Option<SkillIndex>,
     /// 主体自己约下的时刻（**持有物**；读失败 ⇒ `None` ⇒ 如实渲染 `unknown`，不冒充"没安排过"）。
     holdings: Option<Vec<crate::holdings::HoldingRow>>,
     /// 自识（三态：缺席 / 在 / 读不出来）。
@@ -881,6 +887,7 @@ fn origin_text(origin: WakeOrigin) -> &'static str {
 fn read_opening_materials(
     environment_root: &Path,
     material_root: &Path,
+    skill_ref: &SkillRef,
     previous: PreviousReading,
     openings_that_thought: &[Vec<(String, String)>],
 ) -> OpeningMaterials {
@@ -892,7 +899,7 @@ fn read_opening_materials(
         // 装配这一层不翻它的存储、不认识它的记录类型。
         pinned: crate::notes_app::pinned_material(environment_root).ok(),
         pinned_actions: crate::pinned_actions::pinned_actions(environment_root).ok(),
-        skills: read_skills(material_root),
+        skills: read_skills_for(material_root, skill_ref),
         // **持有物**：主体自己约下的时刻。它与 `pinned` / `pinned_actions` 同款——读的是
         // 自己的地盘，因此不需要任何授权，也不需要宿主参与；`None` = 读不出来（不是"没约过"）。
         //
@@ -1161,7 +1168,7 @@ fn situation_chain(
                 materials.handoff_delivered,
                 PinnedActions::new(
                     materials.pinned_actions.as_deref(),
-                    SkillsDesktop::new(
+                    SkillsDesktop::with_index(
                         materials.skills.clone(),
                         EventCards::new(
                             live.cards,
@@ -1777,6 +1784,7 @@ impl<'a> RunSession<'a> {
         let materials = read_opening_materials(
             &environment_root,
             material_root,
+            &declarations.skills,
             previous,
             &readings.openings_that_thought,
         );

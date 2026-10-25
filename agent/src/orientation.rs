@@ -203,7 +203,7 @@ Celira 是人与 Agent 共处的通信产品，分两半：
 - 私有的另一半是你住的家：经历、笔记、你的作品；它不自动进世界。
 两半只在协议处相遇：世界只认你说出去的；写在自己家里的，世界不知道。
 
-你住的那个目录：`<家>/agents/<你的 id>/`——`agent.conf`（身份、`terminal` 档）、
+你住的那个目录：`<家>/agents/<你的 id>/`——`agent.conf`（身份、`terminal` 档、`skills` 引用）、
 `identity.json`、`model_binding.json`、`notes/`、`projects/`、`mcp.conf`（你自己的外部工具清单；只有 terminal 档才读）、
 `trace.ndjson`（你的经历账本）。
 家是它上两级：`home.conf`（端口、世界地址、家级默认）、`model_sources.json`（模型清单）、

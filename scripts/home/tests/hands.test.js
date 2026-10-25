@@ -83,6 +83,31 @@ hCase('★ 手的三条规则：支级覆盖家级 ／ `mcp=none` 一只都不�
   assert.equal(none.mcpSource, 'none')
 })
 
+// **技能引用**（2026-10-25）：支级事实，从 `agent.conf` 的 `skills=` 读；不跟家级走。
+// 没写 = 空串 ⇒ 宿主缺省 all（不是「一项都不要」）。
+hCase('★ 技能引用：支级 agent.conf 的 skills= 进 hands；没写就是缺省 all', () => {
+  const home = scratch('skills', [])
+  const declared = makeResident(home.homeDir, 'a-1', { lines: ['skills=release-note,ops'] })
+  const silence = makeResident(home.homeDir, 'a-2', { slot: 2, roomId: 'r-2' })
+
+  const hands = handsOf(home.homeDir, home.confFile, declared)
+  assert.equal(hands.skills, 'release-note,ops', '支级声明原样读出来')
+  assert.equal(handsOf(home.homeDir, home.confFile, silence).skills, '', '没写就是空（宿主缺省 all）')
+
+  const lines = up.handNotices({
+    who: '住户 a-1：',
+    hands,
+    terminal: residents.resolveTerminal(hands, { isWindows: false, isLinux: true }),
+  })
+  assert.ok(
+    lines.some((line) => line.includes('[skills]') && line.includes('技能引用=release-note,ops')),
+    `读数要说清技能引用：${lines.join('\n')}`,
+  )
+
+  const legacy = { agentId: 'a-old', envDir: '/tmp/legacy', slot: 1, roomId: 'r-old', legacy: true }
+  assert.equal(handsOf(home.homeDir, home.confFile, legacy).skills, '', '老家没有支级声明位 ⇒ 缺省 all')
+})
+
 hCase('★ 老家那一支（还没迁）：手从 home.conf 读，来源如实报 `home`（不假装它有 agent.conf）', () => {
   const home = scratch('legacy', ['mcp_a=stdio:node a.js', 'agent_id=a-old', 'room_id=r-old'])
   const legacy = { agentId: 'a-old', envDir: P.legacyEnvRoot(home.homeDir), slot: 1, roomId: 'r-old', legacy: true }
@@ -186,12 +211,13 @@ hCase('★ 读数：按支说、说清来源（跟家走 / 它自己的 / 明确
 
 hCase('★ 重写身份不许吞掉手：`writeAgentConf` 更新身份时 `mcp_*` / `terminal=` 原样留着', () => {
   const home = scratch('survive')
-  const resident = makeResident(home.homeDir, 'a-1', { lines: ['mcp_b=stdio:node b.js', 'terminal=none', 'note=keep'] })
+  const resident = makeResident(home.homeDir, 'a-1', { lines: ['mcp_b=stdio:node b.js', 'terminal=none', 'skills=release-note', 'note=keep'] })
   residents.writeAgentConf(P.agentConfPath(home.homeDir, 'a-1'), { agentId: 'a-1', roomId: 'r-9', slot: 1 })
   const text = fs.readFileSync(P.agentConfPath(home.homeDir, 'a-1'), 'utf8')
   assert.match(text, /room_id=r-9/, '身份那一行要更新')
   assert.match(text, /mcp_b=stdio:node b\.js/, '手不许被吞')
   assert.match(text, /terminal=none/, '终端档不许被吞')
+  assert.match(text, /skills=release-note/, '技能引用不许被吞')
   assert.match(text, /note=keep/, '别人的行也不许被吞')
 })
 

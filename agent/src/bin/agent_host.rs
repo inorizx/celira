@@ -54,6 +54,7 @@ use celira_agent::provider_adapter::{
 };
 use celira_agent::responses_adapter::{self, ResponsesModel};
 use celira_agent::self_concept::IdentityClaim;
+use celira_agent::skills_desktop::{SkillRef, read_skills};
 use celira_agent::terminal_app::{TerminalAccess, TerminalTier};
 use celira_agent::timer_app::TIMER_FILE;
 use celira_agent::wake::{TimerSource, WakeHub, Woken};
@@ -93,6 +94,11 @@ const USAGE: &str = "\
   --files <档位>    声明文件面的档位：`own`（缺省）＝ 只能动自己那一块（资料根读、
                     作品目录写）；`full` ＝ 任意文件夹（`files_*` 的地址一律写绝对路径）。
                     这一档由主人给，不是 Agent 能申请的；未知档位直接拒绝，不静默降档。
+  --skills <引用>   显式覆盖这一支的技能引用（一般不用给：读它自己的 `agent.conf` 的
+                    `skills=`，再没有就 `all`）。`all` ＝ 全部；`none` ＝ 一项都不启用；
+                    或逗号分隔的**一级目录名**（不是 frontmatter 的显示名，也不是包里的
+                    子技能名）。只过滤开场索引，不改 `files_*` 读面，也不授予能力；
+                    显式名单是快照，之后新装的技能不会自动进来。改引用要重启本进程。
   --mcp <声明>      装一台外部来源的 App（MCP server），可重复（一台一条）。
                     形状：`<名>=stdio:<命令>[,read-only][,timeout=<秒>][,keep-alive|,idle=<秒>]`
                       <名>      动词前缀：它的动词叫 `<名>_<工具名>`（ASCII 字母开头）。
@@ -136,6 +142,7 @@ const USAGE: &str = "\
   唤醒通道终结与环境准入问题都以退出读数 + 一行 next 交回给操作者。
 ";
 
+#[derive(Debug)]
 struct Options {
     root: String,
     agent: String,
@@ -147,6 +154,9 @@ struct Options {
     terminal_tier: Option<String>,
     /// **文件面的档位**（`--files own|full`；不给 = `own` ⇒ 只能动自己那一块）。
     files_tier: Option<String>,
+    /// **技能引用的显式覆盖**（`--skills all|none|一级目录名,...`）；`None` = 读这一支
+    /// `agent.conf` 的 `skills=`（再没有就 `all`）。
+    skills: Option<SkillRef>,
     /// **出网档**的原始声明（`--web off|fetch|full`；缺省 full = 出厂以来的样子）。
     web_tier: Option<String>,
     /// `--mcp` 的**原始声明**（可重复，一台一条）。
@@ -177,6 +187,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
     let mut im_endpoint: Option<String> = None;
     let mut terminal_tier: Option<String> = None;
     let mut files_tier: Option<String> = None;
+    let mut skills: Option<SkillRef> = None;
     let mut web_tier: Option<String> = None;
     let mut mcp: Vec<String> = Vec::new();
     let mut model: Option<String> = None;
@@ -193,9 +204,9 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
         match argument {
             "--help" | "-h" => return Ok(None),
             "--root" | "--agent" | "--materials" | "--max-turns" | "--context-window"
-            | "--terminal" | "--files" | "--web" | "--mcp" | "--model" | "--model-endpoint"
-            | "--model-protocol" | "--model-sources" | "--web-sources" | "--identity-agent"
-            | "--identity-name" | "--im-endpoint" => {
+            | "--terminal" | "--files" | "--skills" | "--web" | "--mcp" | "--model"
+            | "--model-endpoint" | "--model-protocol" | "--model-sources" | "--web-sources"
+            | "--identity-agent" | "--identity-name" | "--im-endpoint" => {
                 index += 1;
                 let value = args
                     .get(index)
@@ -212,6 +223,12 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
                     "--context-window" => context_window = Some(value),
                     "--terminal" => terminal_tier = Some(value),
                     "--files" => files_tier = Some(value),
+                    "--skills" => {
+                        skills = Some(
+                            SkillRef::parse(&value)
+                                .map_err(|message| format!("--skills 读不懂（{message}）"))?,
+                        )
+                    }
                     "--web" => web_tier = Some(value),
                     // **可重复**：一台 server 一条声明（重名由 resolve 那一关拒绝）。
                     "--mcp" => mcp.push(value),
@@ -262,6 +279,7 @@ fn parse(args: &[String]) -> Result<Option<Options>, String> {
     Ok(Some(Options {
         terminal_tier,
         files_tier,
+        skills,
         web_tier,
         mcp,
         root: root.ok_or_else(|| "缺 --root".to_string())?,
@@ -301,6 +319,45 @@ fn im_credential() -> Result<String, String> {
         _ => Err(format!(
             "缺少 {IM_CREDENTIAL_ENV}（im 的 BackendAuth 凭据）"
         )),
+    }
+}
+
+/// 读这一支 `agent.conf` 的 `skills=`（缺文件/缺行 ⇒ `all`；读不出/读不懂 ⇒ 明确失败）。
+///
+/// **为什么在宿主入口读**：技能引用是这一支的装配事实，和 `mcp.conf` 一样以环境根为准；
+/// 两个启动器（`node home.js` 与桌面壳）因此不必各抄一份解析。`--skills` 只是显式覆盖。
+/// 语义与 `scripts/home/conf.js` 的 `confGet` 一致：**第一行** `skills=` 胜出。
+fn read_agent_conf_skills(root: &Path) -> Result<SkillRef, String> {
+    let path = root.join("agent.conf");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(SkillRef::All),
+        Err(error) => {
+            return Err(format!(
+                "读不出 {}（{error}）；要用显式引用就加 --skills",
+                path.display()
+            ));
+        }
+    };
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(value) = line.strip_prefix("skills=") {
+            return SkillRef::parse(value).map_err(|message| {
+                format!(
+                    "{} 的 skills= 读不懂（{message}）；修好它或显式加 --skills",
+                    path.display()
+                )
+            });
+        }
+    }
+    Ok(SkillRef::All)
+}
+
+/// 这一次装配的技能引用：显式 `--skills` 优先，否则读这一支的 `agent.conf`。
+fn resolve_skills(options: &Options) -> Result<SkillRef, String> {
+    match &options.skills {
+        Some(skills) => Ok(skills.clone()),
+        None => read_agent_conf_skills(Path::new(&options.root)),
     }
 }
 
@@ -404,6 +461,14 @@ fn main() -> ExitCode {
         }
     };
 
+    let skills = match resolve_skills(&options) {
+        Ok(skills) => skills,
+        Err(message) => {
+            eprintln!("agent_host: {message}");
+            return ExitCode::from(1);
+        }
+    };
+
     let mut out = String::new();
     use std::fmt::Write as _;
     let _ = writeln!(out, "celira-agent-host v1");
@@ -411,6 +476,26 @@ fn main() -> ExitCode {
     let _ = writeln!(out, "agent={}", escape_field(&options.agent));
     let _ = writeln!(out, "material-root={}", escape_field(&options.materials));
     let _ = writeln!(out, "max-turns={}", options.max_turns);
+    // **技能引用**（2026-10-25）：装配期事实；`total` 是技能区里一级目录的个数（读不出来 = 0，
+    // 与「没有技能区」同形，逐项缺失由下面的 `skills-missing=` 如实说）。
+    let known_skills = read_skills(Path::new(&options.materials));
+    let _ = writeln!(
+        out,
+        "skills={} total={}",
+        skills.as_text(),
+        known_skills.as_ref().map_or(0, |entries| entries.len())
+    );
+    if let SkillRef::Only(names) = &skills {
+        let ids: Vec<&str> = known_skills
+            .as_ref()
+            .map(|entries| entries.iter().map(|entry| entry.id.as_str()).collect())
+            .unwrap_or_default();
+        for name in names {
+            if !ids.contains(&name.as_str()) {
+                let _ = writeln!(out, "skills-missing={}", escape_field(name));
+            }
+        }
+    }
     // 横幅打印**生效的**窗口（声明解析之后的值），而不是原始字符串。
     let _ = writeln!(out, "context-window={window}");
     let _ = writeln!(out, "im-endpoint={}", escape_field(&options.im_endpoint));
@@ -586,6 +671,7 @@ fn main() -> ExitCode {
         fetch,
         terminal,
         files,
+        skills: skills.clone(),
         mcp,
         // 这一次装配用的模型收不收得到媒体材料（2026-10-17）：与上面 `model` 同一处口径
         // ——从**模型来源**里取，入口不另算一份；进程侧来源没有这一格 ⇒ fail-closed。
@@ -1333,5 +1419,108 @@ mod tests {
             ],
             "声明要原样收下（逗号与空格都是命令的一部分）"
         );
+    }
+
+    /// `--skills` 收 `all` / `none` / 逗号分隔的一级目录名，认不出就在**入口**拒绝。
+    #[test]
+    fn the_skills_flag_takes_all_none_or_a_list_and_rejects_junk() {
+        let base = arguments(&[
+            "--root",
+            "env",
+            "--agent",
+            "a",
+            "--materials",
+            "materials",
+            "--max-turns",
+            "3",
+            "--im-endpoint",
+            "http://127.0.0.1:1",
+        ]);
+        let with = |extra: &[&str]| {
+            let mut argv = base.clone();
+            argv.extend(arguments(extra));
+            parse(&argv)
+        };
+
+        assert_eq!(
+            with(&[])
+                .expect("不带 --skills 也能解析")
+                .expect("不是 --help")
+                .skills,
+            None,
+            "没给旗标 ⇒ 由 agent.conf 决定（宿主入口再读）"
+        );
+        assert_eq!(
+            with(&["--skills", "all"])
+                .expect("all")
+                .expect("不是 --help")
+                .skills,
+            Some(SkillRef::All)
+        );
+        assert_eq!(
+            with(&["--skills", "none"])
+                .expect("none")
+                .expect("不是 --help")
+                .skills,
+            Some(SkillRef::None)
+        );
+        assert_eq!(
+            with(&["--skills", "release-note, ops"])
+                .expect("名单")
+                .expect("不是 --help")
+                .skills,
+            Some(SkillRef::Only(vec![
+                "release-note".to_string(),
+                "ops".to_string()
+            ])),
+            "逗号分隔、去空白、保持输入顺序"
+        );
+
+        for bad in ["", "all,none", "release-note,", "ops/rotate"] {
+            let error = with(&["--skills", bad]).expect_err("应当拒绝");
+            assert!(
+                error.contains("--skills"),
+                "错误文本要说清是哪一个旗标：{error}"
+            );
+        }
+    }
+
+    /// `agent.conf` 的 `skills=` 由宿主入口读；缺文件/缺行 = all，坏值明确失败。
+    #[test]
+    fn the_agent_conf_skills_line_is_read_at_the_host_entry() {
+        let root = std::env::temp_dir().join(format!(
+            "celira-host-skills-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("时钟可用")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("建临时环境根");
+
+        assert_eq!(
+            read_agent_conf_skills(&root).expect("没有 agent.conf ⇒ 缺省"),
+            SkillRef::All,
+            "没有文件 = 不声明 = all"
+        );
+
+        std::fs::write(root.join("agent.conf"), "agent_id=a\nskills=release-note\n")
+            .expect("写 agent.conf");
+        assert_eq!(
+            read_agent_conf_skills(&root).expect("读得懂"),
+            SkillRef::Only(vec!["release-note".to_string()])
+        );
+
+        std::fs::write(root.join("agent.conf"), "skills=none\n").expect("写 none");
+        assert_eq!(
+            read_agent_conf_skills(&root).expect("读得懂"),
+            SkillRef::None
+        );
+
+        std::fs::write(root.join("agent.conf"), "skills=bad/name\n").expect("写坏值");
+        let error = read_agent_conf_skills(&root).expect_err("坏值要拒绝");
+        assert!(error.contains("skills= 读不懂"), "{error}");
+
+        std::fs::remove_dir_all(&root).expect("清理临时环境根");
     }
 }

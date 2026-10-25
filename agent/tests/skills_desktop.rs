@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 
 use celira_agent::core::{ContentBatch, ContextSource, InjectionContext};
 use celira_agent::skills_desktop::{
-    MAX_HINT_BYTES, MAX_LISTED, MAX_NAME_BYTES, SKILLS_DESKTOP_LABEL, SkillsDesktop, read_skills,
+    MAX_HINT_BYTES, MAX_LISTED, MAX_NAME_BYTES, SKILLS_DESKTOP_LABEL, SkillRef, SkillsDesktop,
+    read_skills, read_skills_for,
 };
 
 fn sandbox(name: &str) -> PathBuf {
@@ -289,4 +290,60 @@ fn a_missing_skills_directory_has_no_block_and_an_empty_one_says_it_is_empty() {
         .reading()
         .expect("有块（存在但空）");
     assert_eq!(reading, "skills: 0 项（技能区为空）", "空就如实说空");
+}
+
+/// **引用按一级目录名过滤**（不是 frontmatter 的显示名）；过滤后仍报技能区总数；
+/// 正文不会被引用挡住——软引用的边界要如实钉住。
+#[test]
+fn a_reference_filters_by_directory_name_and_reports_the_catalog_total() {
+    let root = sandbox("reference");
+    write_skill(
+        &root,
+        "skills/alpha/SKILL.md",
+        &skill_md("pretty-alpha", "处理甲事时用", "# 正文\n甲的步骤"),
+    );
+    write_skill(
+        &root,
+        "skills/beta/SKILL.md",
+        &skill_md("pretty-beta", "处理乙事时用", "# 正文\n乙的步骤"),
+    );
+
+    let only =
+        read_skills_for(&root, &SkillRef::Only(vec!["alpha".to_string()])).expect("有技能区");
+    assert_eq!(only.total, 2, "过滤前的总数");
+    assert_eq!(only.entries.len(), 1, "只启用 alpha");
+    assert_eq!(only.entries[0].id, "alpha");
+    let reading = SkillsDesktop::with_index(Some(only), Nothing)
+        .reading()
+        .expect("有读数");
+    assert!(
+        reading.starts_with("skills: 1 项（已启用；技能区共 2 项；"),
+        "{reading}"
+    );
+    assert!(reading.contains("pretty-alpha"), "{reading}");
+    assert!(!reading.contains("pretty-beta"), "没启用的不列: {reading}");
+
+    // 引用写的是目录名；写成显示名不算命中（显示名可变，身份是目录名）。
+    let by_display = read_skills_for(&root, &SkillRef::Only(vec!["pretty-alpha".to_string()]))
+        .expect("有技能区");
+    assert!(by_display.entries.is_empty(), "显示名不是引用身份");
+    assert_eq!(
+        SkillsDesktop::with_index(Some(by_display), Nothing)
+            .reading()
+            .expect("有读数"),
+        "skills: 0 项（没有启用任何技能；技能区共 2 项）"
+    );
+
+    // `none` 与 `all` 的两端。
+    let none = read_skills_for(&root, &SkillRef::None).expect("有技能区");
+    assert!(none.entries.is_empty());
+    assert_eq!(none.total, 2);
+    let all = read_skills_for(&root, &SkillRef::All).expect("有技能区");
+    assert_eq!(all.entries.len(), 2);
+    assert_eq!(all.total, 2);
+
+    // **软引用的事实**：beta 没启用，但正文仍在通用文件面上读得到。
+    // 这不是漏洞，是 v1 的明确边界（引用只过滤开场索引，不是 ACL）。
+    let body = fs::read_to_string(root.join("skills/beta/SKILL.md")).expect("正文可读");
+    assert!(body.contains("乙的步骤"), "软引用不挡 files_* 读取: {body}");
 }

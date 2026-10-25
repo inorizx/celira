@@ -62,6 +62,9 @@ const AGENT_CONF_KEYS = {
 const HAND_KEYS = {
   mcp: 'mcp',
   terminal: 'terminal',
+  // **技能引用**（2026-10-25）：这一支能看到技能库里的哪些一级目录。
+  // 空 = 不声明 ⇒ 宿主缺省 all；不跟家级走（技能可见性是支级事实）。
+  skills: 'skills',
 }
 
 /** 读 `<环境根>/identity.json` 的身份（`{ agent }`）；读不出来 ⇒ `null`（不编）。 */
@@ -568,6 +571,7 @@ function residentHands({ homeDir, resident, homeConfFile }) {
 
   const ownTerminal = (!legacy ? (confGet(residentFile, HAND_KEYS.terminal) || '').trim().toLowerCase() : '')
   const homeTerminal = (confGet(homeConfFile, HAND_KEYS.terminal) || '').trim().toLowerCase()
+  const skills = (!legacy ? (confGet(residentFile, HAND_KEYS.skills) || '').trim() : '')
   const known = (value) => value === 'full' || value === 'none'
   let terminal = ''
   let terminalSource = 'platform'
@@ -579,7 +583,7 @@ function residentHands({ homeDir, resident, homeConfFile }) {
     terminalSource = 'home'
   }
 
-  return { mcp, mcpSource, terminal, terminalSource }
+  return { mcp, mcpSource, terminal, terminalSource, skills }
 }
 
 /**

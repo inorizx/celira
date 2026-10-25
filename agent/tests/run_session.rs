@@ -32,6 +32,7 @@ use celira_agent::manual_entry::{
     EXIT_UNSETTLED, ManualEnding, ManualInput, ManualRun, run_host_session_in,
 };
 use celira_agent::provider_adapter::DeepSeekModel;
+use celira_agent::skills_desktop::SkillRef;
 use celira_agent::store::{Admission, Environment};
 
 mod common;
@@ -1292,6 +1293,67 @@ fn the_first_request_of_a_real_session_already_carries_her_own_verbs() {
     assert!(
         !first.contains("# 步骤"),
         "桌面块不许带清单正文（零正文）: {}",
+        redacted(first)
+    );
+}
+
+/// **引用过滤开场索引**（2026-10-25）：同一份材料区，两支不同的 `SkillRef` 看到不同的一级条目。
+/// 这是装配路径的真实验收，不只是 `read_skills_for` 的单元测试。
+#[test]
+fn a_skill_reference_filters_the_opening_index_in_a_real_session() {
+    let temp = TempDir::new("skills-reference");
+    let env_root = temp.env_root();
+    let mut environment = Environment::create(&env_root, agent_id()).expect("建立身份环境");
+
+    for (relative, body) in [
+        (
+            "skills/web-search/SKILL.md",
+            "---\nname: web-search\ndescription: 在网上搜东西并回答\n---\n\n# 步骤\n",
+        ),
+        (
+            "skills/notes-pack/notes-tidy/SKILL.md",
+            "---\nname: notes-tidy\ndescription: 把笔记整理成条目\n---\n\n# 步骤\n",
+        ),
+    ] {
+        let path = temp.materials().join(relative);
+        std::fs::create_dir_all(path.parent().expect("有父目录")).expect("建目录");
+        std::fs::write(path, body).expect("写清单");
+    }
+
+    let (endpoint, bodies) = spawn_reply_server(vec![finish_reply()]);
+    let mut run = manual_run(
+        &temp,
+        "run-skills-ref",
+        ManualInput::Text("醒着".to_string()),
+    );
+    run.declarations.skills = SkillRef::Only(vec!["web-search".to_string()]);
+    let mut model = loopback_model(&endpoint);
+    let mut host: &[u8] = b"";
+    run_host_session_in(
+        &mut environment,
+        &run,
+        RunInput::text("醒着").expect("在上限内"),
+        &mut host,
+        &mut model,
+    )
+    .expect("循环本身不该失败");
+
+    let bodies = receive_bodies(&bodies);
+    assert_eq!(bodies.len(), 1, "一次收场只驱动一轮");
+    let first = &bodies[0];
+    assert!(
+        first.contains("skills: 1 项（已启用；技能区共 2 项；要翻看用 files_list，路径 skills/）"),
+        "索引头要同时说启用数与技能区总数: {}",
+        redacted(first)
+    );
+    assert!(
+        first.contains("web-search"),
+        "启用的那一项要在: {}",
+        redacted(first)
+    );
+    assert!(
+        !first.contains("notes-pack") && !first.contains("notes-tidy"),
+        "没启用的包不许进开场索引: {}",
         redacted(first)
     );
 }

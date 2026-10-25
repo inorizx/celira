@@ -352,6 +352,11 @@ function handNotices({ who = '', hands, terminal, platform = null }) {
     const from = terminal.source === 'resident' ? '它自己的 agent.conf' : '家级 home.conf'
     out.push(`[terminal] ${who}终端档 full（来自${from}）`)
   }
+  // **技能引用**（2026-10-25）：没写 = 宿主缺省 all（默认状态，不占一行）；写了就把它说出来。
+  const skillRef = typeof hands.skills === 'string' ? hands.skills.trim() : ''
+  if (skillRef) {
+    out.push(`[skills] ${who}技能引用=${skillRef}（只影响开场索引，不授予能力）`)
+  }
   return out
 }
 
@@ -1639,7 +1644,7 @@ async function startResidentHost({
   if (agentAtStart.running) {
     // 接管那一支写进去的是**真实 pid**（对账查出来的），所以这里再读一次账本作为显示值。
     console.log(`[agent] 住户 ${agentId} 已经在等唤醒（pid ${proc.readPid(hostPidFile)}）`)
-    if (declarations.length > 0 || hands.mcpSource === 'none') {
+    if (declarations.length > 0 || hands.mcpSource === 'none' || hands.skills) {
       for (const line of handNotices({ who, hands, terminal })) console.log(line)
       console.log('      ⚠ Agent**已经在跑**：装配面是**起 Agent 那一刻**的事实 ⇒ 换面要先 node home.js down 再 up')
     }

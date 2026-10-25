@@ -455,6 +455,8 @@ im-less / 本地（已确认目标；无公共主链）：
 
 Skill 是可版本化的 Agent 工作方法/提示资源，不是公共身份、工具授权或隐式 Memory。Skill 是否对 Agent 可见必须经过明确启用关系，并在 Run Context Snapshot 中留下来源引用。
 
+**当前实现状态（2026-10-25，v1）**：技能库在 `<家>/materials/skills/`（一份）；每支 Native Agent 在 `agent.conf` 写 `skills=all|none|一级目录名,...`，宿主按它投影开场索引（缺省 `all`）。这是**索引引用**：只决定开场可见性，正文仍走通用 `files_*`，也尚未写入 Run Context Snapshot——**硬可见**与 **Snapshot 来源引用**仍是后续接入门槛；本行不把 v1 说成已支持。
+
 ### MCP
 
 MCP 只能作为 Runtime 私有 Tool Provider 来源；Server 连接、凭据、工具选择、调用上下文和审计都留在执行端，不进入 im 服务端。MCP 的动态能力不能静默改变已建立 Run 的工具上限。
