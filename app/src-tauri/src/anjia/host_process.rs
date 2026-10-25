@@ -57,27 +57,34 @@ impl HostPlatform {
     fn has_terminal_arm(self) -> bool {
         matches!(self, Self::Windows | Self::Linux)
     }
+
+    /// 有沙箱 provider 的平台（`up.js`：今天只有 Linux；provider 是否真可用由 runtime 探针回答）。
+    fn has_sandbox_arm(self) -> bool {
+        matches!(self, Self::Linux)
+    }
 }
 
-/// 一支的**终端档**（`terminal=`）：`full` / `none`。
+/// 一支的**终端档**（`terminal=`）：`none` / `sandbox` / `full`。
 ///
 /// ⚠ 判据的**权威**是 `scripts/home/residents.js` 的 `residentHands` ＋ `resolveTerminal`
 /// （两边必须一起动）：
 ///   · 支级 `agent.conf` 写了 ⇒ 用它；
 ///   · 没写 ⇒ 家级 `home.conf` 写了 ⇒ 用它；
-///   · 都没写 ⇒ **不给手**（2026-10-14 主人裁：平台默认是不给；要手只能显式写 `full`）。
+///   · 都没写 ⇒ **不给手**（2026-10-14 主人裁：平台默认是不给；要手只能显式写 `full` / `sandbox`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandTier {
+    Sandbox,
     Full,
     None,
 }
 
-/// 认取值：只有 `full` / `none` 算数，别的**当没写**（与 JS 的 `known()` 一致：不猜、不就近映射，
-/// 认不出就落到"不给"那一档）。
+/// 认取值：只有 `none` / `sandbox` / `full` 算数，别的**当没写**（与 JS 的 `known()` 一致：不猜、
+/// 不就近映射，认不出就落到"不给"那一档）。
 fn tier_of(raw: Option<String>) -> Option<HandTier> {
     match raw?.trim().to_ascii_lowercase().as_str() {
-        "full" => Some(HandTier::Full),
         "none" => Some(HandTier::None),
+        "sandbox" => Some(HandTier::Sandbox),
+        "full" => Some(HandTier::Full),
         _ => None,
     }
 }
@@ -213,15 +220,21 @@ pub fn build_host_args(spec: &HostSpec) -> Vec<String> {
         "--max-turns".into(),
         max_turns,
     ];
-    // ⚠ **终端档是支级事实，而且缺省不给**（2026-10-14 主人裁）：只有**显式声明 `full`** 才给
-    //   这只手 —— 判据与 `scripts/home/up.js` 的 `residents.resolveTerminal` 同一条（那边是权威）。
-    //   从前这一格是"有终端臂的平台就给 full"，于是"装完即整机全权"成了一个**没人声明过**的默认；
-    //   现在"要"必须被说出来（缺省那一档是"自己的区可写、出不去"）。
+    // ⚠ **终端档是支级事实，而且缺省不给**（2026-10-14 主人裁）：只有**显式声明**才给这只手。
+    //   判据与 `scripts/home/up.js` 的 `residents.resolveTerminal` 同一条（那边是权威）：
+    //   · `full`  → 有终端臂的平台（Windows / Linux）；
+    //   · `sandbox` → 有沙箱 provider 的平台（今天只有 Linux；探针由 runtime 负责，不可用则
+    //     宿主拒绝启动，不在这里把它换成 full 或 none）；
+    //   · `none` / 没写 / 平台不支持 → **不带旗标**（宿主缺省就是 none）。
     //   ⚠ 与 `up.js` 不一致就是**两个行为**（哪个平台有没有臂、谁声明了，权威都在那边）。
     //   档位就是授权本体：给了 ⇒ 这台机器随主体用（agent 侧按档位门控装配）。
-    if spec.platform.has_terminal_arm() && terminal_tier(spec) == Some(HandTier::Full) {
+    let terminal = terminal_tier(spec);
+    if terminal == Some(HandTier::Full) && spec.platform.has_terminal_arm() {
         args.push("--terminal".into());
         args.push("full".into());
+    } else if terminal == Some(HandTier::Sandbox) && spec.platform.has_sandbox_arm() {
+        args.push("--terminal".into());
+        args.push("sandbox".into());
     }
     // **外部工具的授权面**（`home.conf` 的 `mcp_*` 行）：剥掉 `mcp_` 前缀，等号右边**原样**
     // 交给宿主（`conf.js` 的 `mcpDeclarations` 同一条）。⇒ 装了哪几台由**家**声明一次，
@@ -551,7 +564,7 @@ mod tests {
             listen: "127.0.0.1:8080".to_string(),
             identity: None,
             model_sources_file: None,
-        web_sources_file: None,
+            web_sources_file: None,
             platform,
         };
         (dir, spec)
@@ -599,6 +612,34 @@ mod tests {
         assert!(!build_host_args(&other)
             .iter()
             .any(|arg| arg == "--terminal"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **sandbox 档**：Linux 上原样进 argv；Windows / 别的平台上不带（也绝不换成 full）。
+    #[test]
+    fn host_args_carry_sandbox_only_on_linux() {
+        let (dir, spec) = temp_spec("sandbox", HostPlatform::Linux, "", "terminal=sandbox\n");
+        let linux = build_host_args(&spec);
+        let at = linux
+            .iter()
+            .position(|arg| arg == "--terminal")
+            .expect("Linux 上要带");
+        assert_eq!(linux[at + 1], "sandbox");
+        assert!(
+            !linux.contains(&"full".to_string()),
+            "sandbox 不许被换成 full"
+        );
+
+        let windows = HostSpec {
+            platform: HostPlatform::Windows,
+            ..spec
+        };
+        assert!(
+            !build_host_args(&windows)
+                .iter()
+                .any(|arg| arg == "--terminal"),
+            "Windows 上没有沙箱 provider ⇒ 不带，也不落成 full"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -683,6 +724,16 @@ mod tests {
         };
         assert_eq!(declared("", "terminal=full\n"), Some(HandTier::Full));
         assert_eq!(
+            declared("", "terminal=sandbox\n"),
+            Some(HandTier::Sandbox),
+            "sandbox 要被认出来，不能当成没写"
+        );
+        assert_eq!(
+            declared("terminal=none\n", "terminal=sandbox\n"),
+            Some(HandTier::Sandbox),
+            "支级 sandbox 覆盖家级 none"
+        );
+        assert_eq!(
             declared("", "terminal=NONE\n"),
             Some(HandTier::None),
             "大小写归一"
@@ -743,7 +794,7 @@ mod tests {
         let spec = HostSpec {
             identity: Some(("a-1".to_string(), "小满".to_string())),
             model_sources_file: Some(spec.home_dir.join("model_sources.json")),
-        web_sources_file: Some(spec.home_dir.join("web_sources.json")),
+            web_sources_file: Some(spec.home_dir.join("web_sources.json")),
             ..spec
         };
         let args = build_host_args(&spec);

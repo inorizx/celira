@@ -17,8 +17,9 @@
 //!
 //! ## 词表
 //!
-//! `full` / `none`（缺省 = 没写 = 不给）——与 `scripts/home/residents.js` 的 `resolveTerminal`
-//! 同一条。**页面只认 `granted` 这个布尔**，不认档位字符串（档位是机器侧的事）。
+//! `none` / `sandbox` / `full`（缺省 = 没写 = 不给）——与 `scripts/home/residents.js` 的
+//! `resolveTerminal` 同一条。**页面只认 `granted` 这个布尔**，不认档位字符串（档位是机器侧的事）；
+//! `sandbox` 也是一只手（受限），所以读数上 `granted = true`，但页面开关今天只会写 `full` / `none`。
 //!
 //! ## 这一层不做的事
 //!
@@ -33,8 +34,9 @@ use tauri::command;
 use crate::home_facts;
 use crate::registration;
 
-/// 档位的两个取值（v1 只有这两档；与 `residents.js` 的 `resolveTerminal` 同一条）。
+/// 档位的三个取值（v1 三档；与 `residents.js` 的 `resolveTerminal` 同一条）。
 const TERMINAL_FULL: &str = "full";
+const TERMINAL_SANDBOX: &str = "sandbox";
 const TERMINAL_NONE: &str = "none";
 
 /// **本平台有没有终端臂**（与 `anjia::host_process::HostPlatform::has_terminal_arm` 同一条：
@@ -50,7 +52,7 @@ pub struct HandsReadout {
     pub homed: bool,
     /// `agent.conf` 里 `terminal=` 的原文（没写 ⇒ `None`）——只作读数，页面不拿它判档。
     pub declared: Option<String>,
-    /// 开了没有（原文归一后是 `full`）。
+    /// 开了没有（原文归一后是 `full` 或 `sandbox`；两者都是"有手"，只是效果域不同）。
     pub granted: bool,
     /// 本平台有没有终端臂（没有 ⇒ 开关不给，只怕人以为开了有用）。
     pub arm: bool,
@@ -71,9 +73,11 @@ fn readout_for(home_dir: &Path, agent_id: &str) -> HandsReadout {
         let effective = declared
             .clone()
             .or(home_facts::read_conf(home_dir).terminal);
-        effective
-            .as_deref()
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case(TERMINAL_FULL))
+        effective.as_deref().is_some_and(|value| {
+            let value = value.trim();
+            value.eq_ignore_ascii_case(TERMINAL_FULL)
+                || value.eq_ignore_ascii_case(TERMINAL_SANDBOX)
+        })
     };
     HandsReadout {
         agent_id: agent_id.to_string(),
@@ -185,6 +189,18 @@ mod tests {
             false,
             "内容没变就不许碰文件"
         );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn sandbox_counts_as_a_granted_hand_but_the_switch_still_writes_full_or_none() {
+        let (home, _env_root) = home_with_conf(
+            "sandbox",
+            "agent_id=a-1\nroom_id=\nslot=1\nterminal=sandbox\n",
+        );
+        let readout = readout_for(&home, "a-1");
+        assert!(readout.granted, "sandbox 也是一只手，页面不能显示成关着");
+        assert_eq!(readout.declared.as_deref(), Some("sandbox"));
         let _ = fs::remove_dir_all(&home);
     }
 

@@ -100,7 +100,7 @@ pub struct HomeConf {
     pub home_id: Option<String>,
     pub status_port: Option<String>,
     pub config_port: Option<String>,
-    /// **家级的终端档默认**（`terminal=full|none`；2026-10-14 主人裁那一格）。
+    /// **家级的终端档默认**（`terminal=none|sandbox|full`；2026-10-14 主人裁那一格）。
     ///
     /// 壳起 Agent 时要用它：档位是**支级事实**（`agents/<支>/agent.conf` 优先），家级这一行
     /// 只是默认；**两处都没写 ⇒ 不给手**。判据的权威是 `scripts/home/residents.js` 的
