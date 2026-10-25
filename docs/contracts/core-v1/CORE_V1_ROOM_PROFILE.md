@@ -1,14 +1,14 @@
 # Celira Core v1.1 附加切片：Group Room Profile（群简介）
 
-> 状态：**v1.1 附加切片，已获主人批准**。授权范围 = 本文件边界内的改动；
-> 边界之外的 Core v1 冻结面（身份、房间、成员、权限、消息、Event、附件、
-> 撤回、read state、投递位置）仍然冻结。本文件是「群简介」的唯一权威契约：
-> 持久形状、写读 wire、错误码、不变量与非目标。
+> 状态：**v1.1 附加切片 + 2026-10-26 接入切片，已获主人批准**。授权范围 =
+> 本文件边界内的改动；边界之外的 Core v1 冻结面（身份、房间、成员、权限、
+> 消息、Event、附件、撤回、read state、投递位置）仍然冻结。本文件是「群简介」
+> 的唯一权威契约：持久形状、写读 wire、错误码、不变量与非目标。
 >
-> ⚠ **UI 与 Runtime 尚未接入**：本切片只实现 Core（`im/server`）。`client/`
-> 与 `agent/` 零改动——没有群简介编辑界面，也没有 Runtime 动词；客户端与
-> 执行端是后续切片的消费者。Core 的端点今天已经可用，但不得据此宣称产品面
-> 或执行端已支持"查看/编辑群简介"。
+> ✅ **三层已接入（2026-10-26）**：Core（`im/server`）提供读写；客户端
+> （`client/`）的群信息抽屉可读、群主可编辑；Native Runtime（`agent/`）以
+> `im_write_room_profile` 写入，并以 `im_read_history` 的房间头读取。本文仍是
+> 群简介的唯一权威契约；客户端与 Runtime 的实现细节见各自 README 与验收记录。
 
 ## 1. 目标与拓扑（C4 Level 1–2）
 
@@ -21,11 +21,11 @@ owner**（Human 或 Agent——owner 是房内的治理角色，不是参与者 
 ### 1.2 拓扑
 
 ```text
-Client（后续切片）── Human Session ──> Core HTTP
+Client（已接入）── Human Session ──> Core HTTP
   ├─ GET /v1/rooms/{room_id}                 读简介（member-scoped 管理视图）
   └─ PUT /v1/rooms/{room_id}/profile         群主写（Human Session + Idempotency-Key）
 
-Native Runtime（后续切片）── BackendAuth ──> Core HTTP
+Native Runtime（已接入）── BackendAuth ──> Core HTTP
   ├─ PUT /v1/backend/rooms/{room_id}/profile 群主写（Agent 身份 + Idempotency-Key）
   └─ GET /v1/backend/rooms/{room_id}/messages
        历史回执带房间头（id / kind / name / profile）
@@ -288,6 +288,13 @@ owner 不限 kind）：
   仍在**。
 - 回归：`cargo test -p celira-im --all-targets` 全绿；`cargo fmt --check`
   干净；`cargo clippy -p celira-im --all-targets -- -D warnings` 干净。
+- 客户端接入（2026-10-26）：`npm test` 958/958、`npm run build`、`npm run lint`
+  全过；浏览器冒烟：群信息抽屉的空态 → 编辑 → 保存 → 显示，以及人类群主把群
+  转让给 Agent 成员的入口（Agent 行姓名仍可读）。
+- Runtime 接入（2026-10-26）：`cargo test -p celira-agent --all-targets
+  --no-fail-fast` 全绿（1082 passed；`im_app` 116 passed），新增
+  `im_write_room_profile` 的形状、参数网关、403/404/409 分类、2xx 读数留白与
+  房间头复核用例。
 
 行为证明来自公开协议 / 真实进程黑盒；SQLite 只在 migration 与 store 层证明
 持久守卫，不以直读数据库冒充 HTTP 成功证据。
@@ -296,7 +303,6 @@ owner 不限 kind）：
 
 - 公告 / 置顶 / 未读 / 通知 / SSE / 事件；
 - `POST /v1/groups` 或 Backend 建房端点的创建体（建房仍只有 `name`）；
-- `client/**` 与 `agent/**`（UI 与 Runtime 是后续切片；本切片不宣称它们已接入）；
 - `scripts/home/**`；
 - `direct` / `human_direct` 的简介（它们没有这一格）；
 - 群名可变性（`rooms.name` 仍按既有规则，创建后不改）；
