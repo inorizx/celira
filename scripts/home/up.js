@@ -181,7 +181,7 @@ function parseUpArgs(argv) {
 
 /**
  * 起 Agent 时的参数（**顺序是语义**，与 bash 版逐字节对齐）：
- * `--root … --agent … --materials … --max-turns 300 [--terminal full] [--mcp …]* --im-endpoint …
+ * `--root … --agent … --materials … --max-turns 300 [--terminal none|sandbox|full] [--mcp …]* --im-endpoint …
  *  [--model-sources …] [--identity-agent … --identity-name …]`
  * 声明 0 台外部 server 时**一个参数都不多**（回归判据就是这条"零个"）。
  *
@@ -190,15 +190,16 @@ function parseUpArgs(argv) {
  * 值换成那个地址（Agent 的门铃与 im 动词都指向它）。
  *
  * ⚠ **两处平台缝**（都按"本构建里有没有能用的臂"给）：
- * - 终端档位（第五刀）：`--terminal full` 给**有终端臂的平台**——Windows 与 Linux
- *   （`agent/src/terminal_app.rs`：臂今天两支；别的平台上这一档是**有意的 fail-closed**，传它
- *   等于让 Agent 每次开机都被拒绝启动）。没有臂的平台上**不给这个旗标**：这台机器上 Agent
- *   没有"终端"这只手 —— 如实、不静默换一个近似行为（读数由 `terminalNotice` 说出来）。
- *   **2026-10-01 第五刀**：档位由 `terminal` 入参决定（一支一个身体，手是**支级事实**）。
- *   ⚠ **2026-10-14 主人裁**：**缺省改成"不给手"** —— 这个入参的默认值因此是 `'none'`
- *   （`agent.conf` 里只有显式 `terminal=full` 才给手；老住户由 `migrateTerminalDefault`
- *   把现行的 full 显式写进它们自己的 `agent.conf`，所以"缺省变了、老住户不掉东西"）。
- *   ⇒ **入参缺省不许再写成 `'full'`**：那等于把"装完即整机全权"重新变成没人声明过的默认。
+ *        ⚠ **终端三档**（2026-10-23）：每一档都有平台前提；`full` 给有终端臂的平台
+ *        （Windows / Linux）；`sandbox` 给有沙箱 provider 的平台（今天只有 Linux）；
+ *        `none` / 平台不支持的那一档**不带旗标**，由宿主的缺省档（none）兜住。
+ *        这样不会把"明确不要"读成"给手"，也不会把 sandbox 落成 full。
+ *        "为什么这次没有手"由 `handNotices` 按 `terminal.unavailable` 分开说：
+ *        `sandbox` 不可用与 `full` 不可用是两句话。
+ *        **2026-10-01 第五刀**：档位由 `terminal` 入参决定（一支一个身体，手是**支级事实**）。
+ *        ⚠ **2026-10-14 主人裁**：**缺省是"不给手"** —— 入参默认 `'none'`；`agent.conf`
+ *        里只有显式 `terminal=full` / `terminal=sandbox` 才有手。
+ *        ⇒ **入参缺省不许再写成 `'full'`**：那等于把"装完即整机全权"重新变成没人声明过的默认。
  * - MCP（本刀）：`--mcp` 给**有 stdio 通道臂的平台**——同样是 Windows 与 Linux
  *   （`agent/src/mcp`：臂今天两支；别的平台上入口会**拒绝开启**这一档）。没有臂的平台上
  *   **不传**：`home.conf` 里的声明照旧在场（那是配置），但这台机器上装不进来 ——
@@ -217,7 +218,7 @@ function buildHostArgs({
   modelSourcesFile = null,
   // **web 源清单在哪**（2026-10-20）：与模型源同款——给清单，用哪一条在环境根的绑定里。
   webSourcesFile = null,
-  // ⚠ **缺省是"不给手"**（2026-10-14 主人裁）：只有 `terminal === 'full'` 才给这只手。
+  // ⚠ **缺省是"不给手"**（2026-10-14 主人裁）：只有显式声明（`full` / `sandbox`）才给这只手。
   //   入参的默认值也是 `'none'` —— "没说"与"说了不要"在这一档上是同一个结果，而"要"必须被说出来。
   terminal = 'none',
   // **支级资源上界**（2026-10-05）：`agent.conf` 的 `max_turns`（缺省 = 内置 300）。
@@ -232,7 +233,14 @@ function buildHostArgs({
     '--materials', materialsDir,
     '--max-turns', maxTurns ?? '300',
   ]
+  // **终端档（三档：none | sandbox | full）**：每一档只在自己有实现的那条平台上进 argv ——
+  //   · full    → Windows / Linux（有终端臂）；
+  //   · sandbox → **只有 Linux**（今天的 provider 是 bwrap / identity；Windows 的还没做）；
+  //   · none / 平台不支持的那一档 → **不带旗标**，由宿主的缺省档（none）兜住。
+  // ⚠ 平台不支持时**绝不把 sandbox 落成 full**（那是把"关起来"换成"整机全权"）。
+  //   "为什么这次没有手"由 `handNotices` 按 `terminal.unavailable` 如实说。
   if (terminal === 'full' && (isWindows || isLinux)) args.push('--terminal', 'full')
+  else if (terminal === 'sandbox' && isLinux) args.push('--terminal', 'sandbox')
   if (isWindows || isLinux) {
     for (const declaration of declarations) args.push('--mcp', declaration)
   }
@@ -330,8 +338,24 @@ function handNotices({ who = '', hands, terminal, platform = null }) {
   //   今天的行为就是这样，本刀不动它）。
 
   if (terminal.unavailable) {
+    // **声明的那一档**装不进来：说清是哪一档、为什么、这次不带，并明说**不降级**。
+    // ⚠ 两档分开说：把 sandbox 的不可用写成"声明了 full 没臂"，读数会把用户推向一个**更宽的**档。
+    if (terminal.requested === 'sandbox' || terminal.unavailableReason === 'sandbox-provider-absent') {
+      out.push(
+        `[terminal] ${who}声明了终端档 sandbox，但这台机器上没有沙箱 provider（今天只有 Linux 有；由 runtime 探测）—— 这次不带；不静默降级（不会退成 full）`,
+      )
+    } else {
+      out.push(
+        `[terminal] ${who}声明了终端档 full，但这台机器上没有终端臂（有实现的平台：Windows、Linux）—— 这次不带；不静默降级`,
+      )
+    }
+  } else if (terminal.mode === 'sandbox') {
+    // 声明了 sandbox ⇒ 交给宿主原样带 `--terminal sandbox`；**能不能真跑由 runtime 探测**
+    //（provider 不在就起不来，不降级）。这一句要让用户看见"档在这儿、能力在对面"。
+    const from =
+      terminal.source === 'resident' ? '它自己的 agent.conf' : terminal.source === 'home' ? '家级 home.conf' : '平台默认'
     out.push(
-      `[terminal] ${who}声明了终端档 full，但这台机器上没有终端臂（有实现的平台：Windows、Linux）—— 这次不带；不静默降级`,
+      `[terminal] ${who}终端档 sandbox（来自${from}）—— 由 runtime 探测 provider：装不进来就起不来，不降级成 full`,
     )
   } else if (terminal.mode === 'none') {
     // 三条来路分开说：它自己写的 / 家级写的 / **没人写过**（平台默认，2026-10-14 起是"不给"）。
@@ -374,9 +398,10 @@ const TERMINAL_DEFAULT_MIGRATED = 'migrated-2026-10-14'
  * ⚠ **判据必须是家级标记，不是"这一支跑过没有"**：拿经历当判据会把**新建的支**也迁到 full
  * （它第二次开机就有经历了）——那是把一次性的历史补偿变成永久的新缺省。
  *
- * ⚠ **只加那一行**：文件里别的字节一个都不动；已经有 `terminal=`（`full` 或 `none`）的支跳过——
- * 那是别人已经表过的态。老家那一支（还没迁的住户）的档写在 `home.conf` 里，**不动它**，
- * 只如实说一句该怎么办。
+ * ⚠ **只加那一行**：文件里别的字节一个都不动；已经有 `terminal=`（`none` / `sandbox` / `full`）
+ * 的支跳过——那是别人已经表过的态。⚠ `sandbox` 也在跳过之列（2026-10-23）：它比 full **窄**，
+ * 拿迁移给它补一行 `terminal=full` 等于把"关起来"悄悄换成"整机全权"。老家那一支（还没迁的
+ * 住户）的档写在 `home.conf` 里，**不动它**，只如实说一句该怎么办。
  *
  * 返回打出来的那几行（调用方负责打印；用例直接看返回值）。
  */
@@ -394,7 +419,8 @@ function migrateTerminalDefault({ homeDir, confFile, residents: list, log = null
     }
     const file = P.agentConfPath(homeDir, resident.agentId)
     const declared = (confGet(file, residents.HAND_KEYS.terminal) || '').trim().toLowerCase()
-    if (declared === 'full' || declared === 'none') continue
+    // 任何**认得的**档都算"表过态"（`sandbox` 尤其：迁移不许把它改成更宽的 full）。
+    if (residents.TERMINAL_TIERS.includes(declared)) continue
     let current = ''
     try {
       current = fs.readFileSync(file, 'utf8')

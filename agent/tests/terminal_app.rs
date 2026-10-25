@@ -2016,11 +2016,11 @@ fn the_entry_identity_rule_refuses_a_foreign_root_with_a_fix() {
     // 由两个 bin 的分支结构钉住（`TerminalTier::Full => Ok(Some(access))` 在调用之前返回）。
 }
 
-/// **缺省档**：不给 `--terminal` 时，Linux 上会试着装 `sandbox`；本机（bwrap 不可用、
+/// **sandbox 档的后端选择**：显式要 `sandbox` 时，Linux 上必须装 strongest backend；本机（bwrap 不可用、
 /// identity 可用）必须落到 identity，而不是"没有手"、更不是 `full`。
 #[cfg(target_os = "linux")]
 #[test]
-fn the_default_tier_picks_the_strongest_backend_that_really_works() {
+fn the_sandbox_tier_picks_the_strongest_backend_that_really_works() {
     use celira_agent::sandbox_backend::{BwrapBackend, IdentityBackend, SandboxBackend};
     let root = test_root();
     let bwrap = BwrapBackend::new().probe().is_ok();

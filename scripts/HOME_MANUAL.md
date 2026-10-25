@@ -47,13 +47,16 @@ D:/celira-home/
 - **家的默认位置按平台**：Windows 是 `D:/celira-home`；Linux（以及别的非 Windows 平台）是
   `~/celira-home`。换位置的老路不变：`CELIRA_HOME_DIR` 指到哪儿就是哪儿
   （下面手册里出现的 `D:/celira-home` 都按这一行换算）。
-- **「终端」这只手默认不给**（2026-10-14 起）：终端档（`--terminal full`）在 Windows 与 Linux 上都能装
-  —— Linux 上的 shell 是这台机器的默认 shell（`bash`，与机器处境那行说的**同一个词**）。
-  **要它就在那一支的 `agents/<支>/agent.conf` 里写 `terminal=full`**（家级 `home.conf` 里写就是全家的
-  默认）；不写就没有，`up` 会如实打一行
-  `[terminal] 平台默认不给「终端」这只手（2026-10-14 起）；要手就在它自己的 agent.conf 里写 terminal=full`。
+- **「终端」这只手默认不给**（2026-10-14 起）：终端档（`--terminal none|sandbox|full`）的三档里，
+  `full` 在 Windows 与 Linux 上都能装—— Linux 上的 shell 是这台机器的默认 shell（`bash`，与机器处境
+  那行说的**同一个词**）；`sandbox` 只有 Linux 且要 runtime 探针通过（自己的环境根可写、系统只读、
+  默认断网）。
+  **要 full 就在那一支的 `agents/<支>/agent.conf` 里写 `terminal=full`；要受限手写 `terminal=sandbox`**
+  （家级 `home.conf` 里写就是全家的默认）；不写或写 `terminal=none` 就没有，`up` 会如实打一行
+  `[terminal] 平台默认不给「终端」这只手（2026-10-14 起）；要手就在它自己的 agent.conf 里写 terminal=full 或 terminal=sandbox`。
   升级前就住着的支**不会掉东西**：`up` 的一次性迁移把它们现行的 `full` 显式写进各自的 `agent.conf`
   （见下面「给 Agent 装一台外部 server」那一节里的**迁移**一段）。
+  `sandbox` 在没有 provider 的机器上**拒绝启动**（不静默退 full、也不在宿主裸跑）；读数和宿主自己都会说清。
   没有终端实现的其他平台上，声明了 `full` 也装不进来：那是**有意的 fail-closed**（不静默换一个近似
   行为），`up` 会如实打一行说明。
 - **外部 MCP server 也按支**：`mcp_*` 声明写在那一支的 `agents/<支>/agent.conf` 里；
@@ -913,10 +916,12 @@ terminal=none
 | `mcp=none` | **一只外部 server 都不要**（哪怕家级声明了一堆） |
 | 都没写 | **跟家走**（`home.conf` 的 `mcp_*` —— 2026-10-01 之前的行为一字不变） |
 
-`terminal=` 同款：支级 ⇒ 家级 ⇒ **平台默认**。⚠ **2026-10-14 起，平台默认是"不给手"**：
-**要这只手只有一个说法——显式写 `terminal=full`**（不写就没有）；`terminal=none` 是"这一支明确不要"
-（`full` 被家级给了、这一支要退掉时用它）。`terminal=full` 在没有终端臂的平台上仍装不进来，
-读数会如实说。**这次缺省变更不会让老支掉东西**：
+`terminal=` 同款：支级 ⇒ 家级 ⇒ **平台默认**。⚠ **2026-10-14 起，平台默认是「不给手」**：
+**要 full 就显式写 `terminal=full`；要受限手就显式写 `terminal=sandbox`**（不写或 `terminal=none` 都没有）；
+`terminal=none` 是“这一支明确不要”（家级给了、这一支要退掉时用它）。`sandbox` 只有 Linux 且 runtime
+探针通过才起得来；`terminal=full` 在没有终端臂的平台上仍装不进来，读数会如实说。
+**home 不传旗标就是 none**（宿主的缺省档与产品默认一致），只有显式 `sandbox` / `full` 才进 argv ——
+**明确写 `none` 的支不会被读成 sandbox**。**这次缺省变更不会让老支掉东西**：
 
 - `up` 开机时跑一次**一次性迁移**：升级前就住着的支（`agent.conf` 里**没有** `terminal=` 那一行）
   ⇒ 把它们在旧缺省下**本来就有**的 `full` **显式写进各自的 `agent.conf`**，并打一行
@@ -938,6 +943,7 @@ terminal=none
 [mcp] 住户 3f2a…：装了 1 台外部 server：browser（来自它自己的 agent.conf）
 [mcp] 住户 9c1b…：这一支不要外部 server（agent.conf 里写了 mcp=none）—— 家级那几台不带给它
 [terminal] 住户 3f2a…：终端档 full（来自它自己的 agent.conf）
+[terminal] 住户 7b2c…：终端档 sandbox（来自它自己的 agent.conf）—— 由 runtime 探测 provider：装不进来就起不来，不降级成 full
 [terminal] 住户 9c1b…：这一支没有「终端」这只手（agent.conf 里写了 terminal=none）
 [terminal] 平台默认不给「终端」这只手（2026-10-14 起）；要手就在它自己的 agent.conf 里写 terminal=full
 ```

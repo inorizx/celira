@@ -191,12 +191,30 @@ function handsLabel(facts) {
   return `${hands.mcp.length} 台（${from}）`
 }
 
-/** 终端那一格的读数：有 / 没有 ＋ 来源（平台默认 / 它自己的 / 家级）。 */
-function terminalLabel(facts) {
+/**
+ * 终端那一格的读数：哪一档 ＋ 来源（平台默认 / 它自己的 / 家级）＋ 这台机器给不给。
+ *
+ * ⚠ **三档**（2026-10-23 沙箱刀）：`sandbox` 不许被读成"没有手"——它是**有手、但被关起来**，
+ * 而且"这台机器上真能跑起来吗"由 **runtime 探测 provider** 回答（home 不复制那份事实）。
+ * 装不进来时两档分开说：`sandbox` 的不可用**不是**"没有终端臂"，更**不是**退成 full。
+ */
+function terminalLabel(facts, platform = null) {
   const hands = facts.hands
   if (!hands) return '读不出来'
-  const resolved = residents.resolveTerminal(hands, { isWindows: proc.IS_WINDOWS, isLinux: proc.IS_LINUX })
-  if (resolved.unavailable) return '声明了但**这台机器上没有终端臂**（这次不带）'
+  // 平台只有一处来源（与 `up.handNotices` 同款）：调用方可注入，缺省读真实平台。
+  const plat = platform ?? { isWindows: proc.IS_WINDOWS, isLinux: proc.IS_LINUX }
+  const resolved = residents.resolveTerminal(hands, plat)
+  if (resolved.unavailable) {
+    if (resolved.requested === 'sandbox' || resolved.unavailableReason === 'sandbox-provider-absent') {
+      return '声明了 **sandbox**，但这台机器上没有沙箱 provider（今天只有 Linux 有）—— 这次不带，也不降级成 full'
+    }
+    return '声明了但**这台机器上没有终端臂**（这次不带）'
+  }
+  if (resolved.mode === 'sandbox') {
+    const from =
+      resolved.source === 'resident' ? '它自己的声明' : resolved.source === 'home' ? '家级声明' : '平台默认'
+    return `sandbox（${from}；由 runtime 探测 provider —— 装不进来就起不来，不降级成 full）`
+  }
   if (resolved.mode === 'none') {
     if (resolved.source === 'resident') return '没有（它自己的声明）'
     if (resolved.source === 'home') return '没有（家级声明）'

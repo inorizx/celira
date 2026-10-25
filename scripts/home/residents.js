@@ -56,7 +56,7 @@ const AGENT_CONF_KEYS = {
  *
  * - `mcp`：这一支的外部 server 模式。唯一认的值是 `none`（"一只都不要"）；
  *   真正的声明走 `mcp_<名字>=<transport>:<命令>` 那几行（与家级同格式）。
- * - `terminal`：终端档（`full` / `none`）。**它是"这一支不要终端"的唯一说法** ——
+ * - `terminal`：终端档（`none` / `sandbox` / `full`）。**它是"这一支不要终端"的唯一说法** ——
  *   不许靠"旗标缺席"去表达（那正是"用户靠猜"的来源）。
  */
 const HAND_KEYS = {
@@ -66,6 +66,14 @@ const HAND_KEYS = {
   // 空 = 不声明 ⇒ 宿主缺省 all；不跟家级走（技能可见性是支级事实）。
   skills: 'skills',
 }
+
+/**
+ * 终端档的三个值（**一个概念一个清单**）。
+ *
+ * `residentHands` 的"认不认这个值"与 `resolveTerminal` 的"这档在这台机器上能不能给"
+ * 都从这里取——两处各写一份的话，加一档时必有一处漏掉（sandbox 就是这么被读成 none 的）。
+ */
+const TERMINAL_TIERS = ['none', 'sandbox', 'full']
 
 /** 读 `<环境根>/identity.json` 的身份（`{ agent }`）；读不出来 ⇒ `null`（不编）。 */
 function readEnvIdentity(envDir) {
@@ -543,9 +551,14 @@ function migrateHomeShape({ homeDir, confFile, layout, canTouchWorld = true, hos
  *   · 支级写了 `mcp=none` ⇒ 这一支**一只外部 server 都不要**（哪怕家级声明了）；
  *   · 都没有 ⇒ **跟家走**（`home.conf` 的 `mcp_*` —— 2026-10-01 之前的行为一字不变）。
  *
- * 终端档同款：支级 `terminal=full|none` ⇒ 家级 `terminal=` ⇒ **平台默认（2026-10-14 起是"不给手"）**。
+ * 终端档同款：支级 `terminal=none|sandbox|full` ⇒ 家级 `terminal=` ⇒ **平台默认（2026-10-14 起是"不给手"）**。
  * 支级 `terminal=none` 是"这一支不要终端这只手"的**唯一**说法——它不靠旗标缺席去表达；
- * 而"要手"也只有一个说法：**显式写 `full`**。
+ * 而"要手"也只有一个说法：**显式写出来**（`sandbox` 或 `full`）。
+ *
+ * ⚠ **三档不是"三个强度任选"**（2026-10-23 沙箱刀）：`sandbox` 与 `full` 各有各的平台前提——
+ * `full` 要终端臂（Windows / Linux），`sandbox` 要**沙箱 provider**（今天只有 Linux）。
+ * 两者的"装不进来"因此要分开报（`resolveTerminal` 的 `unavailableReason`）：把 sandbox 的
+ * 不可用读成"声明了 full 却没臂"，读数就会把用户指向一个**更宽的**档。
  *
  * ⚠ **老家那一支**（还没迁的住户）：它的支级事实还在 `home.conf` 里，所以"支级/家级"两层
  * 在它身上是同一份文件 —— 来源如实报 `home`（不假装它有自己的 agent.conf）。
@@ -572,7 +585,7 @@ function residentHands({ homeDir, resident, homeConfFile }) {
   const ownTerminal = (!legacy ? (confGet(residentFile, HAND_KEYS.terminal) || '').trim().toLowerCase() : '')
   const homeTerminal = (confGet(homeConfFile, HAND_KEYS.terminal) || '').trim().toLowerCase()
   const skills = (!legacy ? (confGet(residentFile, HAND_KEYS.skills) || '').trim() : '')
-  const known = (value) => value === 'full' || value === 'none'
+  const known = (value) => TERMINAL_TIERS.includes(value)
   let terminal = ''
   let terminalSource = 'platform'
   if (known(ownTerminal)) {
@@ -587,29 +600,62 @@ function residentHands({ homeDir, resident, homeConfFile }) {
 }
 
 /**
- * 一支的终端档最终是什么（**平台事实优先**：没有终端臂的平台上，声明 full 也装不进来）。
+ * 一支的终端档最终是什么（**平台事实优先**：没有终端臂 / 没有沙箱 provider 的平台上，声明了也装不进来）。
  *
- * ⚠ **2026-10-14 主人裁**：**平台默认不给手**（要手就显式写 `terminal=full`）。从前这一格是
+ * ⚠ **2026-10-14 主人裁**：**平台默认不给手**（要手就显式写 `terminal=full`；要手但关起来写
+ * `terminal=sandbox`）。从前这一格是
  * "有臂就给 full"——那让"装完即整机全权"成了一个**没人声明过**的默认，而缺省那一档该是
  * "自己区可写、出不去"（她自己的东西不需要授权；见 `agent/README.md` §3.105 与施工单 §12.12）。
  * 与它配套的那一步（老住户把**现行的** full 显式写进自己的 `agent.conf`）见 `up.js` 的
  * `migrateTerminalDefault`：**缺省变了、老住户不掉东西**，但要手这件事从此看得见。
  *
- * 与 `up.js` 的 `terminalNotice` 同一条纪律：**如实说、不静默降级** —— 返回值里带
- * `unavailable`，调用方据此把"声明了但这台机器上没有这只手"打在读数里。
+ * ⚠ **三档的平台前提各不相同**（2026-10-23 沙箱刀）：
+ * - `full` 要**终端臂**（`agent/src/terminal_app.rs`：Windows / Linux）；
+ * - `sandbox` 要**沙箱 provider**（`docs/runtime/terminal/SANDBOX_PROVIDER_DECISIONS.md`
+ *   §5/§8：今天只有 Linux 的 bwrap / identity 两支；Windows AppContainer 还没做）。
+ *
+ * ⇒ "这台机器上能不能给"按**声明的那一档**算，不共用一个布尔：共用会把
+ * "Windows 上声明 sandbox"读成"声明了 full 没臂"，读数于是把用户指向一个**更宽的**档。
+ * 而 `sandbox` 装不进来时**绝不退回 `full`**（那是把"关起来"换成"整机全权"）；也不假装成
+ * `none`（"用户明确不要"与"这台机器给不了"是两件事，读数必须分开说）。
+ *
+ * 与 `up.js` 的 `terminalNotice` / `handNotices` 同一条纪律：**如实说、不静默降级** ——
+ * 返回值里带 `requested` / `unavailable` / `unavailableReason`，调用方据此把
+ * "声明了但这台机器上没有这只手"打在读数里，并说清是哪一档、为什么。
+ *
+ * @returns {{mode: string, source: string, requested: string, unavailable: boolean,
+ *            unavailableReason: 'no-terminal-arm'|'sandbox-provider-absent'|null}}
+ *   `mode` 是**真正要交给宿主**的档；`requested` 是**声明出来的**档（不可用时两者不同）。
  */
 function resolveTerminal(hands, { isWindows, isLinux }) {
-  const arm = Boolean(isWindows || isLinux)
-  // 只有**显式声明** `terminal=full` 才给手；`none` 与"没写"（平台默认）都是不给。
-  const wanted = hands.terminal === 'full' ? 'full' : 'none'
-  const mode = arm ? wanted : 'none'
-  return { mode, source: hands.terminalSource, unavailable: !arm && wanted === 'full' }
+  const declared = String((hands && hands.terminal) || '').trim().toLowerCase()
+  const requested = TERMINAL_TIERS.includes(declared) ? declared : 'none'
+  let available = true
+  let unavailableReason = null
+  if (requested === 'full') {
+    // 只有**显式声明** `terminal=full` 才给这只手；`none` 与"没写"（平台默认）都是不给。
+    available = Boolean(isWindows || isLinux)
+    if (!available) unavailableReason = 'no-terminal-arm'
+  } else if (requested === 'sandbox') {
+    // 沙箱 provider 今天只长在 Linux 上（bwrap / identity）。**探测归 runtime**：
+    // 这里只判"这条平台上有没有 provider 实现"，探不到时由宿主 fail-closed（起不来）。
+    available = Boolean(isLinux)
+    if (!available) unavailableReason = 'sandbox-provider-absent'
+  }
+  return {
+    mode: available ? requested : 'none',
+    source: (hands && hands.terminalSource) || 'platform',
+    requested,
+    unavailable: !available,
+    unavailableReason,
+  }
 }
 
 module.exports = {
   AGENT_CONF_KEYS,
   AGENT_BUDGET_KEYS,
   HAND_KEYS,
+  TERMINAL_TIERS,
   readEnvIdentity,
   parseSlot,
   readAgentConf,

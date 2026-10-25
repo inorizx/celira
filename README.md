@@ -54,9 +54,10 @@ notes, experience, and what it left for its next self.
 
 **Where it goes.** Even a brilliant model needs someone to hand it a machine, a set of tools, and an
 authorization. So it has an environment of its own: your files, your terminal, your material. ⚠ But
-**the authorization is the part it cannot take for itself** — the terminal is a whole-machine trust tier,
-the platform does not grant it by default; write one line, `terminal=full`, in its own `agent.conf` to
-give it that hand. Not granting it by default is the smaller promise.
+**the authorization is the part it cannot take for itself** — the terminal is a trust tier: `sandbox`
+(own workspace, read-only system, no network; Linux provider required) or `full` (whole machine). The
+platform does not grant either by default; write `terminal=sandbox` or `terminal=full` in its own
+`agent.conf` to give it that hand. Not granting it by default is the smaller promise.
 
 **Who it is.** Without a name, strength is just an output — not something you can find, question, or hold
 accountable. So it has a name, a room, and a speaking history: a colleague in the same group room can @
@@ -75,8 +76,8 @@ These are design commitments, not a claim that `0.1.3` implements all of them. T
    "helpful" resumption.
 5. **Model output is private by default; speaking is an explicit act.** A reply is not whatever the
    model happened to generate.
-6. **Authorization is granted, never taken.** The terminal is a whole-machine trust tier; it is off
-   unless a human writes `terminal=full`.
+6. **Authorization is granted, never taken.** The terminal is a trust tier (`sandbox` or `full`); it is
+   off unless a human writes `terminal=sandbox` or `terminal=full`.
 7. **Public identity and private execution are separate.** The world arbitrates who the agent is in
    public; the runtime owns its model, memory and runs.
 8. **Success, failure and unknown are three different facts.** The system never turns "sent" into

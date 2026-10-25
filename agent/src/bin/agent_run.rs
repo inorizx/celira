@@ -77,7 +77,7 @@ const USAGE: &str = "\
                    [--context-window <正整数>] [--im-endpoint <URL>]
                    [--identity-agent <core 里的 id> --identity-name <此世界的名字>]
                    [--web-sources <路径>]
-    [--terminal <sandbox|full>] [--files <own|full>]   （缺省 sandbox；不可用则没有手）
+    [--terminal <none|sandbox|full>] [--files <own|full>]   （缺省 none；sandbox 要显式声明）
                    [--mcp <声明>]
                    [--model <id>] [--model-endpoint <URL>]
                    [--model-protocol <responses|chat-completions>]
@@ -1042,9 +1042,14 @@ fn resolve_terminal(
     let Some(text) = tier else {
         return Ok(default_terminal(environment_root));
     };
+    // **显式 none**：与不给旗标结果相同（都是没有手），但保留为显式值，方便启动器把
+    // "用户明确不要"与"调用方没声明"分开表达；不跑探针。
+    if text == "none" {
+        return Ok(None);
+    }
     let Some(tier) = TerminalTier::parse(text) else {
         return Err((
-            format!("未知的 terminal 档位: {text}（v1 只有 sandbox / full）"),
+            format!("未知的 terminal 档位: {text}（v1 只有 none / sandbox / full）"),
             1,
         ));
     };
@@ -1089,37 +1094,13 @@ fn resolve_terminal(
     }
 }
 
-/// **缺省档**（2026-10-23 裁）：不给 `--terminal` ⇒ Linux 上默认就试着给 `sandbox`。
+/// **缺省档**：不给 `--terminal` ⇒ **没有手**（2026-10-14 主人裁）。
 ///
-/// 探针不过 ⇒ 保留「**没有手**」并打一行原因：**绝不退 `full`**（那等于把整机交给一个
-/// 用户没要求的档），**也不在宿主上裸跑**。"没有手"是唯一安全的降级方向——它让缺省装机
-/// 不至于连话都不会说，又不会在用户不知情时扩大授权。
-///
-/// 非 Linux（`sandbox` 那一档没有实现）⇒ 同样没有手：缺省不是"换成别的东西"，是"没有"。
-fn default_terminal(environment_root: &Path) -> Option<TerminalAccess> {
-    if !TerminalTier::Sandbox.available() {
-        return None;
-    }
-    match celira_agent::sandbox_backend::choose_for_entry(environment_root) {
-        Ok(backend) => {
-            eprintln!(
-                "terminal = sandbox（缺省档；backend = {}，{}）",
-                backend.name(),
-                backend.guarantees().reading()
-            );
-            Some(
-                TerminalAccess::new(TerminalTier::Sandbox, credential_names())
-                    .with_sandbox_backend(backend),
-            )
-        }
-        Err(refusal) => {
-            eprintln!(
-                "terminal = 没有手（缺省 sandbox 拒绝启动：{}）；要用整机请显式 --terminal full",
-                refusal.message()
-            );
-            None
-        }
-    }
+/// 2026-10-23 加的 `sandbox` 是**显式档**：只有 `--terminal sandbox` 时才探 provider。
+/// 缺省不探、不给手——"没声明"不会随机器环境悄悄变成一只沙箱手，也不会让缺少 provider
+/// 的机器在开机时就失败。要手必须显式写 `sandbox` / `full`。
+fn default_terminal(_environment_root: &Path) -> Option<TerminalAccess> {
+    None
 }
 
 /// 外部来源的 App（MCP server）的**授权面**解析。
@@ -1230,6 +1211,21 @@ fn resolve_identity_claim(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **显式 none = 没有手**：不跑任何后端探针；与缺省一致，但保留为显式值。
+    #[test]
+    fn explicit_none_means_no_hand() {
+        let tier = Some("none".to_string());
+        let access = resolve_terminal(&tier, Path::new(".")).expect("none 是合法档位");
+        assert!(access.is_none(), "none 必须解析成没有 terminal 窗");
+    }
+
+    /// **不给旗标 = 没有手**（产品缺省；sandbox 只在显式声明时才给）。
+    #[test]
+    fn omitted_terminal_means_no_hand() {
+        let access = resolve_terminal(&None, Path::new(".")).expect("缺省是合法档位");
+        assert!(access.is_none(), "缺省不能偷偷给 sandbox");
+    }
 
     fn arguments(list: &[&str]) -> Vec<String> {
         list.iter().map(|each| (*each).to_string()).collect()

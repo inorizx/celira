@@ -542,6 +542,12 @@ async function buildResidentView({ ctx, resident }) {
 
   // **这一支的手**（2026-10-01 第五刀）：外部 server 与终端档，**按支**给（来源也一起给，
   // 页面才知道"这台 server 是跟家走的还是这一支自己的"）。只报**名字与数量**：命令不进载荷。
+  //
+  // ⚠ **载荷形状是冻结的**（2026-10-23 沙箱刀）：`terminal` 只给 `mode` / `source` /
+  // `unavailable` 三个键，**不**加 `requested`（"声明了哪一档"）。理由不是省事：这一格今天
+  // 没有任何前端读者（`client/src` 里搜不到 `terminal`），而 `hands.test.js` 用 `deepStrictEqual`
+  // 钉着形状 ⇒ 加字段就是改契约、却没有一个消费者。要看"声明的是哪一档、为什么给不了"，
+  // 走 CLI（`node home.js status` 那一行，`status.terminalLabel` 已经分开说）。
   const hands = residents.residentHands({ homeDir, resident, homeConfFile: ctx.confFile ?? path.join(homeDir, 'home.conf') })
   const terminal = residents.resolveTerminal(hands, { isWindows: proc.IS_WINDOWS, isLinux: proc.IS_LINUX })
   const handsView = {

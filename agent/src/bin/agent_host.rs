@@ -85,10 +85,10 @@ const USAGE: &str = "\
   --im-endpoint     声明 Celira IM 的端点：门铃就来自它。必给——没有它就没有门铃。
   --context-window  声明这次清醒期的上下文窗口（状态行 `context` 段的分母）；
                     不给时取适配层当前模型档位的公开标称值。`0` 不是合法声明。
-  --terminal <tier> 声明 terminal 窗的档位：不给就取缺省档——Linux 上默认给 `sandbox`
-                    （探针真跑；这台机器上不可用 ⇒ 没有手，只打一行原因，不会替你换成 full）；
-                    两档：`sandbox` = 只能写自己的环境根、系统只读、默认断网（Linux 上由
-                    bwrap 或 identity 执行；显式要它但不可用 ⇒ 拒绝启动并报 `sandbox-unavailable`）；
+  --terminal <tier> 声明 terminal 窗的档位：`none` = 明确不要这只手；**不给也等于 none**
+                    （没有手，不跑任何后端探针）；三档：`none` / `sandbox` / `full`；
+                    `sandbox` = 只能写自己的环境根、系统只读、默认断网（Linux 上由 bwrap
+                    或 identity 执行；显式要它但不可用 ⇒ 拒绝启动并报 `sandbox-unavailable`）；
                     `full` = 整机全权（break-glass，只在专用机器上用）。未知档位直接拒绝，
                     不静默降档，也不从 `sandbox` 退到 `full`。
   --files <档位>    声明文件面的档位：`own`（缺省）＝ 只能动自己那一块（资料根读、
@@ -963,9 +963,15 @@ fn resolve_terminal(
     let Some(text) = tier else {
         return Ok(default_terminal(environment_root));
     };
+    // **显式 none**：与"不给旗标"结果相同（都是没有手），但保留为显式值，方便启动器把
+    // "用户明确不要"与"调用方没声明"分开表达；在 parse 之前处理，因为 TerminalTier
+    // 只描述"装了哪一只可执行的手"，none 不是手。
+    if text == "none" {
+        return Ok(None);
+    }
     let Some(tier) = TerminalTier::parse(text) else {
         return Err((
-            format!("未知的 terminal 档位: {text}（v1 只有 sandbox / full）"),
+            format!("未知的 terminal 档位: {text}（v1 只有 none / sandbox / full）"),
             1,
         ));
     };
@@ -1012,37 +1018,13 @@ fn resolve_terminal(
     }
 }
 
-/// **缺省档**（2026-10-23 裁）：不给 `--terminal` ⇒ Linux 上默认就试着给 `sandbox`。
+/// **缺省档**：不给 `--terminal` ⇒ **没有手**（2026-10-14 主人裁）。
 ///
-/// 探针不过 ⇒ 保留「**没有手**」并打一行原因：**绝不退 `full`**（那等于把整机交给一个
-/// 用户没要求的档），**也不在宿主上裸跑**。"没有手"是唯一安全的降级方向——它让缺省装机
-/// 不至于连话都不会说，又不会在用户不知情时扩大授权。
-///
-/// 非 Linux（`sandbox` 那一档没有实现）⇒ 同样没有手：缺省不是"换成别的东西"，是"没有"。
-fn default_terminal(environment_root: &Path) -> Option<TerminalAccess> {
-    if !TerminalTier::Sandbox.available() {
-        return None;
-    }
-    match celira_agent::sandbox_backend::choose_for_entry(environment_root) {
-        Ok(backend) => {
-            eprintln!(
-                "agent_host: terminal = sandbox（缺省档；backend = {}，{}）",
-                backend.name(),
-                backend.guarantees().reading()
-            );
-            Some(
-                TerminalAccess::new(TerminalTier::Sandbox, credential_names())
-                    .with_sandbox_backend(backend),
-            )
-        }
-        Err(refusal) => {
-            eprintln!(
-                "agent_host: terminal = 没有手（缺省 sandbox 拒绝启动：{}）；要用整机请显式 --terminal full",
-                refusal.message()
-            );
-            None
-        }
-    }
+/// 2026-10-23 加的 `sandbox` 是**显式档**：只有在 `--terminal sandbox` 时才探 provider。
+/// 缺省不探、不给手——这样"没声明"不会被机器环境偷偷升级成一只沙箱手，也不会让缺少
+/// provider 的机器在开机时就失败。要手必须显式写 `sandbox` / `full`。
+fn default_terminal(_environment_root: &Path) -> Option<TerminalAccess> {
+    None
 }
 
 /// **出网档的解析**（在打开环境、起任何东西之前）：照 `resolve_terminal` 的形状。
@@ -1381,6 +1363,20 @@ fn exit_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **显式 none = 没有手**：不跑任何后端探针；与缺省一致，但保留为显式值。
+    #[test]
+    fn explicit_none_means_no_hand() {
+        let access = resolve_terminal(Some("none"), Path::new(".")).expect("none 是合法档位");
+        assert!(access.is_none(), "none 必须解析成没有 terminal 窗");
+    }
+
+    /// **不给旗标 = 没有手**（产品缺省；sandbox 只在显式声明时才给）。
+    #[test]
+    fn omitted_terminal_means_no_hand() {
+        let access = resolve_terminal(None, Path::new(".")).expect("缺省是合法档位");
+        assert!(access.is_none(), "缺省不能偷偷给 sandbox");
+    }
 
     fn arguments(list: &[&str]) -> Vec<String> {
         list.iter().map(|each| (*each).to_string()).collect()
