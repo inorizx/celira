@@ -19,7 +19,7 @@
   --measure-bubble-md: 70%;
   --measure-bubble-wide: 76%;
 
-  --background: #f7f6fb;
+  --background: #f2f1f6;
   --foreground: #1a1826;
   --card: #ffffff;
   --card-foreground: #1a1826;
@@ -27,24 +27,24 @@
   --popover-foreground: #1a1826;
   --primary: #6d5bc2;
   --primary-foreground: #ffffff;
-  --secondary: #f1eef9;
+  --secondary: #f0eff5;
   --secondary-foreground: #3f3a52;
-  --muted: #f1eef9;
+  --muted: #f0eff5;
   --muted-foreground: #6c6781;
-  --accent: #efeafa;
-  --accent-foreground: #5a48b8;
+  --accent: #efeef6;
+  --accent-foreground: #55575f;
   --destructive: #be3d3d;
   --destructive-foreground: #ffffff;
-  --border: #d8d6e2;
-  --input: #b1adbb;
+  --border: #d4d1dd;
+  --input: #a8a3b4;
   --ring: #9176db;
   --overlay: #1a182666;
 
   --brand: #a284f4;
   --agent: #2a7198;
   --agent-surface: #e3f4fb;
-  --bubble-self-from: #7763db;
-  --bubble-self-to: #a44dd5;
+  --bubble-self-from: #6a52d8;
+  --bubble-self-to: #7059e0;
   --bubble-self-foreground: #ffffff;
   --bubble-peer: #ffffff;
   --bubble-peer-foreground: #1a1826;
@@ -92,7 +92,7 @@
   --muted: #1a1c1e;
   --muted-foreground: #939597;
   --accent: #242527;
-  --accent-foreground: #c5b8f5;
+  --accent-foreground: #c9cbd1;
   --destructive: #ef6b6b;
   --destructive-foreground: #14131c;
   --border: #2c2d2f;
@@ -107,9 +107,9 @@
      `--presence-thinking` 跟它同值：两个青不要各走各的（"在想"本来就是 Agent 那一族）。 */
   --agent: #8cc4e8;
   --agent-surface: #1c2830;
-  --bubble-self-from: #7f6fe0;
-  --bubble-self-to: #9a86ec;
-  --bubble-self-foreground: #14131c;
+  --bubble-self-from: #6a52d8;
+  --bubble-self-to: #7059e0;
+  --bubble-self-foreground: #ffffff;
   --bubble-peer: #1f2022;
   --bubble-peer-foreground: #e2e4e6;
   --presence-online: #7bd88f;
@@ -326,6 +326,7 @@ html[data-font-size='large'] {
   --ring: #288ae1;
   --bubble-self-from: #1379cc;
   --bubble-self-to: #3978c1;
+  --bubble-self-foreground: #ffffff;
   --accent-foreground: #085d9f;
   --background: #f2f8fe;
   --card: #ffffff;
@@ -345,6 +346,7 @@ html[data-font-size='large'] {
   --ring: #cf619e;
   --bubble-self-from: #c04b8d;
   --bubble-self-to: #b45783;
+  --bubble-self-foreground: #ffffff;
   --accent-foreground: #a02270;
   --background: #fcf4f8;
   --card: #ffffff;
@@ -364,6 +366,7 @@ html[data-font-size='large'] {
   --ring: #419ff8;
   --bubble-self-from: #1d86df;
   --bubble-self-to: #4c9bf6;
+  --bubble-self-foreground: #14131c;
   --accent-foreground: #95c7fb;
   --background: #161c22;
   --card: #1c232b;
@@ -383,5 +386,6 @@ html[data-font-size='large'] {
   --ring: #e76db0;
   --bubble-self-from: #cd5298;
   --bubble-self-to: #e16fa6;
+  --bubble-self-foreground: #14131c;
   --accent-foreground: #f2aed0;
 }
