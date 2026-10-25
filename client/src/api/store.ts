@@ -51,6 +51,7 @@ import { roomPreviews } from './uiPolicy'
 // 不判平台名，承 `shell.ts`）。
 import { hasAnjiaBridge, startAnjia, type AnjiaResult } from './anjia.ts'
 import { roomPresentationErrorMessage } from './presentation'
+import { applyRoomProfile } from './roomProfile.ts'
 import {
   DEFAULT_PREFS,
   PREFS_KEY,
@@ -389,6 +390,18 @@ interface AppState {
   refreshOwnedAgents: () => Promise<void>
   refreshAgent: (agentId: string) => Promise<void>
   refreshRoom: (roomId: string) => Promise<void>
+  /**
+   * 保存**群简介**（`PUT /v1/rooms/{room_id}/profile`，契约
+   * `CORE_V1_ROOM_PROFILE.md` §3）。
+   *
+   * 失败原样抛出（带 Core 稳定分类码）：UI 据此走 `contractErrors` 的人话，
+   * 409 那一支还要触发权威重读。成功之后 store 自己 `refreshRoom` ——
+   * 版本号只认 Core 的读面，绝不在本地 +1。
+   */
+  updateRoomProfile: (
+    roomId: string,
+    input: { baseVersion: number; description: string },
+  ) => Promise<void>
   refreshRoomMembers: (roomId: string) => Promise<void>
   /**
    * 刷新主体进行态快照（谁在线 / 谁正在写）。易失投影，失败保留上一次读到的
@@ -1597,8 +1610,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (!api?.getRoom) return
       try {
         const res = await api.getRoom(roomId)
-        set((s) => ({
-          rooms: s.rooms.map((r) => {
+        set((s) => {
+          const rooms = s.rooms.map((r) => {
             if (r.id !== roomId) return r
             const peer = res.peer
               ? toParticipant(res.peer)
@@ -1615,11 +1628,25 @@ export const useAppStore = create<AppState>()((set, get) => {
               // **原样搬**——缺字段 / null 都是"这一格不出现"，不许就近映射成 'unread'。
               peerRead: res.peer_read ?? undefined,
             }
-          }),
-        }))
+          })
+          // 简介单独走纯函数（`api/roomProfile.ts`）：只改目标房，
+          // **其它房间已读到的 profile 原样保留** —— 列表端点本来就不带这一格。
+          return { rooms: applyRoomProfile(rooms, roomId, res.profile) }
+        })
       } catch {
         // keep previous
       }
+    },
+
+    updateRoomProfile: async (roomId, input) => {
+      if (!api?.putRoomProfile) {
+        throw new Error('当前连接不支持编辑群简介')
+      }
+      // 失败**原样抛**（带 Core 稳定分类码）：UI 据此给人话、判 409 后重读；
+      // 绝不吞成"保存成功"。
+      await api.putRoomProfile(roomId, input)
+      // 写后权威重读：版本只认 Core 读面，本地绝不 +1。
+      await get().refreshRoom(roomId)
     },
 
     refreshBindings: async (agentId) => {

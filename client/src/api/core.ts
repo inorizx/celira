@@ -3,6 +3,7 @@
 // `allowImportingTsExtensions: true` 已开着，所以两边都接受。
 // （全是 `import type` 的模块没这个问题——类型剥离时被整条去掉。）
 import { fetchBlob, fetchJson, joinBaseUrl, newIdempotencyKey, uploadMultipart, webSocketBase } from './client.ts'
+import { buildRoomProfilePutRequest } from './roomProfile.ts'
 import type {
   AttachmentView,
   BackendBindingView,
@@ -45,6 +46,7 @@ import type {
   PutProfileResponse,
   RoomListEntryView,
   GetMyProfileResponse,
+  PutRoomProfileResponse,
   PairingGrantIssue,
   PairingGrantListEnvelope,
 } from './contracts'
@@ -624,6 +626,28 @@ export class CoreApi implements RoomApi, RelationApi, ParticipantApi, HomeApi, C
 
   async getRoom(roomId: string): Promise<GetRoomResponse> {
     return this.api<GetRoomResponse>(`/v1/rooms/${roomId}`)
+  }
+
+  /**
+   * `PUT /v1/rooms/{room_id}/profile`：**群主**版本化写群简介（契约
+   * `CORE_V1_ROOM_PROFILE.md` §3）。
+   *
+   * - 认证面是 Human Session；Agent 凭据写不了这一格（403 `not_room_owner`）。
+   * - `Idempotency-Key` 每次调用新生成（与其它写端点同规）：客户端不缓存 key，
+   *   也不把它放进任何持久层 / DOM / 日志。
+   * - `baseVersion` 由调用方从**权威读面**取（`room.profile?.version ?? 0`），
+   *   前端绝不自己 +1；过期由 Core 裁决成 409 `profile_version_conflict`。
+   */
+  async putRoomProfile(
+    roomId: string,
+    input: { baseVersion: number; description: string },
+  ): Promise<PutRoomProfileResponse> {
+    const request = buildRoomProfilePutRequest(roomId, input)
+    return this.api<PutRoomProfileResponse>(request.path, {
+      method: request.method,
+      idempotencyKey: newIdempotencyKey(),
+      body: request.body,
+    })
   }
 
   async getMemberPresentations(roomId: string): Promise<GetMemberPresentationsResponse> {

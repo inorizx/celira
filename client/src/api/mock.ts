@@ -35,6 +35,7 @@
  * | 联系人 / Agent 所有权 / 绑定 / 凭据 / 服务与呈现 | 读 fixtures，**够页面渲染** |
  * | `fetchAttachmentBlob` / `fetchMemberAvatarBlob` / 头像 PUT-DELETE | **不实现**（要字节通道；演示附件的 `url` 直接指向 `/mock/*.svg`，由 `attachmentSource` 直出） |
  * | 群成员增删 / 转让 / 建房 | 只在本地内存里改，进程退出即还原 |
+ * | 群简介（`getRoom.profile` / `putRoomProfile`） | 进程内内存：group-only、演示 owner 可写、版本递增；夹具里不预置简介 |
  */
 
 import type {
@@ -58,7 +59,9 @@ import {
   type MeView,
   type PutPresentationResponse,
   type PutProfileResponse,
+  type PutRoomProfileResponse,
   type RoomMembersItem,
+  type RoomProfileView,
   type PairingGrantIssue,
   type PairingGrantListEnvelope,} from './contracts'
 import type {
@@ -69,6 +72,7 @@ import type {
   RoomListEntry,
   HomeApi,} from './types'
 import { ApiError } from './client'
+import { roomProfileDraftError } from './roomProfile.ts'
 import {
   SELF_ID,
   agentOwnerships,
@@ -125,6 +129,13 @@ export class MockApi implements RoomApi, RelationApi, ParticipantApi, HomeApi {
    */
   private blockedIds = new Map<string, Participant>()
   /** 置顶 / 免打扰**不在这里**：它们是用户侧偏好，归 `api/roomPrefs.ts`（经 `api/storage.ts` 窄口落本机）。 */
+  /**
+   * 演示通道的群简介（进程内，刷新即还原）。键是 roomId。
+   *
+   * 夹具里没有群简介，所以初始是空的 —— 界面显示「还没有群简介」，群主可以在演示里
+   * 写一条看看整条链路。**不编造默认简介**：那会被当成这个世界真有的公共资料。
+   */
+  private roomProfiles = new Map<string, RoomProfileView>()
   private seq = 0
   private wakeupHandler?: () => void
   private timers = new Set<ReturnType<typeof setTimeout>>()
@@ -328,6 +339,7 @@ export class MockApi implements RoomApi, RelationApi, ParticipantApi, HomeApi {
 
   async getRoom(roomId: string): Promise<GetRoomResponse> {
     const room = this.roomList.find((r) => r.id === roomId)
+    const ownerId = room?.participantIds[0]
     return {
       room: {
         id: roomId,
@@ -336,8 +348,57 @@ export class MockApi implements RoomApi, RelationApi, ParticipantApi, HomeApi {
         name: room?.name ?? null,
         created_at: NOW,
       },
+      membership: {
+        membership_id: `demo-mb-${roomId}-${SELF_ID}`,
+        participant_id: SELF_ID,
+        role: ownerId === SELF_ID ? 'owner' : 'member',
+        joined_at: NOW,
+        left_at: null,
+        closed_by: null,
+      },
+      peer: null,
+      read_state: { last_read_message_id: null, unread_count: room?.unreadCount ?? 0 },
+      // 契约 §4.1：非 group 房恒 `null`；group 房没有简介也是 `null`。
+      profile: room?.kind === 'group' ? (this.roomProfiles.get(roomId) ?? null) : null,
       request_id: 'demo-req',
-    } as GetRoomResponse
+    }
+  }
+
+  /**
+   * 演示通道的群简介写面：与真实 Core 同一套**最小语义**（group-only、owner-only、
+   * base_version 递增），只写进程内内存。
+   *
+   * 三条纪律（见文件头第 2 条）：
+   * - 不复制 Core 的幂等事务：每次调用都是新版本（演示通道没有 Idempotency-Key 账本）；
+   * - 正文规则照契约做**早校验**（1..2000 UTF-8 字节、禁 NUL、trim 非空），错误码与
+   *   Core 同名 —— 否则"演示能过、真机 400"；
+   * - 鉴权只看"我是不是 owner"这一格事实（`participantIds[0]` 是演示世界的 owner），
+   *   真实的 owner 周期 / Human 认证面只有 Core 有。
+   */
+  async putRoomProfile(
+    roomId: string,
+    input: { baseVersion: number; description: string },
+  ): Promise<PutRoomProfileResponse> {
+    const room = this.roomList.find((r) => r.id === roomId)
+    if (!room) throw new ApiError(404, 'room_not_found')
+    if (room.kind !== 'group') throw new ApiError(400, 'invalid_room_kind')
+    if (room.participantIds[0] !== SELF_ID) throw new ApiError(403, 'not_room_owner')
+    const invalid = roomProfileDraftError(input.description)
+    if (invalid) throw new ApiError(400, 'invalid_profile_description')
+    const current = this.roomProfiles.get(roomId)
+    const currentVersion = current?.version ?? 0
+    if (input.baseVersion !== currentVersion) {
+      throw new ApiError(409, 'profile_version_conflict')
+    }
+    const profile: RoomProfileView = {
+      // 原样保存（不 trim）：与 Core §3.1 / I7 同一条。
+      description: input.description,
+      version: currentVersion + 1,
+      updated_at: NOW,
+    }
+    this.roomProfiles.set(roomId, profile)
+    this.wakeup()
+    return { profile, idempotency_replayed: false, request_id: 'demo-req' }
   }
 
   async listRoomMembers(roomId: string): Promise<RoomMembersItem[]> {

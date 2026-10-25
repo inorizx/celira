@@ -81,6 +81,8 @@ src/api/store.ts（zustand：状态管理、乐观更新、事件恢复循环）
    │                        建议源过滤/本切片不生成模型回复/扩展动作阻断；
    │                        稳定错误文案；永不含 key）
    ├── src/api/core.ts  —— 真实 Core HTTP + WS（Bearer + Idempotency-Key，经 Vite proxy 转发 /v1）
+   │                        ＋ 群简介：`GET /v1/rooms/{id}` 的 profile 随单房读面到达；
+   │                        `PUT /v1/rooms/{id}/profile` 由群主版本化写（base_version 原样取权威读面）
    ├── src/api/homeStatus.ts —— 本机只读状态口读取层（`http://127.0.0.1:5190`；**不是 Core API**、
    │                        不经 `getApi()`、不随连接模式切换）。形状认不出即判"读不到"（fail-closed），
    │                        绝不半读半猜；只给运行状态页用

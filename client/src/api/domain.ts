@@ -105,6 +105,17 @@ export interface Room {
    * 这一格归 im 服务端。
    */
   attention?: RoomAttention
+  /**
+   * **群简介**（契约 `CORE_V1_ROOM_PROFILE.md` §3–§4）。
+   *
+   * `null` = 这间群房还没有简介（Core 对空值如实给 `null`）；`undefined` = 还没读到
+   * （旧列表投影 / 读取失败）—— 两者在界面上**不是**一回事：前者说「还没有群简介」，
+   * 后者什么都不该断言。只有 `group` 房有这一格；`direct` / `human_direct` 恒不出现。
+   *
+   * ⚠ 它是**房间的公共资料**，不是消息、不是参与者资料：不产生未读、不进投递链。
+   * 写入只有群主（`PUT /v1/rooms/{id}/profile`），读取所有成员（`GET /v1/rooms/{id}`）。
+   */
+  profile?: { description: string; version: number; updatedAt: string } | null
 }
 
 export type DeliveryState = 'sending' | 'delivered' | 'failed'

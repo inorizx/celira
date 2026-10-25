@@ -519,12 +519,49 @@ export interface PutProfileResponse {
   request_id: string
 }
 
+/**
+ * `PUT /v1/rooms/{room_id}/profile` 的响应（契约 §3.3）。
+ *
+ * 首次写与后续更新都是 `200`；同 key + 同摘要重放返回**首次**结果
+ * （`idempotency_replayed = true`，不追加版本）。每次成功写恰好 +1 个版本，
+ * 首版 = 1。
+ */
+export interface PutRoomProfileResponse {
+  profile: RoomProfileView
+  idempotency_replayed: boolean
+  request_id: string
+}
+
+/**
+ * **群简介**（契约 `CORE_V1_ROOM_PROFILE.md` §3.3/§4.1）。
+ *
+ * 只有 `group` 房有这一格，且只在**单房读面**出现：`GET /v1/rooms/{id}` 的顶层
+ * `profile`、`PUT /v1/rooms/{id}/profile` 的响应。`GET /v1/rooms` 列表不带它，
+ * `RoomView` 也没有这个字段（契约 §4.1 / I6）。
+ *
+ * `description` 是**原样保存**的正文（含首尾空白、多行、Emoji；不 trim、不归一化）；
+ * 1..2000 UTF-8 字节、禁 U+0000、trim 后非空 —— 字节口径与 Core 同一条（客户端用
+ * `TextEncoder` 数，见 `api/roomProfile.ts`）。
+ */
+export interface RoomProfileView {
+  description: string
+  version: number
+  updated_at: string
+}
+
 export interface GetRoomResponse {
   room: RoomView
   membership: MembershipView
   peer: ParticipantMinView | null
   read_state: ReadStateView
   peer_read?: PeerReadView | null
+  /**
+   * 群简介：没有简介或非 `group` 时为 `null`（契约 §4.1）。
+   *
+   * 列表端点不返回它 —— 想读到简介必须打开单房读面（房间信息抽屉打开时
+   * `refreshRoom` 已经这么做了）。
+   */
+  profile: RoomProfileView | null
   request_id: string
 }
 

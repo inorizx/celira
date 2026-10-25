@@ -30,6 +30,8 @@ import { FileRow } from './FileRow'
 import { AttachmentImage } from './AttachmentImage'
 import { InviteMemberSheet } from './InviteMemberSheet'
 import { AgentPresentationEditSheet } from './AgentPresentationEditSheet'
+import { RoomProfileEditSheet } from './RoomProfileEditSheet'
+import { canEditRoomProfile } from '@/api/roomProfile'
 
 type DrawerTab = 'members' | 'images' | 'files'
 
@@ -51,6 +53,7 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
   const [tab, setTab] = useState<DrawerTab>('members')
   const [inviteOpen, setInviteOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<string | null>(null)
+  const [profileEditOpen, setProfileEditOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const togglePinned = useAppStore((s) => s.togglePinned)
   const toggleMuted = useAppStore((s) => s.toggleMuted)
@@ -103,6 +106,11 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
   const myRole = members.find((m) => m.id === selfId)?.role ?? (members[0]?.id === selfId ? 'owner' : 'member')
   const isOwner = myRole === 'owner'
   const isGroup = room.kind === 'group'
+  // 群简介（`CORE_V1_ROOM_PROFILE.md`）：只有 group 房有这一格。
+  // 写能力按"传输层真的实现了 putRoomProfile"探（与 uiPolicy 同规，不按 mode 判）；
+  // 读只要成员就能读（`GET /v1/rooms/{id}` 的可见性裁决在 Core）。
+  const profileSupported = typeof getApi()?.putRoomProfile === 'function'
+  const profileEditable = canEditRoomProfile({ kind: room.kind, isOwner, supported: profileSupported })
   // ⚠ **成员列表含我**（2026-10-14 主人裁：人数一律含我 —— 「0 Human」从此不可能出现）。
   // 来源只给对端时（`direct` 房自带的 `participants`）我不在里面，这里补一行；
   // 角色给 `member`：**没有权威来源时不猜**（服务端给了成员表时我本来就在里面，走不到这条路）。
@@ -239,6 +247,49 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
         </button>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {/*
+            **群简介**（契约 `CORE_V1_ROOM_PROFILE.md` §4.1）：只有 group 房有这一格，
+            放在三个页签的内容之上 —— 不新开 tab，成员切到图片/文件时也仍看得到群是什么。
+            它**不是**消息、不是成员资料，所以不参与任何列表、未读或通知。
+
+            ⚠ `undefined`（还没读到）时**什么都不说**：`null` 才是 Core 明确答的
+            「这间群没有简介」。把"还没读到"写成「还没有群简介」是这个仓库治过很多次的假话
+            （`uiPolicy.chatFeedState` 同一纪律）。
+          */}
+          {isGroup && (
+            <section
+              aria-labelledby="room-profile-heading"
+              className="space-y-2 rounded-lg border border-border bg-card px-3 py-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3
+                  id="room-profile-heading"
+                  className="text-micro tracking-wider text-muted-foreground uppercase"
+                >
+                  群简介
+                </h3>
+                {profileEditable && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1 px-2 text-caption"
+                    onClick={() => setProfileEditOpen(true)}
+                    aria-label="编辑群简介"
+                  >
+                    <PenLine className="size-3.5" />
+                    编辑
+                  </Button>
+                )}
+              </div>
+              {room.profile ? (
+                <p className="text-body break-words whitespace-pre-wrap text-muted-foreground">
+                  {room.profile.description}
+                </p>
+              ) : room.profile === null ? (
+                <p className="text-caption text-muted-foreground">还没有群简介</p>
+              ) : null}
+            </section>
+          )}
           {tab === 'members' && (
             <>
               {isGroup && isOwner && (
@@ -514,6 +565,13 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
           agent={editingParticipant}
           open={editingAgent !== null}
           onOpenChange={(next) => !next && setEditingAgent(null)}
+        />
+      )}
+      {isGroup && profileEditable && (
+        <RoomProfileEditSheet
+          room={room}
+          open={profileEditOpen}
+          onOpenChange={setProfileEditOpen}
         />
       )}
     </Sheet>

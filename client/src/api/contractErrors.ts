@@ -104,6 +104,18 @@ export function apiErrorText(code: string | undefined): string {
     case 'invalid_transfer_target': // im :81
       return '只能转让给另一位成员'
 
+    // ── 群简介（`CORE_V1_ROOM_PROFILE.md` §3.2/§5；2026-10-25 接入客户端）──
+    // 这四个码是本切片新增的，词表权威仍是 im 的 `protocol/error.rs`；
+    // 409 那一句是**产品要求的原话**（客户端不另造第二套说法）。
+    case 'not_room_owner': // im :134（403：active 成员但不是当前群主）
+      return '只有群主可以这样操作'
+    case 'invalid_room_kind': // im :137（400：direct / human_direct 没有这一格）
+      return '这个房间类型不支持这项操作'
+    case 'invalid_profile_description': // im :140（400：空 / 纯空白 / NUL / 超 2000 字节）
+      return '简介不符合规则（1–2000 字节，且不能只有空白）'
+    case 'profile_version_conflict': // im :142（409：base_version 已过期）
+      return '简介已被更新，请刷新后重试'
+
     // ── 联系人 ──
     case 'human_direct_room_exists': // im :72
       return '与这位联系人的私聊已经存在'

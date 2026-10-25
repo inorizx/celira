@@ -20,6 +20,7 @@ import type {
   MeView,
   PutProfileResponse,
   PutPresentationResponse,
+  PutRoomProfileResponse,
   RoomLiveSnapshot,
   RoomMembersItem,
   GetMyProfileResponse,
@@ -165,6 +166,21 @@ export interface RoomApi {
    */
   notifyTyping?(roomId: string): Promise<void>
   getRoom?(roomId: string): Promise<GetRoomResponse>
+  /**
+   * **群简介写面**（`PUT /v1/rooms/{room_id}/profile`，契约
+   * `CORE_V1_ROOM_PROFILE.md` §3）。
+   *
+   * 只有当前 group 房的 active **Human owner** 能写；`baseVersion` 必须等于权威读面
+   * 的最新版本（首次写 0），否则 Core 回 409 `profile_version_conflict`。
+   * `description` 原样提交（1..2000 UTF-8 字节、禁 U+0000、trim 后非空）。
+   *
+   * `Idempotency-Key` 由 `core.ts` 内部生成 —— 调用方不传，也不缓存。
+   * 可选：能力探测按「实现里真的有没有这个方法」判（演示通道有内存实现）。
+   */
+  putRoomProfile?(
+    roomId: string,
+    input: { baseVersion: number; description: string },
+  ): Promise<PutRoomProfileResponse>
   listRoomMembers?(roomId: string): Promise<RoomMembersItem[]>
   inviteMember?(
     roomId: string,
