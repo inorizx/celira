@@ -620,6 +620,25 @@ pub struct ImApp {
     /// ⚠ **它不是权限**，也不是"有没有视觉"这句话本身：它是**这台机器配的那个模型**的事实
     /// （`SessionDeclarations::vision`，来自模型配置门的裁决）。宿主不声明就是不支持。
     vision: bool,
+    /// **这一段活动里已经展示过的房间简介**：房间标识 → 版本号（`room_profile (v<版本>)`）。
+    ///
+    /// ## 它是 Run 级，而且是**结构**给的
+    ///
+    /// 这个实例由 `assemble_machine` **每次活动构造一次**、活动结束就散（与 [`Self::me`] 同一条
+    /// 结构性事实）⇒ 这张地图**天然只活一段 Run**、零持久、跨 Run 不共享：下一段活动是**新的空
+    /// 账本**，同一个版本会在那里重新展示全文。
+    ///
+    /// ⚠ **不要在这里加跨 Run 缓存**：跨 Run 的"简介变没变"只有世界那一条版本链是权威（契约
+    /// `CORE_V1_ROOM_PROFILE.md` §6.2 的 I3）。本地再存一份跨 Run 的记忆，等于把"简介是什么"变成
+    /// 第二份要维护的权威——而它能做的只有两件事：让主体错过一次真的更新，或者让一个陈旧版本
+    /// 假扮成最新。这一格只回答"**这一段里我看过这一版没有**"，不回答任何关于世界的问题。
+    ///
+    /// 记账时机：某版**全文真的摆进回执之后**才写；同一房间同一版本再来 ⇒ 回执写
+    /// `(already shown in this run)`（省掉重复全文）。版本一变就重新展示全文并改记新版本。
+    ///
+    /// 锁中毒**一律 fail-open**（见 `room_head` 里那处注释）：这一格坏了最多让全文多展示一次，
+    /// **绝不能让读历史失败**。
+    seen_profiles: std::sync::Mutex<std::collections::BTreeMap<String, i64>>,
 }
 
 /// **回执未达**（写侧）：这次尝试没拿到可确认的结果，带上等了多少、窗口多长。
@@ -648,6 +667,8 @@ impl ImApp {
             world_root: None,
             me: std::sync::OnceLock::new(),
             vision: false,
+            // Run 级账本从**空**开始（见字段文档：这个实例一段活动一个）。
+            seen_profiles: std::sync::Mutex::new(std::collections::BTreeMap::new()),
         })
     }
 
@@ -740,6 +761,9 @@ impl ImApp {
                  {MAX_HISTORY_LIMIT} 以内（缺省\
                  {DEFAULT_HISTORY_LIMIT}）；要更旧的页，把上一次回执末尾的游标原样放回 `{PARAM_BEFORE}`\
                  ——它是不透明字符串，不解析、不猜、不构造。只读：不改变任何东西。\
+                 回执开头给房间名与简介（第一行之后是 `room_name = …` 与 `room_profile (v<版本>) = …`；\
+                 同一段活动里同一版本只展示一次全文，第二遍起写 `(already shown in this run)`；\
+                 没有简介写 `-`）。\
                  回执首行是你的身份（`me = …`：一次活动只问服务器一次；问不到就写 `unknown`，\
                  不拿本机身份或显示名顶替）——「这条是不是我说的」看发出者那一格对不对得上它。\
                  ⚠️ 它顺带推进「我读到哪」（2026-10-10 裁决）：读完之后，世界会记下你读到这一页\
@@ -1320,7 +1344,7 @@ impl ImApp {
             Ok(body) => body,
             Err(failure) => return ActionOutcome::failure(failure.as_str()),
         };
-        match render_history(&body, room, limit) {
+        match render_history(&body, room, limit, &self.seen_profiles) {
             // 同上（第 4 件）：翻记录这一面也有那行身份——**主体看自己的话来核对时，就靠它**。
             Ok(text) => {
                 let cursor_line = self.advance_after_read(room, &body);
@@ -4056,21 +4080,40 @@ fn render_new_since(body: &serde_json::Value, has_anchor: bool) -> Result<String
 ///
 /// ```text
 /// room = <room_id>, limit = <n>, count = <n>
+/// room_name = <房名>
+/// room_profile (v<版本>) = <简介全文> | (already shown in this run)
 /// <message_id>\t<actor_kind>\t<actor_name>\t<created_at>\t<state>[\tmentions = n]
 /// \tattachment\t<第几个>\t<附件身份>\t<文件名>\t<类型>\t<字节数>
 /// more = none | next <游标>
 /// ```
 ///
-/// **附件逐条列**（缩进一行一个）：`im_read_attachment` 要的正是那个**附件身份**——只给计数，
-/// 主体看得到"有东西"却拿不到"读哪一个"。**元数据免费随历史来、字节要主体主动读**（渐进式铁律）。
+/// **房间头两行**（Core v1.1 §4.2，2026-10-26）：「这间房是什么」是主体读历史时最缺的上下文，
+/// 而世界已经把它随每一页送来了（`room = {id, kind, name, profile}`）。因此第一行之后、消息行之前
+/// 给**房名**与**简介全文**——房名是稳定性最高的定位（房号要拿去调工具，名字给人读），简介是
+/// 「这个群在做什么」。
+///
+/// **旧 Core 没有 `room` 字段 ⇒ 这两行一行都不输出**（回执与从前逐字节相同）：房间头是附加字段，
+/// 读面不能因为世界换了版本就换一种回执。
+///
+/// **简介按 (房间, 版本) 只展示一次全文**（`seen` 是本次 Run 的账本，见 [`ImApp::seen_profiles`]）：
+/// 同一段活动里翻同一间房的第二页、或反复读同一页，第二遍起写 `(already shown in this run)`——
+/// 那几百字每页重复摆一遍，付的是主体的注意力。版本一变就重新展示全文（世界说它变了，那就要看）。
 ///
 /// 顺序就是端点给的顺序（序号升序，服务端排好）。撤回**如实**写 `recalled`（正文与附件在撤回后
 /// 由服务端投影为空，本层不还原、不猜）；`more` 行搬运游标，不解释它的内容。
 ///
+/// **附件逐条列**（缩进一行一个）：`im_read_attachment` 要的正是那个**附件身份**——只给计数，
+/// 主体看得到"有东西"却拿不到"读哪一个"。**元数据免费随历史来、字节要主体主动读**（渐进式铁律）。
+///
 /// ⚠ 那一串**追加**在行尾的读数（`mentions` / `actor` / `reply_to`、`mention` 与 `attachment`
 /// 两行）是 TASK_67 分批加上去的：前面各列的形状一个字没动，旧断言的前缀与列序照旧成立。
 /// 逐条理由与审计表见 `outputs/AGENT_REBUILD_TASK_67_SEMANTIC_PROJECTION_AUDIT_REPORT.md`。
-fn render_history(body: &serde_json::Value, room: &str, limit: u32) -> Result<String, ImFailure> {
+fn render_history(
+    body: &serde_json::Value,
+    room: &str,
+    limit: u32,
+    seen: &std::sync::Mutex<std::collections::BTreeMap<String, i64>>,
+) -> Result<String, ImFailure> {
     // 外部字段名只在**连接处**出现这一次（外部冻结形状）；本层自己的词是 `rows`。
     let rows = body
         .get("messages")
@@ -4078,6 +4121,7 @@ fn render_history(body: &serde_json::Value, room: &str, limit: u32) -> Result<St
         .ok_or(ImFailure::Unreachable)?;
 
     let mut text = format!("room = {room}, limit = {limit}, count = {}\n", rows.len());
+    text.push_str(&room_head(body, room, seen));
     for message in rows {
         let field = |name: &str| message.get(name).and_then(|value| value.as_str());
         let actor = message.get("actor");
@@ -4202,6 +4246,78 @@ fn render_history(body: &serde_json::Value, room: &str, limit: u32) -> Result<St
     Ok(text)
 }
 
+/// 翻记录回执的**房间头两行**（Core v1.1 顶层 `room`；旧 Core 没有它 ⇒ 返回空串）。
+///
+/// 三条纪律：
+///
+/// - **房名与简介都走 [`escaped_field`]**：换行 / 回车 / Tab 不能伪造出一条消息行（简介按契约
+///   本来就允许换行，这里能收到的正是多行正文）；
+/// - **缺什么写什么**：没有 `room` ⇒ 一行都不输出；`name` 为 null / 缺失 / 空 ⇒ `-`；`profile` 为
+///   null ⇒ `room_profile = -`（这是"没有简介"，**不是**读不懂）；简介正文读不出来 ⇒ 同样 `-`，
+///   不编一段；
+/// - **账本只记真的展示过全文的那一版**：同一 (房间, 版本) 第二次起写
+///   `(already shown in this run)`；版本一变立刻重新展示并改记新版本。没有版本号就认不出"同一版"
+///   ⇒ 全文照给、**不记账**（不猜一个版本号）。
+///
+/// 锁中毒**也照常展示全文**：`PoisonError::into_inner()` 把 guard 拿回来继续用。这一格只回答
+/// "这一段里这一版展示过没有"，它坏了最多让全文多说一遍——**绝不能因此让读历史失败**
+/// （读历史是 Retrieve 面，主体读不到历史的代价比多看一段简介大得多）。
+fn room_head(
+    body: &serde_json::Value,
+    requested_room: &str,
+    seen: &std::sync::Mutex<std::collections::BTreeMap<String, i64>>,
+) -> String {
+    let Some(head) = body.get("room").filter(|head| head.is_object()) else {
+        // 旧 Core：没有房间头。**不拿请求里的房号冒充房名**，也不编一句"没有简介"。
+        return String::new();
+    };
+
+    let mut text = String::from("room_name = ");
+    match head.get("name").and_then(|name| name.as_str()) {
+        Some(name) if !name.is_empty() => text.push_str(&escaped_field(name)),
+        _ => text.push('-'),
+    }
+    text.push('\n');
+
+    let Some(profile) = head.get("profile").filter(|profile| profile.is_object()) else {
+        text.push_str("room_profile = -\n");
+        return text;
+    };
+    let description = profile
+        .get("description")
+        .and_then(|description| description.as_str())
+        .filter(|description| !description.is_empty());
+    let Some(description) = description else {
+        // 形状读不懂（没有正文）：如实写"没有"，不编一段简介。
+        text.push_str("room_profile = -\n");
+        return text;
+    };
+    let shown = escaped_field(description);
+    let Some(version) = profile.get("version").and_then(|version| version.as_i64()) else {
+        // 没有版本号就认不出"同一版"：全文照给，**不记账**、不猜一个版本号。
+        text.push_str(&format!("room_profile = {shown}\n"));
+        return text;
+    };
+
+    // 账本的键取**世界给的房号**（读不出来才退回请求里那个）：房间头是本页的主角，
+    // 请求参数只是它被问到的方式。
+    let room_key = head
+        .get("id")
+        .and_then(|id| id.as_str())
+        .filter(|id| !id.is_empty())
+        .unwrap_or(requested_room);
+    let mut ledger = seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if ledger.get(room_key) == Some(&version) {
+        text.push_str(&format!(
+            "room_profile (v{version}) = (already shown in this run)\n"
+        ));
+    } else {
+        text.push_str(&format!("room_profile (v{version}) = {shown}\n"));
+        ledger.insert(room_key.to_string(), version);
+    }
+    text
+}
+
 /// 预览的机械截断：只按**字符边界**取不超过 [`MAX_PREVIEW_BYTES`] 字节的前缀，截断了就加一个
 /// 标记字符。它不是摘要、不是省略号改写——被丢掉的部分本层一个字都不解释。
 fn truncate_preview(preview: &str) -> String {
@@ -4236,7 +4352,34 @@ fn escaped_field(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{gif_pixels, image_pixels, jpeg_pixels, png_pixels, webp_pixels};
+    use super::{gif_pixels, image_pixels, jpeg_pixels, png_pixels, room_head, webp_pixels};
+
+    /// **账本锁中毒也照常展示全文**（fail-open）：读历史是 Retrieve 面，绝不能因为这一格坏了
+    /// 就整段读失败。判据两条：不 panic、正文照给。
+    #[test]
+    fn a_poisoned_profile_ledger_still_shows_the_full_text() {
+        let ledger = std::sync::Mutex::new(std::collections::BTreeMap::new());
+        let poisoned = std::panic::catch_unwind(|| {
+            let _guard = ledger.lock().expect("第一次拿锁");
+            panic!("故意在持锁时炸：把账本锁毒掉");
+        });
+        assert!(poisoned.is_err(), "这一条的前提是锁真的中毒了");
+        assert!(ledger.is_poisoned(), "锁必须已经中毒");
+
+        let body = serde_json::json!({
+            "room": {
+                "id": "r-1",
+                "kind": "group",
+                "name": "研发组",
+                "profile": {"description": "中毒也要看得到这段简介", "version": 3}
+            }
+        });
+        let head = room_head(&body, "r-1", &ledger);
+        assert_eq!(
+            head, "room_name = 研发组\nroom_profile (v3) = 中毒也要看得到这段简介\n",
+            "中毒不许藏正文、更不许失败: {head}"
+        );
+    }
 
     /// 一条最小的 PNG 头：签名 ＋ IHDR（长度 ＋ 类型 ＋ 宽高）。
     fn png(width: u32, height: u32) -> Vec<u8> {

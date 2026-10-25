@@ -46,7 +46,7 @@
 | `src/commit.rs` | `EnvironmentCommit` 将中立提交接缝翻译为环境追加；存储错误映射为带阶段的 CommitError |
 | `src/diagnostics.rs` | 只读诊断：把一个活动已确认的事实行用 `store::records_of_run` 重建成 Foundation 事实、交既有单活动解释器，并把**操作解释**与**存储状态**分成两个来源报告；只接受 `&Environment`，不恢复、不重放、不解除暂停。**不渲染模型响应正文，也不接触协议载荷** |
 | `src/notes_app.rs` | **第二个真实 App**，TASK_31 起是**预装常开的字载体**（TASK_33 起还能**贴**）：自己的一对动词 `notes_pin` / `notes_unpin`（把纸条贴到墙上 / 摘下来——只动 `pinned` 标记，内容一字不动；幂等；共用复核 `notes_verify_pinned`）；自己的存储（`<环境根>/notes/<id>.note`）、自己的身份（`note-<n>`）、自己的动作（`notes_create`/`notes_list`/`notes_read`/`notes_verify_note`，以及 TASK_76 的 `notes_delete` / 它的复核 `notes_verify_deleted`——**删就是除名、没有回收站**；**查无此条 ⇒ 明确拒绝**并指路 `notes_list`，不装成功；贴着的那条也照删；复核三分：不在了 ⇒ 成功、还在 ⇒ `still-present`、读不出来 ⇒ 无法确认）与自己的失败词汇；**写自己的笔记不需要任何授权**（自持物，2026-09-12 字裁决；跨边界写才要 Grant，见 §3.21）；`notes_create` 的类别是 `repeatable-write`（抢的是编号而不是内容），因此它的复核**无法归因**到那一次操作；只通过同一份窄契约接入，不认识文件 App，也不被 Core 认识 |
-| `src/im_app.rs` | **第三个真实 App**（第一条跨系统边界通道）——im 家族的**通信面**（**预装常开**）：13 条动词——**只读六个**：`im_rooms`（通讯录：每房标识 / 种类 / 显示名 / **我在这个房间的未读 `unread = n` 与读到的位置 `read = <消息标识>`**（世界按成员周期记着，跨清醒期活着；读不到写 `?`，**不写 0**）/ 预览 ≤60 字节机械截断 / 最近活动 / 自 `since` 以来的条数）、`im_read_history`（翻记录：按发生顺序给身份、发出者、时间、正文，撤回如实标出，游标 opaque 原样回传）、`im_read_attachment`（附件**字节按需读**；元数据免费随历史来，见 §3.31）、`im_room_live`（房内进行态：谁在、谁正在写，**零正文**）与两次复核 `im_verify_said` / `im_verify_recalled`（**有界回翻**——翻到房起点才敢说没有）；**写七个**：`im_say`（在**我参与的**房间里发一条公共消息，可带 `file` 递文件、可 `reply_to_id` 引用某条、可 `mentions` 点名成员）、`im_recall`（撤掉**自己刚说出的**那条）、`im_mark_read`（**推进我在某个房间的读位置**——世界因此记得「我读到哪儿」，跨清醒期活着）、`im_leave_room`（**退出一个房间**）、`im_write_presentation`（写我在某间群房里的呈现）、`im_typing`（**声明「我正在这间房写」**——一个几秒后自己消失的**易失进行态信号**）、`im_attention`（**设置我在这间房的提醒档**：`all` = 普通消息也叫醒 / `mentions` = 只接受结构化 @；状态写、无幂等键、复核 `im_rooms`）；声明**七个效应**（五个 `repeatable-write` ＋ 退房一个 `exclusive-create`，都有复核入口 ＋ `im_typing` 一个 **`unverifiable-write`**：确实是写，但**没有同参复核可配**，按定义豁免）；自己**零存储**（事实的家在 im 服务端）；写侧三态如实（已提交 / 被明确拒绝 / **提交结果未确认**，绝不重发）；端点由 `--im-endpoint` 声明、凭据由环境变量声明（两者必须成对，缺一半即入口拒绝）；失败词表与另两面**共用**中立层的封闭词表（23 个分类，见 §3.16） |
+| `src/im_app.rs` | **第三个真实 App**（第一条跨系统边界通道）——im 家族的**通信面**（**预装常开**）：13 条动词——**只读六个**：`im_rooms`（通讯录：每房标识 / 种类 / 显示名 / **我在这个房间的未读 `unread = n` 与读到的位置 `read = <消息标识>`**（世界按成员周期记着，跨清醒期活着；读不到写 `?`，**不写 0**）/ 预览 ≤60 字节机械截断 / 最近活动 / 自 `since` 以来的条数）、`im_read_history`（翻记录：按发生顺序给身份、发出者、时间、正文，撤回如实标出，游标 opaque 原样回传；**回执开头给房名与最新简介**——`room_name` / `room_profile (v<版本>)`，同一段活动同一版本只摊一次全文，见 §3.108）、`im_read_attachment`（附件**字节按需读**；元数据免费随历史来，见 §3.31）、`im_room_live`（房内进行态：谁在、谁正在写，**零正文**）与两次复核 `im_verify_said` / `im_verify_recalled`（**有界回翻**——翻到房起点才敢说没有）；**写七个**：`im_say`（在**我参与的**房间里发一条公共消息，可带 `file` 递文件、可 `reply_to_id` 引用某条、可 `mentions` 点名成员）、`im_recall`（撤掉**自己刚说出的**那条）、`im_mark_read`（**推进我在某个房间的读位置**——世界因此记得「我读到哪儿」，跨清醒期活着）、`im_leave_room`（**退出一个房间**）、`im_write_presentation`（写我在某间群房里的呈现）、`im_typing`（**声明「我正在这间房写」**——一个几秒后自己消失的**易失进行态信号**）、`im_attention`（**设置我在这间房的提醒档**：`all` = 普通消息也叫醒 / `mentions` = 只接受结构化 @；状态写、无幂等键、复核 `im_rooms`）；声明**七个效应**（五个 `repeatable-write` ＋ 退房一个 `exclusive-create`，都有复核入口 ＋ `im_typing` 一个 **`unverifiable-write`**：确实是写，但**没有同参复核可配**，按定义豁免）；自己**零存储**（事实的家在 im 服务端）；写侧三态如实（已提交 / 被明确拒绝 / **提交结果未确认**，绝不重发）；端点由 `--im-endpoint` 声明、凭据由环境变量声明（两者必须成对，缺一半即入口拒绝）；失败词表与另两面**共用**中立层的封闭词表（23 个分类，见 §3.16） |
 | `src/im_social_app.rs` | im 家族的**关系面**（`im-social`）——2026-10-02 从 `im` 拆出的那一组动词，**不预装**（`open_app` 展开才上场，与 files / timer 同款）：6 条动词——**只读两个**：`im_contacts`（看我的关系账：每一条是对端 ＋ 状态，`direction = incoming` 的**在等我回答**）、`im_blocks`（看我拉黑了谁）；**写四个**：`im_contacts_request`（主动发起关系申请）、`im_answer_contact`（`accept` / `decline` **给我的**那条申请）、`im_block` / `im_unblock`（拉黑 / 解除）；四个写都声明 `repeatable-write`，各配一项只读复核（前两个看关系账、后两个看拉黑名单）；失败词表与另两面**共用**（本面覆盖 `unknown-contact` / `unknown-participant`——后者含被对方拉黑，与「不存在」刻意同形、**不分解**，见 §3.16） |
 | `src/im_profile_app.rs` | im 家族的**表达面**（`im-profile`）——2026-10-02 从 `im` 拆出的那一组动词，**不预装**（`open_app` 展开才上场，与 files / timer 同款）：3 条动词——**只读一个**：`im_my_profile`（看**我自己**的资料：`version = N` ＋ 两句介绍 ＋ `published_by = human\|agent`）；**写两个**：`im_write_profile`（写**我自己**的介绍：`base_version` ＋ 短描述 / 公开描述，**自己的话、不是 Owner 代笔**）、`im_write_avatar`（换**我自己**的头像：`base_version` ＋ `file`，与写资料**共用同一条版本链**）；两个写都声明 `repeatable-write`，各配同参复核（= 读自己的资料）；失败词表与另两面**共用**（本面覆盖 `version-conflict`——基准版本对不上、确定的拒绝，见 §3.16）；路径与字节的机制在 `sandbox`（与 `files` / `notes` 共用同一份实现） |
 | `src/im_channel.rs` | im 家族的**中立层**（2026-10-02 拆包新立）：三个包**共用**的通道机制——端点与凭据的声明 `ImAccess`、请求的机械搬运（含单次请求墙钟上限）、幂等键合成、multipart 与 UUID / 版本校验、工具面共用的参数判据（**两族形状上限各一处**：`MAX_ID_BYTES` = 标识一族（房间 / 参与者 / 消息目标）、`MAX_FILE_PARAM_BYTES` = 本地文件路径一族；同一种形状只有一个答案——头像那一处曾借用标识的界，2026-10-06 收），以及**共用的封闭失败词表**（23 个分类）；每个包**各自拿一份通道、各自建自己的请求客户端**（各自的连接池），**包间不引用彼此的实现**（结构性守卫 `boundary_apis_stay_in_their_own_layer` 逐个检查，与 `sandbox` 同款）；只搬机械事实（状态码 / 响应体 / 字节）——**分类是契约知识**，由知道那条端点契约的 App 自己做（`Reply`） |
@@ -2699,6 +2699,50 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 
 ⚠ **负空间**：不做回收站（软删除会把"不可逆"这个词弄脏）· 不做自动压缩 / 自动归档（那是记忆系统的活）·
 不动 `notes_append` / `notes_delete` 的语义 · 不删任何既有动词 · 不碰 Core / im / 冻结契约。
+
+### 3.108 读历史先认房：房间头（名字 + 简介 + 版本）随单房回执到达，一段活动只摊一次全文
+
+**一句话**：`im_read_history` 的回执在第一行之后多两行——`room_name = …` 与
+`room_profile (v<版本>) = …`；同一段活动里同一版本只展示一次全文（第二遍起写
+`(already shown in this run)`），版本一变重新展示。**旧 Core 没有 `room` 字段 ⇒ 回执一个字都不变。**
+
+**拓扑（C4 L1–2；本刀零新节点、零新连接）**：
+
+```text
+Native Runtime（agent/，唯一改动方）
+  └─ ImApp::read_history ── GET /v1/backend/rooms/{id}/messages ──> Core HTTP（不改）
+        └─ render_history ＋ room_head：把回执顶层 `room` 摆成两行
+              └─ seen_profiles: Mutex<BTreeMap<room_id, version>>（Run 级、零持久）
+
+Core（不改）：每一页回执都带同一个房间头（CORE_V1_ROOM_PROFILE.md §4.2）
+Client（不改）：不消费这条回执
+```
+
+**原理**：房间头是**读时上下文**，不是新事实——Core 已经把它随每一页送来，Runtime 只需
+"摆在主体看得见的地方，且别每页重复摆一遍"。重复全文付的是主体的注意力；而**跨 Run 记住"看过"**
+又会让陈旧版本假扮最新（世界的版本链才是唯一权威）⇒ 账本只活**这一段活动**：`ImApp` 由
+`assemble_machine` 每次活动构造一次、活动结束就散，于是这张地图天然是 Run 级、零持久、跨 Run 归零。
+"缺什么写什么"照旧：没简介写 `room_profile = -`，房名缺失写 `-`；房名与简介都走既有 `escaped_field`
+（简介按契约允许换行，不转义就能在回执里伪造一条消息行）。
+
+**权威位置（本节不再重复它们的内容）**：
+
+- **渲染形状、旧 Core 的逐字节兼容、没给版本号那一档、锁中毒 fail-open** →
+  [`im_app.rs`](src/im_app.rs) 的 `room_head` 与 `render_history`
+- **Run 级账本为什么不是跨 Run 缓存**（结构性事实写在字段文档里） → 同件的 `ImApp::seen_profiles`
+- **主体在动词详情卡里读到的那个句子** → 同件的 `own_capabilities` 里 `im_read_history` 的 `with_details`
+
+**证明** → [`tests/im_app.rs`](tests/im_app.rs)：`the_history_receipt_carries_the_room_head`（位置 ＋ 全文）、
+`the_room_head_cannot_forge_a_message_line`（换行 / Tab 转义）、
+`a_shown_profile_is_not_repeated_within_the_same_run`、`a_bumped_profile_version_is_shown_again`、
+`a_room_without_a_profile_says_so`、
+`a_receipt_without_a_room_head_is_byte_identical_to_the_old_shape`（旧回执逐字节不变）、
+`two_runs_show_the_same_profile_again`（Run 级而非进程级）；锁中毒那一条在同文件的单元测试
+`im_app::tests::a_poisoned_profile_ledger_still_shows_the_full_text`。
+
+⚠ **负空间**：`im_rooms` 列表**不加**简介（索引保持轻量，简介只在单房读面带）· 不新增动词、不改任何
+动词名与参数形状 · Agent **不能写**简介（写面只有 Human 群主，见 `CORE_V1_ROOM_PROFILE.md` §3）·
+不落盘、不跨 Run 缓存、不做简介的历史版本读取 / 回滚 · 不改 Core / client / `scripts/home`。
 
 ## 4. 代码核验发现的目标差距 / 阻塞
 
