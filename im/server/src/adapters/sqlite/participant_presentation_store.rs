@@ -7,8 +7,8 @@
 //! 本模块是 Profile / Group Room Presentation / Group Room Profile 公共事实
 //! 唯一允许接触 SQLite 文件的地方，独立于 generic repository 之外的窄
 //! adapter。每一次 `put_*` 都在**单个 `BEGIN IMMEDIATE` 事务**内完成：授权
-//! （active Owner / active group owner + active Agent member / 该房 active
-//! owner 且为 active Human，**先于任何重放裁决**）→ 读 scope + key 幂等记录
+//! （active Owner / active group owner + active Agent member / 该房当前
+//! active owner（Human 或 Agent），**先于任何重放裁决**）→ 读 scope + key 幂等记录
 //! 与 digest → 同 key 同摘要恒重放既有结果（必要时读回历史版本行，即使当前
 //! 最新版本已被其他写入推进也不重新裁决 base_version）→ 同 key 不同摘要
 //! `IdempotencyConflict` → 新 key 要求 `base_version == 当前最新` → 插入
@@ -634,8 +634,8 @@ impl ParticipantPresentationStore for SqliteParticipantPresentationStore {
             // ② actor 必须是该房当前 active 成员；不是成员 / 从未来过 / 已离开
             // 一律 NotRoomMember（路由出 404，与未知房同形）。这条必须排在
             // kind 之前：否则非成员能靠 400 探出一间 direct 房存在。
-            let member: Option<(String, String, String)> = sqlx::query_as(
-                "SELECT o.role, p.kind, p.status \
+            let member: Option<(String, String)> = sqlx::query_as(
+                "SELECT o.role, p.status \
                  FROM room_memberships o \
                  JOIN participants p ON p.id = o.participant_id \
                  WHERE o.room_id = ? AND o.participant_id = ? AND o.active_marker = 1",
@@ -645,23 +645,24 @@ impl ParticipantPresentationStore for SqliteParticipantPresentationStore {
             .fetch_optional(&mut *tx)
             .await
             .map_err(db_error)?;
-            let Some((role, actor_kind, actor_status)) = member else {
+            let Some((role, actor_status)) = member else {
                 return Err(StoreError::NotRoomMember);
             };
             // ③ 只有 group 房有群简介（direct / human_direct → 400）。
             if room_kind != "group" {
                 return Err(StoreError::NotGroupRoom);
             }
-            // ④ 只有该房当前 active owner 可写；owner 可以是 Agent（owner =
-            // 创建者），但本端点只有 Human 认证面 ⇒ 非 active Human 一律按
-            // 「不是可写群主」拒绝（403），绝不落库（DB 触发器同一判据兜底）。
-            if role != "owner" || actor_kind != "human" || actor_status != "active" {
+            // ④ 只有该房当前 active owner 可写。owner 是**房内的治理角色**，
+            // 不是参与者 kind（2026-09-27 起 Agent 也能建房并持有 owner）：
+            // 判据只看 role + active，不限 kind。仍要求写入者 active——
+            // revoked 主体不得经重放或新写落库（DB 触发器同一判据兜底）。
+            if role != "owner" || actor_status != "active" {
                 return Err(StoreError::NotRoomOwner);
             }
             // ⑤ 幂等重放 / 冲突（授权已通过，重放不得绕过授权）。
             let existing: Option<(String, i64)> = sqlx::query_as(
                 "SELECT request_digest, result_version FROM room_profile_put_idempotency \
-                 WHERE actor_human_id = ? AND room_id = ? AND key = ?",
+                 WHERE actor_id = ? AND room_id = ? AND key = ?",
             )
             .bind(record.updated_by.as_str())
             .bind(record.room_id.as_str())
@@ -705,7 +706,7 @@ impl ParticipantPresentationStore for SqliteParticipantPresentationStore {
                     .map_err(db_error)?;
                     sqlx::query(
                         "INSERT INTO room_profile_put_idempotency \
-                         (actor_human_id, room_id, key, request_digest, result_version, created_at) \
+                         (actor_id, room_id, key, request_digest, result_version, created_at) \
                          VALUES (?, ?, ?, ?, ?, ?)",
                     )
                     .bind(record.updated_by.as_str())
@@ -717,8 +718,9 @@ impl ParticipantPresentationStore for SqliteParticipantPresentationStore {
                     .execute(&mut *tx)
                     .await
                     .map_err(db_error)?;
-                    let version = RoomProfileVersion::parse(new_version)
-                        .map_err(|e| corrupt(format!("stored room profile version invalid: {e}")))?;
+                    let version = RoomProfileVersion::parse(new_version).map_err(|e| {
+                        corrupt(format!("stored room profile version invalid: {e}"))
+                    })?;
                     return Ok(RoomProfilePutOutcome {
                         created: true,
                         result: RoomProfileRead {

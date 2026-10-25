@@ -333,6 +333,24 @@ fn put_body(base: i64, description: &str) -> Value {
     serde_json::json!({ "base_version": base, "description": description })
 }
 
+async fn put_backend_profile(
+    server: &Server,
+    token: Option<&str>,
+    room: &str,
+    key: Option<&str>,
+    body: Value,
+) -> Response {
+    server
+        .request(
+            "PUT",
+            &format!("/v1/backend/rooms/{room}/profile"),
+            token,
+            key,
+            Some(&body),
+        )
+        .await
+}
+
 async fn put_profile(
     server: &Server,
     token: &str,
@@ -763,6 +781,182 @@ async fn room_profile_write_read_matrix_and_restart() {
     assert_eq!(resp.json()["profile"]["version"], 3);
     assert_eq!(resp.json()["profile"]["description"], "新群主写");
 
+    // ── 2026-10-26：Agent 群主经 BackendAuth 写自己的群简介 ──────────────
+    // 一支 Agent 自己建房并成为 owner（owner 是房内治理角色，不限 kind）；
+    // Alice 经「Agent 发起关系 → 人自己接受」成为成员。
+    let owner_agent = create_agent(&server, &alice_token, "a-3", "群主助手").await;
+    let owner_token = backend_token(&server, &alice_token, &owner_agent, "owner").await;
+    let resp = server
+        .request(
+            "POST",
+            "/v1/backend/groups",
+            Some(&owner_token),
+            Some("bg-1"),
+            Some(&serde_json::json!({ "name": "Agent 的群" })),
+        )
+        .await;
+    assert_eq!(resp.status, 201, "backend group: {}", resp.json());
+    let agent_group = require_string(&resp.json()["room"], "id");
+
+    let resp = server
+        .request(
+            "POST",
+            "/v1/backend/contacts/requests",
+            Some(&owner_token),
+            Some("bg-rel"),
+            Some(&serde_json::json!({ "participant_id": alice_id })),
+        )
+        .await;
+    assert_eq!(resp.status, 201, "agent contact request: {}", resp.json());
+    let resp = accept_contact(&server, &alice_token, &owner_agent).await;
+    assert_eq!(resp.status, 200, "human accepts agent: {}", resp.json());
+    let resp = server
+        .request(
+            "POST",
+            &format!("/v1/backend/rooms/{agent_group}/members"),
+            Some(&owner_token),
+            Some("bg-inv"),
+            Some(&serde_json::json!({ "participant_id": alice_id })),
+        )
+        .await;
+    assert_eq!(resp.status, 201, "backend invite: {}", resp.json());
+
+    // 缺凭据 → 401；direct 房 → 400（agent 是成员，但不是 group）。
+    let resp = put_backend_profile(
+        &server,
+        None,
+        &agent_group,
+        Some("bg-anon"),
+        put_body(0, "匿名"),
+    )
+    .await;
+    assert_error(&resp, 401, "authentication_required");
+    let resp = put_backend_profile(
+        &server,
+        Some(&agent_token),
+        &direct,
+        Some("bg-direct"),
+        put_body(0, "私聊"),
+    )
+    .await;
+    assert_error(&resp, 400, "invalid_room_kind");
+
+    // Agent 群主首次写 → v1；Human 成员读得到。
+    let agent_text = "Agent 群主写的简介\n第二行 🙂";
+    let resp = put_backend_profile(
+        &server,
+        Some(&owner_token),
+        &agent_group,
+        Some("bg-p1"),
+        put_body(0, agent_text),
+    )
+    .await;
+    assert_eq!(resp.status, 200, "{}", resp.json());
+    assert_eq!(resp.json()["profile"]["version"], 1);
+    assert_eq!(resp.json()["profile"]["description"], agent_text);
+    assert_eq!(resp.json()["idempotency_replayed"], false);
+    let resp = server
+        .request(
+            "GET",
+            &format!("/v1/rooms/{agent_group}"),
+            Some(&alice_token),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(resp.status, 200, "{}", resp.json());
+    assert_eq!(resp.json()["profile"]["version"], 1);
+    assert_eq!(resp.json()["profile"]["description"], agent_text);
+
+    // Human 成员不能代写 Agent 的群。
+    let resp = put_profile(
+        &server,
+        &alice_token,
+        &agent_group,
+        Some("bg-human"),
+        put_body(1, "Human 成员代写"),
+    )
+    .await;
+    assert_error(&resp, 403, "not_room_owner");
+
+    // 幂等重放 / 过期 / 同 key 异正文。
+    let resp = put_backend_profile(
+        &server,
+        Some(&owner_token),
+        &agent_group,
+        Some("bg-p1"),
+        put_body(0, agent_text),
+    )
+    .await;
+    assert_eq!(resp.status, 200, "{}", resp.json());
+    assert_eq!(resp.json()["idempotency_replayed"], true);
+    assert_eq!(resp.json()["profile"]["version"], 1);
+    let resp = put_backend_profile(
+        &server,
+        Some(&owner_token),
+        &agent_group,
+        Some("bg-stale"),
+        put_body(0, "过期"),
+    )
+    .await;
+    assert_error(&resp, 409, "profile_version_conflict");
+    let resp = put_backend_profile(
+        &server,
+        Some(&owner_token),
+        &agent_group,
+        Some("bg-p1"),
+        put_body(0, "改过"),
+    )
+    .await;
+    assert_error(&resp, 409, "idempotency_conflict");
+
+    // 历史回执的房间头看到新版本。
+    let resp = server
+        .request(
+            "GET",
+            &format!("/v1/backend/rooms/{agent_group}/messages"),
+            Some(&owner_token),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(resp.status, 200, "{}", resp.json());
+    assert_eq!(resp.json()["room"]["id"], serde_json::json!(agent_group));
+    assert_eq!(resp.json()["room"]["profile"]["version"], 1);
+    assert_eq!(resp.json()["room"]["profile"]["description"], agent_text);
+
+    // Agent → Human 转让：新 Human 群主立刻可写（v2），Agent 立刻 403。
+    let resp = server
+        .request(
+            "POST",
+            &format!("/v1/backend/rooms/{agent_group}/owner-transfer"),
+            Some(&owner_token),
+            Some("bg-tr"),
+            Some(&serde_json::json!({ "participant_id": alice_id })),
+        )
+        .await;
+    assert_eq!(resp.status, 200, "transfer: {}", resp.json());
+    let resp = put_profile(
+        &server,
+        &alice_token,
+        &agent_group,
+        Some("bg-human-owner"),
+        put_body(1, "Human 新群主写"),
+    )
+    .await;
+    assert_eq!(resp.status, 200, "{}", resp.json());
+    assert_eq!(resp.json()["profile"]["version"], 2);
+    assert_eq!(resp.json()["profile"]["description"], "Human 新群主写");
+    let resp = put_backend_profile(
+        &server,
+        Some(&owner_token),
+        &agent_group,
+        Some("bg-old-owner"),
+        put_body(2, "Agent 旧群主再写"),
+    )
+    .await;
+    assert_error(&resp, 403, "not_room_owner");
+
     // 重启：简介与版本仍在，历史头仍在。
     server.stop().await;
     let mut server = Server::start(&db_path, &media_root).await;
@@ -789,6 +983,31 @@ async fn room_profile_write_read_matrix_and_restart() {
         .await;
     assert_eq!(resp.status, 200, "{}", resp.json());
     assert_eq!(resp.json()["room"]["profile"]["version"], 3);
+
+    // Agent 起的群也跨重启：v2（Human 新群主写）仍在，房间头同步。
+    let resp = server
+        .request(
+            "GET",
+            &format!("/v1/rooms/{agent_group}"),
+            Some(&alice_token),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(resp.status, 200, "{}", resp.json());
+    assert_eq!(resp.json()["profile"]["version"], 2);
+    assert_eq!(resp.json()["profile"]["description"], "Human 新群主写");
+    let resp = server
+        .request(
+            "GET",
+            &format!("/v1/backend/rooms/{agent_group}/messages"),
+            Some(&owner_token),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(resp.status, 200, "{}", resp.json());
+    assert_eq!(resp.json()["room"]["profile"]["version"], 2);
 
     server.stop().await;
     run.cleanup();

@@ -1,7 +1,8 @@
 //! Group Room Profile（群简介）领域事实：房间自己的版本化公共资料。
 //!
 //! 契约（CORE_V1_ROOM_PROFILE.md §3–§5）：简介是 **group Room 的公共事实**，
-//! 只有该房当前 active owner（Human）能写；正文 1..2000 UTF-8 字节、禁
+//! 只有该房当前 active owner（Human 或 Agent，owner 是房内治理角色而非
+//! 参与者 kind）能写；正文 1..2000 UTF-8 字节、禁
 //! U+0000、`trim` 后非空，原样保存（不做 Unicode 归一化、不 trim）；版本
 //! > 0 且同 room 严格 +1；没有版本行 = 没有简介（读面 `profile: null`）。
 //!

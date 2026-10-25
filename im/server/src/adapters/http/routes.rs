@@ -103,8 +103,10 @@ pub fn router() -> Router<AppState> {
         // 组合用例，不重复弱化检查。
         .merge(participant_presentation_routes::router())
         // Group Room Profile（v1.1 附加切片，契约 CORE_V1_ROOM_PROFILE.md）：
-        // 群简介写端点（该房 active owner 且为 active Human；授权在存储事务内
-        // 先于重放裁决）。自带 16 KiB 请求体上限，故在 4 KiB 默认层之后合并。
+        // 群简介写端点（该房当前 active owner，Human 与 Agent 同一条判据；
+        // 授权在存储事务内先于重放裁决）。自带 16 KiB 请求体上限，故在
+        // 4 KiB 默认层之后合并；BackendAuth 写面与 Human 写面是同一个
+        // 用例、同一段响应映射。
         .merge(room_profile_routes::router())
         // Participant Avatar 切片（窄解冻切片）：在 4 KiB 默认上限之后注册，
         // PUT 自带 2 MiB + 开销的独立上限（multipart）。写路径只对 active

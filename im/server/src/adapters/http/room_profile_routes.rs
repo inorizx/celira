@@ -1,14 +1,24 @@
 //! Group Room Profile（群简介）HTTP handlers
 //! （CORE_V1_ROOM_PROFILE.md §3–§5）。
 //!
-//! 只有一条写端点 `PUT /v1/rooms/{room_id}/profile`（Human Session）。handler
-//! 只调用 `application::room_profile` 用例与窄端口，不直接操作 SQLite；所有
-//! 非 2xx 走统一 JSON 错误信封。授权（该房当前 active owner 且为 active
-//! Human）由存储端口在 `BEGIN IMMEDIATE` 事务内先于重放裁决——路由层绝不
-//! 重复弱化检查、不引入第二个写者。
+//! 两条写端点，**同一条业务路径**：
+//! - `PUT /v1/rooms/{room_id}/profile`（Human Session，`CurrentAuth`）——逐字节
+//!   沿用 v1.1 切片的行为；
+//! - `PUT /v1/backend/rooms/{room_id}/profile`（Agent BackendAuth，2026-10-26）
+//!   ——owner 是房内的治理角色而非参与者 kind：Agent 建了自己的群，就必须能
+//!   写自己群的简介。
 //!
-//! 请求体上限 16 KiB：简介正文上限 2000 字节，JSON 转义（换行 / Emoji 等）
-//! 后仍有余量；超出返回 413 payload_too_large。正文字段级边界在域层裁决
+//! 两个 adapter 只换认证面与 actor 的来源（`backend_agent_actor`），请求体 /
+//! 幂等键解析、`application::room_profile::put_room_profile` 调用与响应映射
+//! 全部走 [`put_room_profile_response`] 这一处，不复制第二套业务逻辑。
+//!
+//! handler 只调用用例与窄端口，不直接操作 SQLite；所有非 2xx 走统一 JSON
+//! 错误信封。授权（该房当前 active owner，**不限参与者 kind**）由存储端口在
+//! `BEGIN IMMEDIATE` 事务内先于重放裁决——路由层绝不重复弱化检查、不引入
+//! 第二个写者。
+//!
+//! 请求体上限 16 KiB：简介正文上限 2000 字节，JSON 转义（换行 / Emoji 等）后
+//! 仍有余量；超出返回 413 payload_too_large。正文字段级边界在域层裁决
 //! （400 invalid_profile_description），不属于路由上限。
 
 use axum::extract::rejection::{BytesRejection, FailedToBufferBody, JsonRejection};
@@ -21,9 +31,11 @@ use axum::{Json, Router};
 use crate::adapters::http::AppState;
 use crate::adapters::http::agent_routes::{KeyError, idempotency_key_from_headers};
 use crate::adapters::http::auth::CurrentAuth;
+use crate::adapters::http::backend_auth::{BackendAuth, backend_agent_actor};
 use crate::adapters::http::middleware::RequestId;
 use crate::adapters::http::routes::{error_response, store_error_response};
 use crate::application::room_profile::{RoomProfilePutError, put_room_profile};
+use crate::domain::participant::Participant;
 use crate::ports::participant_presentation::{RoomProfileHeader, RoomProfileRead};
 use crate::protocol::error::codes;
 use crate::protocol::room_profile::{
@@ -39,6 +51,10 @@ pub const MAX_ROOM_PROFILE_BODY_BYTES: usize = 16 * 1024;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/rooms/{room_id}/profile", put(put_room_profile_route))
+        .route(
+            "/v1/backend/rooms/{room_id}/profile",
+            put(put_backend_room_profile_route),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(
             MAX_ROOM_PROFILE_BODY_BYTES,
         ))
@@ -96,33 +112,35 @@ fn require_key(headers: &HeaderMap, request_id: &str) -> Result<String, Box<Resp
     }
 }
 
-/// PUT /v1/rooms/{room_id}/profile：current Group active owner（Human）为
-/// 整间房写简介。**统一 200**：首次写入产生版本 N，同 key 同摘要重放返回
-/// 首次结果（`idempotency_replayed=true`）且不追加版本；同 key 不同摘要
+/// 群简介写的**唯一** HTTP 执行路径：Human `CurrentAuth` 与 BackendAuth 两个
+/// 适配器都调用本函数——解析顺序（body → Idempotency-Key → 用例）、错误映射
+/// 与成功响应逐字节相同，只在调用方换 actor 的来源。
+///
+/// **统一 200**：首次写入产生版本 N，同 key 同摘要重放返回首次结果
+/// （`idempotency_replayed=true`）且不追加版本；同 key 不同摘要
 /// 409 `idempotency_conflict`；新 key 但 `base_version` 过期 409
 /// `profile_version_conflict`。非成员 / 未知房 404 `room_not_found`；
 /// active 成员但非 owner 403 `not_room_owner`；非 group 400 `invalid_room_kind`。
-async fn put_room_profile_route(
-    State(state): State<AppState>,
-    auth: CurrentAuth,
-    Path(room_id): Path<String>,
-    request_id: RequestId,
-    headers: HeaderMap,
+pub(crate) async fn put_room_profile_response(
+    state: &AppState,
+    actor: &Participant,
+    room_id: &str,
+    request_id: &str,
+    headers: &HeaderMap,
     body: Result<Json<PutRoomProfileRequest>, JsonRejection>,
 ) -> Response {
-    let request_id = request_id.0;
-    let Json(payload) = match parse_put_body(body, &request_id) {
+    let Json(payload) = match parse_put_body(body, request_id) {
         Ok(p) => p,
         Err(response) => return response,
     };
-    let key = match require_key(&headers, &request_id) {
+    let key = match require_key(headers, request_id) {
         Ok(key) => key,
         Err(response) => return *response,
     };
     match put_room_profile(
         state.presentation.as_ref(),
-        &auth.participant,
-        &room_id,
+        actor,
+        room_id,
         &key,
         payload.base_version,
         payload.description.as_deref(),
@@ -132,11 +150,48 @@ async fn put_room_profile_route(
         Ok(outcome) => Json(PutRoomProfileResponse {
             profile: room_profile_view(&outcome.result),
             idempotency_replayed: !outcome.created,
-            request_id,
+            request_id: request_id.to_owned(),
         })
         .into_response(),
-        Err(e) => room_profile_put_error_response(e, &request_id),
+        Err(e) => room_profile_put_error_response(e, request_id),
     }
+}
+
+/// `PUT /v1/rooms/{room_id}/profile`（Human Session）：行为与 v1.1 切片逐字节
+/// 相同——认证面、actor 与响应映射都没有换。
+async fn put_room_profile_route(
+    State(state): State<AppState>,
+    auth: CurrentAuth,
+    Path(room_id): Path<String>,
+    request_id: RequestId,
+    headers: HeaderMap,
+    body: Result<Json<PutRoomProfileRequest>, JsonRejection>,
+) -> Response {
+    put_room_profile_response(
+        &state,
+        &auth.participant,
+        &room_id,
+        &request_id.0,
+        &headers,
+        body,
+    )
+    .await
+}
+
+/// `PUT /v1/backend/rooms/{room_id}/profile`（BackendAuth）：Agent 以自己的
+/// 身份写它所拥有的群的简介。身份只来自认证——路径里只有房间，没有"以谁
+/// 的名义"；凡不是该房当前 active owner 的 Agent 一律 403 `not_room_owner`，
+/// 非成员仍 404（不泄露存在性）。
+async fn put_backend_room_profile_route(
+    State(state): State<AppState>,
+    auth: BackendAuth,
+    Path(room_id): Path<String>,
+    request_id: RequestId,
+    headers: HeaderMap,
+    body: Result<Json<PutRoomProfileRequest>, JsonRejection>,
+) -> Response {
+    let actor = backend_agent_actor(&auth.view.agent);
+    put_room_profile_response(&state, &actor, &room_id, &request_id.0, &headers, body).await
 }
 
 fn room_profile_put_error_response(e: RoomProfilePutError, request_id: &str) -> Response {

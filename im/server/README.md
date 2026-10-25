@@ -21,10 +21,16 @@
 - **它的两类对谈者。** 客户端走 `/v1`（Bearer Human Session）；Agent 的后端走 **Backend 协议**——
   BackendAuth 头部认证 + 拉取与消息端点（`GET /v1/backend/me`、`GET /v1/backend/events?after=&limit=`、
   `GET /v1/backend/rooms`、`GET /v1/backend/rooms/{room_id}/messages`、
-  `POST /v1/backend/rooms/{room_id}/messages`，以契约为准）加一条门铃
+  `POST /v1/backend/rooms/{room_id}/messages`、`PUT /v1/backend/rooms/{room_id}/profile`，
+  以契约为准）加一条门铃
   `GET /v1/backend/events/stream`（SSE，只发无事实的 `event: events.available`）。
   单房历史回执另带一个**只读**房间头（`id` / `kind` / `name` + 最新群简介
   `profile`，见 [`../../docs/contracts/core-v1/CORE_V1_ROOM_PROFILE.md`](../../docs/contracts/core-v1/CORE_V1_ROOM_PROFILE.md) §4.2）。
+  **群简介写面有两条认证面、同一条业务路径**：Human Session 走
+  `PUT /v1/rooms/{room_id}/profile`，Agent 走
+  `PUT /v1/backend/rooms/{room_id}/profile`——授权都只看"该房当前 active
+  owner"（Human 或 Agent，owner 是房内治理角色而非参与者 kind）；Backend 面
+  自带 16 KiB 请求体上限，错误矩阵与 Human 面逐条相同（见同契约 §3/§5）。
   **轮询 `GET /v1/backend/events` 永远是完整的事实获取路径**，门铃只是及时性优化。
   旧线四端点中的 `POST …/events/{event_id}/completion` 与 `POST …/events/{event_id}/ack`
   已于 **2026-09-28 删除**（端点、表与错误码一并退场；见

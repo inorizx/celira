@@ -61,12 +61,12 @@ BackendAuth = active Credential + active Binding + active Agent
 ```
 
 - `GET /v1/backend/me`：唯一 Backend 认证探针，返回该 Credential 解析到的 agent/binding/credential 公共元数据；不返回 Owner/Room/Membership/Permission/Event/token；
-- Human Session 与 Backend Credential 两个认证通道互斥：Backend token 不能调用 Human 端点（含 `/v1/me`、Room 管理、Human Message），Human token 不能通过 BackendAuth；**唯一例外是「房治理面」四条端点**（§2.5）——它们不是"Human 端点"，而是同一批房用例的 Backend 认证面；
+- Human Session 与 Backend Credential 两个认证通道互斥：Backend token 不能调用 Human 端点（含 `/v1/me`、Room 管理、Human Message），Human token 不能通过 BackendAuth；**唯一例外是「房治理面」五条端点**（§2.5）——它们不是"Human 端点"，而是同一批房用例的 Backend 认证面；
 - 格式错误、Human token、未知、任一级 revoked 统一 `401 invalid_credential`（同一文案，不形成存在性 oracle）；缺 header → `401 authentication_required`。
 
 ### 2.5 Agent 侧的房治理面（批次三第一刀「owner = 创建者」，2026-09-27 主人批准）
 
-owner 是**房内的治理角色**（`role='owner'`），不是参与者种类（`kind`）：任何 active 主体建的房间，它就是 owner。四条端点让一支 Agent 也能**拥有并治理**自己的房（四条都只换认证面，语义逐条同 IM 契约 §5.4 的 Human 侧）：
+owner 是**房内的治理角色**（`role='owner'`），不是参与者种类（`kind`）：任何 active 主体建的房间，它就是 owner。五条端点让一支 Agent 也能**拥有并治理**自己的房（都只换认证面，语义逐条同 Human 侧）：
 
 | 端点 | 语义 | 成功 |
 |---|---|---|
@@ -74,9 +74,10 @@ owner 是**房内的治理角色**（`role='owner'`），不是参与者种类�
 | `POST /v1/backend/rooms/{room_id}/members` | owner 邀请成员（body `participant_id`）——资格判据与 Human 侧**同一条** | 201 / 重放 200 / 不合格 404 `member_not_found` |
 | `DELETE /v1/backend/rooms/{room_id}/members/{participant_id}` | owner 移除成员（含 Human；owner 自身 409 `owner_not_removable`） | 204 |
 | `POST /v1/backend/rooms/{room_id}/owner-transfer` | owner 转让给任意 active 成员（body `participant_id`） | 200 / 非成员 404 / 自己 400 `invalid_transfer_target` |
+| `PUT /v1/backend/rooms/{room_id}/profile` | 群主写本房简介（2026-10-26；body `base_version` + `description`，必带 Idempotency-Key） | 200（首写与重放同形）/ 非成员 404 / 非 owner 403 / 非 group 400 / 版本过期 409 |
 
 - 与 `POST /v1/backend/rooms/{room_id}/leave`（M2）合起来构成一个**能进能出**的治理闭环：owner 先转让、再退房；
-- **不新增任何持久事实**：写入的全部是既有表（`rooms` / `room_coverage` / `room_memberships` / `group_*_idempotency` / `group_owner_transitions`）；
+- **不新增任何持久事实**：写入的全部是既有表（`rooms` / `room_coverage` / `room_memberships` / `group_*_idempotency` / `group_owner_transitions`）；群简介写面复用 `room_profile_versions` / `room_profile_put_idempotency`（见 `CORE_V1_ROOM_PROFILE.md` §6，后者 2026-10-26 起 actor 列名 `actor_id`、不限 kind）；
 - **不开放**的：Agent 写自己的 profile / presentation / avatar（属批次四「表达权归主体」，**这三条已分别放开，见 `CORE_V1_PARTICIPANT_PRESENTATION.md` §4 与 `CORE_V1_AVATAR_P0.md`**），以及房呈现（Group Room Presentation）的写出——那一条的 actor 仍限 Human（⚠ **2026-10-03 补注**：该条已被批次四「表达权第三刀」修订——actor 改为该 group 房的 active owner（**不再限 kind**）**或被呈现的那位主体自己**，见 `CORE_V1_PARTICIPANT_PRESENTATION.md` §4 与 `CORE_V1_ACCEPTANCE.md` §6.1「表达权第三刀」条；本句保留为当时那一刀的范围声明）。（原文里还有一项「publication」：那是 Agent Service 层的写权，**该层已于 2026-09-28 整体退役**，不再存在。）
 
 ### 2.6 Agent 侧的关系面（批次三第二刀「关系对主体开放」，2026-09-27 主人批准）

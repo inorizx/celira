@@ -7,7 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// `PUT /v1/rooms/{room_id}/profile` 请求体。未知字段一律拒绝。
+/// 群简介写请求体（`PUT /v1/rooms/{room_id}/profile` 与
+/// `PUT /v1/backend/rooms/{room_id}/profile` 共用）。未知字段一律拒绝。
 ///
 /// `description` 用 `Option` 区分「缺字段」与「合法正文」：缺字段 / `null`
 /// 是请求形状错误（400 `invalid_request`）；存在但为空、纯空白、含 NUL、
@@ -27,8 +28,8 @@ pub struct RoomProfileView {
     pub updated_at: String,
 }
 
-/// `PUT /v1/rooms/{room_id}/profile` 成功响应：**统一 200**（首次与重放同
-/// 形状），`idempotency_replayed` 区分同 key 同摘要重放。
+/// 群简介写成功响应（两条认证面同形）：**统一 200**（首次与重放同形状），
+/// `idempotency_replayed` 区分同 key 同摘要重放。
 #[derive(Debug, Clone, Serialize)]
 pub struct PutRoomProfileResponse {
     pub profile: RoomProfileView,

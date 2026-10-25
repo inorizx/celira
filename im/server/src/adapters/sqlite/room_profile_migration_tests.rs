@@ -1,11 +1,13 @@
 //! Group Room Profile migration 完整性测试。
 //!
-//! 在真实临时 SQLite 上应用全部 migration（含本切片 202610250001），用直接
-//! SQL 证明本切片的 schema 守卫（CORE_V1_ROOM_PROFILE.md §6）：
-//! 不可变、同 room 单调 +1、身份 REPLACE 防线、group-only + active Human
-//! owner 写入资格、`length(CAST(... AS BLOB))` 2000 字节上限、NUL 拒绝、
-//! trim 后非空、幂等记录的 deferred 外键（**只证明引用一致性，不证明同
-//! 事务**）与见证一致性守卫（writer == actor、created_at == updated_at）。
+//! 在真实临时 SQLite 上应用全部 migration（含 202610250001 与本刀
+//! 202610260001），用直接 SQL 证明本切片的 schema 守卫
+//! （CORE_V1_ROOM_PROFILE.md §6）：
+//! 不可变、同 room 单调 +1、身份 REPLACE 防线、group-only + active owner
+//! （**不限参与者 kind**）写入资格、`length(CAST(... AS BLOB))` 2000 字节
+//! 上限、NUL 拒绝、trim 后非空、幂等表的 `actor_id` 列名、幂等记录的
+//! deferred 外键（**只证明引用一致性，不证明同事务**）与见证一致性守卫
+//! （writer == actor、created_at == updated_at）。
 //! 本阶段所有断言直接面向 migration 生成的 schema。
 
 use crate::adapters::sqlite::migration_store::MigrationStore;
@@ -19,12 +21,15 @@ const AGENT: &str = "33333333-3333-4333-8333-333333333333";
 const GROUP_ROOM: &str = "44444444-4444-4444-8444-444444444444";
 const SECOND_GROUP_ROOM: &str = "45454545-4545-4545-8545-454545454545";
 const DIRECT_ROOM: &str = "55555555-5555-4555-8555-555555555555";
+const AGENT_GROUP_ROOM: &str = "56565656-5656-4656-8656-565656565656";
 const OWNER_MEMBERSHIP: &str = "66666666-6666-4666-8666-666666666666";
 const SECOND_OWNER_MEMBERSHIP: &str = "69696969-6969-4969-8969-696969696969";
 const MEMBER_HUMAN_MEMBERSHIP: &str = "77777777-7777-4777-8777-777777777777";
 const AGENT_MEMBERSHIP: &str = "88888888-8888-4888-8888-888888888888";
 const DIRECT_HUMAN_MEMBERSHIP: &str = "89898989-8989-4989-8989-898989898989";
 const DIRECT_AGENT_MEMBERSHIP: &str = "90909090-9090-4090-8090-909090909090";
+const AGENT_OWNER_MEMBERSHIP: &str = "91919191-9191-4191-8191-919191919191";
+const AGENT_GROUP_HUMAN_MEMBERSHIP: &str = "92929292-9292-4292-8292-929292929292";
 
 async fn open() -> (tempfile::TempDir, MigrationStore) {
     let dir = tempfile::tempdir().unwrap();
@@ -35,7 +40,8 @@ async fn open() -> (tempfile::TempDir, MigrationStore) {
 }
 
 /// 闭合世界：active Human owner + active Human member（accepted 关系）+
-/// active Agent（被 owner 拥有）+ 一间 group 房 + 一间 direct 房。
+/// active Agent（被 owner 拥有）+ 一间 Human owned group 房 + 一间 Agent
+/// owned group 房（Agent 是 owner、Human 是 member）+ 一间 direct 房。
 async fn seed_world(pool: &SqlitePool) {
     let mut tx = pool.begin().await.unwrap();
     for (id, kind, status, name) in [
@@ -165,6 +171,52 @@ async fn seed_world(pool: &SqlitePool) {
         .await
         .unwrap();
     }
+
+    // Agent 自己的群：owner = AGENT（owner 是房内治理角色，不限 kind）；
+    // MEMBER_HUMAN 经 accepted 关系入群，作为「非 owner 的 Human 成员」。
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO rooms (id, kind, status, created_at, name) VALUES (?, 'group', 'active', 1, 'agent-owned')",
+    )
+    .bind(AGENT_GROUP_ROOM)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO room_coverage \
+         (room_id, kind, created_at, group_owner_membership_id, group_owner_role, group_owner_active_marker) \
+         VALUES (?, 'group', 1, ?, 'owner', 1)",
+    )
+    .bind(AGENT_GROUP_ROOM)
+    .bind(AGENT_OWNER_MEMBERSHIP)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO room_memberships \
+         (membership_id, room_id, participant_id, role, joined_at, join_after_sequence, active_marker) \
+         VALUES (?, ?, ?, 'owner', 1, 0, 1)",
+    )
+    .bind(AGENT_OWNER_MEMBERSHIP)
+    .bind(AGENT_GROUP_ROOM)
+    .bind(AGENT)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    seed_accepted_relation(pool, AGENT, MEMBER_HUMAN).await;
+    sqlx::query(
+        "INSERT INTO room_memberships \
+         (membership_id, room_id, participant_id, role, joined_at, join_after_sequence, active_marker) \
+         VALUES (?, ?, ?, 'member', 2, 0, 1)",
+    )
+    .bind(AGENT_GROUP_HUMAN_MEMBERSHIP)
+    .bind(AGENT_GROUP_ROOM)
+    .bind(MEMBER_HUMAN)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 async fn insert_version(
@@ -200,7 +252,7 @@ async fn insert_idempotency(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO room_profile_put_idempotency \
-         (actor_human_id, room_id, key, request_digest, result_version, created_at) \
+         (actor_id, room_id, key, request_digest, result_version, created_at) \
          VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(actor)
@@ -262,7 +314,7 @@ async fn migration_applies_and_creates_tables_and_guards() {
         "room_profile_versions_insert_identity_guard",
         "room_profile_versions_strictly_increment",
         "room_profile_versions_insert_guards",
-        "room_profile_put_idempotency_actor_human",
+        "room_profile_put_idempotency_actor_active",
         "room_profile_put_idempotency_immutable",
         "room_profile_put_idempotency_no_delete",
         "room_profile_put_idempotency_insert_identity_guard",
@@ -393,7 +445,7 @@ async fn description_enforces_bytes_nul_and_trim_non_empty() {
 }
 
 #[tokio::test]
-async fn only_group_rooms_with_active_human_owner_can_be_written() {
+async fn only_group_rooms_with_an_active_owner_can_be_written() {
     let (_dir, store) = open().await;
     let pool = store.pool();
     seed_world(pool).await;
@@ -406,21 +458,74 @@ async fn only_group_rooms_with_active_human_owner_can_be_written() {
     let err = insert_version(pool, GROUP_ROOM, 1, "成员写的", MEMBER_HUMAN, 100)
         .await
         .expect_err("active member but not owner");
-    assert!(format!("{err}").contains("active human owner"), "{err}");
+    assert!(format!("{err}").contains("active owner"), "{err}");
 
-    let err = insert_version(pool, GROUP_ROOM, 1, "Agent 写的", AGENT, 100)
+    let err = insert_version(pool, GROUP_ROOM, 1, "Agent 成员写的", AGENT, 100)
         .await
-        .expect_err("agent cannot write");
-    assert!(format!("{err}").contains("active human owner"), "{err}");
+        .expect_err("agent member is not the owner");
+    assert!(format!("{err}").contains("active owner"), "{err}");
 
     let err = insert_version(pool, GROUP_ROOM, 1, "陌生人写的", "nobody", 100)
         .await
         .expect_err("unknown participant cannot write");
-    assert!(format!("{err}").contains("active human owner"), "{err}");
+    assert!(format!("{err}").contains("active owner"), "{err}");
 
     insert_version(pool, GROUP_ROOM, 1, "群主写的", OWNER_HUMAN, 100)
         .await
         .expect("active human owner can write");
+
+    // 2026-10-26：owner 不限参与者 kind——Agent 群主能写自己的群。
+    insert_version(pool, AGENT_GROUP_ROOM, 1, "Agent 群主写的", AGENT, 100)
+        .await
+        .expect("active agent owner can write its own group");
+
+    // 同一间 Agent owned 群里，Human 成员**不是** owner ⇒ 仍拒绝。
+    let err = insert_version(
+        pool,
+        AGENT_GROUP_ROOM,
+        2,
+        "Human 成员写的",
+        MEMBER_HUMAN,
+        200,
+    )
+    .await
+    .expect_err("human member of an agent-owned group is not the owner");
+    assert!(format!("{err}").contains("active owner"), "{err}");
+}
+
+#[tokio::test]
+async fn idempotency_actor_column_and_trigger_were_renamed() {
+    let (_dir, store) = open().await;
+    let pool = store.pool();
+
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('room_profile_put_idempotency')")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert!(columns.iter().any(|name| name == "actor_id"), "{columns:?}");
+    assert!(
+        !columns.iter().any(|name| name == "actor_human_id"),
+        "旧列名必须已被正名：{columns:?}"
+    );
+
+    // 列改名必须同样改写既有触发器正文（identity / witness 守卫），
+    // 否则它们会在下一次写入时引用一个不存在的列。
+    let trigger_sql: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master \
+         WHERE type = 'trigger' AND tbl_name = 'room_profile_put_idempotency' \
+           AND name = 'room_profile_put_idempotency_insert_identity_guard'",
+    )
+    .fetch_optional(pool)
+    .await
+    .unwrap();
+    let trigger_sql = trigger_sql.expect("identity guard exists");
+    assert!(trigger_sql.contains("actor_id"), "{trigger_sql}");
+    assert!(!trigger_sql.contains("actor_human_id"), "{trigger_sql}");
+
+    // 旧的 kind 限定 actor 触发器已经退场，替换为 active 主体判据。
+    assert!(!object_exists(pool, "trigger", "room_profile_put_idempotency_actor_human").await);
+    assert!(object_exists(pool, "trigger", "room_profile_put_idempotency_actor_active").await);
 }
 
 #[tokio::test]
@@ -447,7 +552,7 @@ async fn idempotency_records_are_immutable_witnessed_and_keyed() {
     );
     let err = sqlx::query(
         "INSERT OR REPLACE INTO room_profile_put_idempotency \
-         (actor_human_id, room_id, key, request_digest, result_version, created_at) \
+         (actor_id, room_id, key, request_digest, result_version, created_at) \
          VALUES (?, ?, 'k-1', ?, 1, 100)",
     )
     .bind(OWNER_HUMAN)
@@ -468,20 +573,37 @@ async fn idempotency_records_are_immutable_witnessed_and_keyed() {
         .expect_err("wrong created_at");
     assert!(format!("{err}").contains("witness"), "{err}");
 
-    // 非 active Human 的 actor 一律拒绝（这里是 Agent）。
+    // 见证一致性仍按 actor 逐字对齐：Agent 不能说它写了 Human 的版本。
     let err = insert_idempotency(pool, AGENT, GROUP_ROOM, "k-3", &d2, 1, 100)
         .await
-        .expect_err("agent actor");
-    // actor 守卫与见证守卫都会看到"它不是那条版本行的 active Human 写入者"；
-    // 两条都拒即符合契约（这里不断言是哪一条先触发）。
-    assert!(
-        format!("{err}").contains("active human") || format!("{err}").contains("witness"),
-        "{err}"
-    );
+        .expect_err("agent actor cannot witness a human-written version");
+    assert!(format!("{err}").contains("witness"), "{err}");
+
+    // actor 必须是 active 主体（不限 kind）：未知主体仍拒绝。
+    let err = insert_idempotency(pool, "nobody", GROUP_ROOM, "k-4", &d2, 1, 100)
+        .await
+        .expect_err("unknown actor");
+    assert!(format!("{err}").contains("active participant"), "{err}");
+
+    // 2026-10-26：Agent 作为 actor 合法——只要它确实是该版本行的写入者。
+    insert_version(pool, AGENT_GROUP_ROOM, 1, "Agent 群主写的", AGENT, 300)
+        .await
+        .expect("agent-owned version");
+    insert_idempotency(
+        pool,
+        AGENT,
+        AGENT_GROUP_ROOM,
+        "k-agent",
+        &digest('e'),
+        1,
+        300,
+    )
+    .await
+    .expect("agent actor is active and matches the witness");
 
     // 摘要 / key 形状。
     for (digest_value, key, why) in [
-        (digest('A'), "k-4", "uppercase digest"),
+        (digest('A'), "k-4b", "uppercase digest"),
         ("abc".to_string(), "k-5", "short digest"),
         (digest('c'), "bad key", "space in key"),
         (digest('c'), "a,b", "comma in key"),
@@ -519,7 +641,7 @@ async fn idempotency_reference_is_deferred_and_checked_at_commit() {
     let mut tx = pool.begin().await.unwrap();
     sqlx::query(
         "INSERT INTO room_profile_put_idempotency \
-         (actor_human_id, room_id, key, request_digest, result_version, created_at) \
+         (actor_id, room_id, key, request_digest, result_version, created_at) \
          VALUES (?, ?, 'k-missing', ?, 2, 100)",
     )
     .bind(OWNER_HUMAN)

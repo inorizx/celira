@@ -257,7 +257,8 @@ pub trait ParticipantPresentationStore: Send + Sync {
 
     /// 幂等写入 Group Room Profile（群简介）新版本
     /// （CORE_V1_ROOM_PROFILE.md §3/§5/§6）。`record.updated_by` 必须同时是
-    /// 该 active group Room 的 **active owner** 与 active Human；否则
+    /// 该 active group Room 的 **active owner**（Human 或 Agent——owner 是房内
+    /// 治理角色，不限参与者 kind）与 active 主体；否则
     /// `NotRoomOwner`（active 成员但非 owner）或 `NotRoomMember` /
     /// `UnknownRoom`（不泄露存在性），非 group → `NotGroupRoom`。
     /// 裁决规则同其余版本链：同 key 同摘要恒重放（读回既有 `result`，不裁决

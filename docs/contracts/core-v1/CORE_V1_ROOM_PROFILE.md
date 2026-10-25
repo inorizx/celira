@@ -14,8 +14,9 @@
 
 ### 1.1 一句话原理
 
-**房间简介是 Core 的公共事实、Runtime 的读时上下文**：只有群主能版本化写入；
-读取随单房历史回执到达；它**不进消息 / 投递链**，也不产生未读或通知。
+**房间简介是 Core 的公共事实、Runtime 的读时上下文**：只有该房**当前 active
+owner**（Human 或 Agent——owner 是房内的治理角色，不是参与者 kind）能版本化
+写入；读取随单房历史回执到达；它**不进消息 / 投递链**，也不产生未读或通知。
 
 ### 1.2 拓扑
 
@@ -25,13 +26,14 @@ Client（后续切片）── Human Session ──> Core HTTP
   └─ PUT /v1/rooms/{room_id}/profile         群主写（Human Session + Idempotency-Key）
 
 Native Runtime（后续切片）── BackendAuth ──> Core HTTP
+  ├─ PUT /v1/backend/rooms/{room_id}/profile 群主写（Agent 身份 + Idempotency-Key）
   └─ GET /v1/backend/rooms/{room_id}/messages
        历史回执带房间头（id / kind / name / profile）
 
 Core SQLite
   ├─ rooms                          不动（房名与 kind 仍由既有事实持有）
   ├─ room_profile_versions          新增：简介的不可变版本链
-  └─ room_profile_put_idempotency   新增：写请求幂等见证
+  └─ room_profile_put_idempotency   新增：写请求幂等见证（actor 不限 kind）
 ```
 
 - **零新容器、零新连接拓扑**：客户端与执行端仍然只经既有 HTTP 面说话；
@@ -44,13 +46,22 @@ Core SQLite
 | 事实 | 归属 | 写者 | 读面 |
 |---|---|---|---|
 | 群名 `rooms.name` | 既有 Room 事实 | 建房时固定（本切片不改可变性） | RoomView |
-| 群简介 | **本切片新增的版本化公共资料** | 该群当前 active owner（**仅 Human**） | `GET /v1/rooms/{id}` 与单房历史回执 |
+| 群简介 | **本切片新增的版本化公共资料** | 该群当前 active owner（**Human 或 Agent**） | `GET /v1/rooms/{id}` 与单房历史回执 |
 | 成员在群里的呈现 | 既有 Group Room Presentation | 该房 owner 或成员自己 | 既有 member-presentations 面 |
 
 判据一句话：**简介说的是"这间房是什么"，不是"我在这间房里是谁"**——所以它
 不挂在任何 Participant 上，也不复制 `display_name` / `status` / `kind`。
 
-## 3. 写面：`PUT /v1/rooms/{room_id}/profile`
+## 3. 写面：两条认证面，同一条业务路径
+
+```text
+PUT /v1/rooms/{room_id}/profile           Human Session（CurrentAuth）
+PUT /v1/backend/rooms/{room_id}/profile   Agent BackendAuth
+```
+
+两条端点调用**同一个 application 用例**、共用同一段请求体 / 幂等键解析与响应
+映射（适配器只换认证面与 actor 的来源），语义、状态码、错误码与成功形状逐条
+相同。Human 面在 2026-10-26 之前的线上行为**一字未变**。
 
 ### 3.1 请求
 
@@ -63,7 +74,20 @@ Content-Type: application/json
 { "base_version": 0, "description": "这个群在做什么…" }
 ```
 
-- 认证：Human Session（`CurrentAuth`）。Agent Credential 不能写这一格。
+```text
+PUT /v1/backend/rooms/{room_id}/profile
+Authorization: Bearer <clr_bc_...>        （BackendAuth）
+Idempotency-Key: <opaque key>
+Content-Type: application/json
+
+{ "base_version": 0, "description": "这个群在做什么…" }
+```
+
+- 认证：Human 面用 Human Session（`CurrentAuth`）；Backend 面用 BackendAuth
+  （active Credential + active Binding + active Agent）。身份只来自认证——
+  路径里只有房间，没有"以谁的名义写"。两支凭据互不通用：Backend token 打
+  Human 面 → 401 `invalid_session`；Human token 打 Backend 面 → 401
+  `invalid_credential`。
 - `Idempotency-Key` **必带**，形状规则沿用既有写端点（1–128 字节、
   无首尾空白、无逗号、可打印 ASCII；缺 → `400 idempotency_key_required`，
   形状错 → `400 invalid_idempotency_key`）。
@@ -82,13 +106,19 @@ Content-Type: application/json
    （不泄露存在性）；
 2. Room 不是 `group`（`direct` / `human_direct`）→ `400 invalid_room_kind`；
 3. actor 是该房 active 成员但不是 **owner** → `403 not_room_owner`
-   （明确 ACL：身份已由 Human Session 证明，群主资格是可观察公共事实）；
-4. actor 是该房 active owner 但**不是 active Human** → 同样 `403 not_room_owner`
-   （本端点只有 Human 认证面；Agent owner 的群由它自己经后续切片处理，今天
-   没有写入口）。
+   （明确 ACL：身份已由认证证明，群主资格是可观察公共事实）；
+4. actor 是该房 active owner 但**不是 active 主体**（已 revoked）→ 同样
+   `403 not_room_owner`。
+
+**判据只有"当前 active owner"，不看参与者 kind**：owner 自 2026-09-27 起是
+房内的治理角色（`role='owner'`），不是参与者种类（`kind`）——一支 Agent 可以
+建房并持有 owner，因此它也能写自己群的简介（经 BackendAuth 面）；Human owner
+走 Human 面——Backend 面代表的是那支 Agent 自己，不是它的 Owner（两支凭据是
+不同主体，不能互相代替）。
 
 授权读的是**当前 active owner 周期**：群主转让后，新 owner 立刻可写，旧 owner
-立刻 `403`（不靠任何身份缓存）。
+立刻 `403`（不靠任何身份缓存）。转让**跨 kind** 同样即时生效（Human → Agent、
+Agent → Human 都已验证）。
 
 ### 3.3 成功响应（统一 `200`）
 
@@ -103,6 +133,8 @@ Content-Type: application/json
   "request_id": "…"
 }
 ```
+
+两条认证面共享同一套语义：
 
 - **每次成功写恰好产生一个新版本**（`version = 当前最新 + 1`；首版 = 1）。
 - 首次写与后续更新都是 `200`；不设 `201`（"首个版本"不是资源创建语义，
@@ -161,14 +193,15 @@ Content-Type: application/json
 
 | code | HTTP | 场景 |
 |---|---|---|
-| `authentication_required` | 401 | 缺 Authorization（Human 写面） |
-| `invalid_session` | 401 | Session 无效 / 已撤销 / 指向非 active Human |
+| `authentication_required` | 401 | 缺 Authorization（任一写面） |
+| `invalid_session` | 401 | Session 无效 / 已撤销 / 指向非 active Human（Human 面） |
+| `invalid_credential` | 401 | 凭据格式错 / Human token / 未知 / 任一级 revoked（Backend 面） |
 | `idempotency_key_required` | 400 | 缺 `Idempotency-Key` |
 | `invalid_idempotency_key` | 400 | key 形状不合法 / 重复 header |
 | `invalid_request` | 400 | 请求体不是 JSON、缺字段、`base_version` 负数或非整数、未知字段 |
 | `invalid_profile_description` | 400 | 正文为空、`trim` 后为空、含 U+0000、超过 2000 UTF-8 字节 |
 | `invalid_room_kind` | 400 | 目标 Room 不是 `group` |
-| `not_room_owner` | 403 | actor 是该房 active 成员但不是当前 active owner |
+| `not_room_owner` | 403 | actor 是该房 active 成员但不是当前 active owner（不限 kind） |
 | `room_not_found` | 404 | bad-id / 未知房 / actor 不是该房 active 成员（不泄露存在性） |
 | `profile_version_conflict` | 409 | 新 key 但 `base_version` != 当前最新 |
 | `idempotency_conflict` | 409 | 同 key 已被不同请求（不同摘要）使用 |
@@ -182,8 +215,9 @@ SQL、路径或内部版本边界。
 
 ### 6.1 Migration
 
-`im/server/migrations/202610250001_room_profile.sql`（**schema-only 新增，不搬行、
-不改任何既有迁移**）：
+两个 schema-only 迁移（**不搬行、不改任何既有迁移**）：
+
+`im/server/migrations/202610250001_room_profile.sql`（v1.1 切片）：
 
 - `room_profile_versions(room_id, version, description, updated_by, updated_at)`，
   PK `(room_id, version)`；
@@ -196,12 +230,29 @@ SQL、路径或内部版本边界。
   `updated_at == created_at`）；正文 CHECK 按 BLOB 长度 1..2000、禁 NUL、
   trim 后非空。
 
+`im/server/migrations/202610260001_room_profile_any_owner.sql`（2026-10-26，
+owner 不限 kind）：
+
+- `ALTER TABLE room_profile_put_idempotency RENAME COLUMN actor_human_id TO
+  actor_id`——列名与事实对齐（actor 可以是 Human 或 Agent）。SQLite 的
+  `RENAME COLUMN` 同步改写 PK、外键与触发器正文里的引用；
+- 重建 `room_profile_versions_insert_guards`：**去掉 `p.kind='human'`**，仍要求
+  Room 是 active group、写入者是 active 主体、且是该房当前 active owner；
+- 重建幂等 actor 守卫并改名 `room_profile_put_idempotency_actor_active`：actor
+  必须是 active 主体（不限 kind），错误文案同步为
+  `room profile idempotency actor must be an active participant`。
+
+其他表 / 列 / 触发器（不可变、单调 +1、身份防重、见证一致性、正文 CHECK）逐字
+不动；已提交的 `202610250001` 不重写。
+
 ### 6.2 不变量
 
 - **I1 房间资料，不是消息**：简介不进 `messages`、投递、已读游标、SSE、
   Human Event / Agent Event；不产生未读、不产生通知、不改任何分页。
 - **I2 只有群主能写**：非成员 404（不泄露）、成员非 owner 403、非 group 400；
-  授权读当前 active owner 周期，转让即时生效；DB 触发器兜同一判据。
+  授权读当前 active owner 周期，**不限参与者 kind**（Human 与 Agent owner
+  同一条判据，两个认证面各自证明身份），转让即时生效（含跨 kind）；
+  DB 触发器兜同一判据。
 - **I3 版本只增不改**：无行 = 没有简介；每次成功写恰好 +1；UPDATE / DELETE /
   REPLACE 一律被拒；不同 Room 的版本互不影响。
 - **I4 幂等**：同 key 同摘要恒重放（不追加版本、不重新裁决 base_version）；
@@ -218,22 +269,25 @@ SQL、路径或内部版本边界。
 ## 7. 测试证据
 
 - migration 完整性：`cargo test -p celira-im --bin celira-im room_profile_migration_tests`
-  ——表/触发器存在、单调、不可变、REPLACE 防线、group-only、active Human owner、
-  正文边界（空/纯空白/NUL/2001 字节/多行 Emoji）、幂等 deferred FK 与见证。
+  ——表/触发器存在、`actor_id` 正名（含触发器正文同步改写）、旧的 kind 限定
+  actor 守卫退场、单调、不可变、REPLACE 防线、group-only、**active owner
+  （Human 与 Agent）**、Human 成员不可代写、拒绝非成员 / direct 房、正文边界
+  （空/纯空白/NUL/2001 字节/多行 Emoji）、幂等 deferred FK 与见证。
 - 存储层：`cargo test -p celira-im --bin celira-im room_profile_store_tests`
-  ——写读、版本单调、重放抵御 head 推进、冲突/过期、owner/非 owner/非成员、
-  direct 房、房间头、失败零残留。
+  ——写读、版本单调、重放抵御 head 推进、冲突/过期、**Agent owner 可写**、
+  Human/Agent 成员 403、非成员 404、owner 转让（Human → Agent 与
+  Agent → Human）后权限即时切换、direct 房、房间头、失败零残留。
 - HTTP 契约：`cargo test -p celira-im --bin celira-im room_profile_routes_tests`
   ——完整错误矩阵、列表/RoomView 不变、历史房间头与分页零重叠、owner 转让、
-  Agent owner 的群不可由 Human 成员代写。
+  Human owner 的 human route 行为不变、**Agent owner 经 BackendAuth 写自己的
+  群**（401 / 403 / 404 / 400 / 409 / 重放）、Human 成员不可代写。
 - 领域规则：`cargo test -p celira-im --bin celira-im room_profile_tests`。
 - 真实进程黑盒：`cargo test -p celira-im --test room_profile_blackbox`
   ——CLI 建世界 → 群主写 → 成员读 → 错误矩阵 → owner 转让 → 历史房间头 →
-  重启后仍在。
-- 回归：`cargo test -p celira-im --all-targets` 全绿（本切片新增 bin 用例
-  24 条：domain 4 / migration 7 / store 7 / HTTP 契约 6；另 1 条独立进程
-  黑盒）；`cargo fmt --check` 干净；`cargo clippy --all-targets -- -D warnings`
-  干净。
+  **Agent 经 backend 建房并写简介 → Human 成员读 → 跨 kind 转让 → 重启后
+  仍在**。
+- 回归：`cargo test -p celira-im --all-targets` 全绿；`cargo fmt --check`
+  干净；`cargo clippy -p celira-im --all-targets -- -D warnings` 干净。
 
 行为证明来自公开协议 / 真实进程黑盒；SQLite 只在 migration 与 store 层证明
 持久守卫，不以直读数据库冒充 HTTP 成功证据。

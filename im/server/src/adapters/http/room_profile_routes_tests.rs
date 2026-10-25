@@ -915,3 +915,246 @@ async fn an_agent_owned_group_cannot_be_written_by_a_human_member() {
     assert_eq!(json["error"]["code"], "not_room_owner");
     assert_eq!(profile_version_count(&f.pool, &room).await, 0);
 }
+
+// ============================================================
+// 6. 2026-10-26：Agent 群主经 BackendAuth 写自己的群简介
+// ============================================================
+
+async fn put_backend_profile(
+    router: &axum::Router,
+    token: Option<&str>,
+    room: &str,
+    key: Option<&str>,
+    body: Vec<u8>,
+) -> (StatusCode, serde_json::Value, Option<String>) {
+    let mut headers: Vec<(&str, &str)> = vec![("content-type", AUTH_JSON)];
+    if let Some(key) = key {
+        headers.push((KEY_HEADER, key));
+    }
+    let authorization = token.map(bearer);
+    send(
+        router,
+        Method::PUT,
+        &format!("/v1/backend/rooms/{room}/profile"),
+        authorization.as_deref(),
+        &headers,
+        Some(body),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn agent_owner_writes_profile_through_backend_auth() {
+    let f = fixture().await;
+
+    // 一支 Agent 自己建房（owner = Agent），Human 成员经关系进来。
+    let agent = create_agent(&f.router, &f.alice_token, "群主 Agent", "a-write").await;
+    let token = backend_token(&f.router, &f.alice_token, &agent, "write").await;
+    let (status, json, _) = send(
+        &f.router,
+        Method::POST,
+        "/v1/backend/groups",
+        Some(&bearer(&token)),
+        &[(KEY_HEADER, "bw-group"), ("content-type", AUTH_JSON)],
+        Some(
+            serde_json::json!({ "name": "Agent 的群" })
+                .to_string()
+                .into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    let room = json["room"]["id"].as_str().unwrap().to_owned();
+
+    seed_accepted_relation(&f.pool, &agent, &f.alice).await;
+    let (status, json, _) = send(
+        &f.router,
+        Method::POST,
+        &format!("/v1/backend/rooms/{room}/members"),
+        Some(&bearer(&token)),
+        &[(KEY_HEADER, "bw-inv"), ("content-type", AUTH_JSON)],
+        Some(
+            serde_json::json!({ "participant_id": f.alice.as_str() })
+                .to_string()
+                .into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+
+    // Agent 群主经 BackendAuth 首次写 → 200 v1（不是 201）。
+    let text = "Agent 写的群简介\n第二行 🙂";
+    let (status, json, request_id) = put_backend_profile(
+        &f.router,
+        Some(&token),
+        &room,
+        Some("bw-1"),
+        put_body(0, text),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["profile"]["version"], 1);
+    assert_eq!(json["profile"]["description"], text);
+    assert_eq!(json["idempotency_replayed"], false);
+    assert_eq!(
+        json["request_id"],
+        request_id.as_deref().unwrap_or_default()
+    );
+
+    // Human 成员从既有 `GET /v1/rooms/{id}` 读得到。
+    let (status, json) = get_room(&f.router, &f.alice_token, &room).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["profile"]["version"], 1);
+    assert_eq!(json["profile"]["description"], text);
+
+    // 同一群，Human 成员写 human route → 403（不是 owner）。
+    let (status, json, _) = put_profile(
+        &f.router,
+        &f.alice_token,
+        &room,
+        Some("bw-human"),
+        put_body(1, "Human 成员代写"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{json}");
+    assert_eq!(json["error"]["code"], "not_room_owner");
+
+    // 历史回执的房间头看到新版本。
+    let (status, json) = backend_history(&f.router, &token, &room, "").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["room"]["profile"]["version"], 1);
+    assert_eq!(json["room"]["profile"]["description"], text);
+
+    // 同 key 同摘要重放：200 + replayed。
+    let (status, json, _) = put_backend_profile(
+        &f.router,
+        Some(&token),
+        &room,
+        Some("bw-1"),
+        put_body(0, text),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["idempotency_replayed"], true);
+    assert_eq!(json["profile"]["version"], 1);
+    assert_eq!(profile_version_count(&f.pool, &room).await, 1);
+
+    // 新 key 但 base 过期 → 409 profile_version_conflict。
+    let (status, json, _) = put_backend_profile(
+        &f.router,
+        Some(&token),
+        &room,
+        Some("bw-stale"),
+        put_body(0, "过期"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "profile_version_conflict");
+
+    // 同 key 不同摘要 → 409 idempotency_conflict。
+    let (status, json, _) = put_backend_profile(
+        &f.router,
+        Some(&token),
+        &room,
+        Some("bw-1"),
+        put_body(0, "改过"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "idempotency_conflict");
+
+    // 缺凭据 → 401 authentication_required；错凭据 → invalid_credential。
+    let (status, json, _) =
+        put_backend_profile(&f.router, None, &room, Some("bw-anon"), put_body(1, "匿名")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{json}");
+    assert_eq!(json["error"]["code"], "authentication_required");
+    let (status, json, _) = put_backend_profile(
+        &f.router,
+        Some(&f.alice_token),
+        &room,
+        Some("bw-human-token"),
+        put_body(1, "Human token"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{json}");
+    assert_eq!(json["error"]["code"], "invalid_credential");
+
+    // 非成员 Agent → 404 room_not_found（不泄露存在性）。
+    let outsider = create_agent(&f.router, &f.alice_token, "旁观 Agent", "a-write-out").await;
+    let outsider_token = backend_token(&f.router, &f.alice_token, &outsider, "write-out").await;
+    let (status, json, _) = put_backend_profile(
+        &f.router,
+        Some(&outsider_token),
+        &room,
+        Some("bw-out"),
+        put_body(1, "旁观"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+    assert_eq!(json["error"]["code"], "room_not_found");
+
+    // Agent 成员（非 owner）在 Human 的群里经 backend 写 → 403。
+    let human_room = create_group(&f.router, &f.alice_token, "Human 的群", "bw-human-group").await;
+    invite(
+        &f.router,
+        &f.alice_token,
+        &human_room,
+        &agent,
+        "bw-inv-agent",
+    )
+    .await;
+    let (status, json, _) = put_backend_profile(
+        &f.router,
+        Some(&token),
+        &human_room,
+        Some("bw-member"),
+        put_body(0, "Agent 成员写"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{json}");
+    assert_eq!(json["error"]["code"], "not_room_owner");
+
+    // Human owner 仍走 human route（行为不变）。
+    let (status, json, _) = put_profile(
+        &f.router,
+        &f.alice_token,
+        &human_room,
+        Some("bw-human-owner"),
+        put_body(0, "Human 群主写"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["profile"]["version"], 1);
+
+    // direct 房 → 400 invalid_room_kind（Agent 是成员，不是 group）。
+    let (status, json, _) = send(
+        &f.router,
+        Method::POST,
+        "/v1/direct-rooms",
+        Some(&bearer(&f.alice_token)),
+        &[(KEY_HEADER, "bw-direct"), ("content-type", AUTH_JSON)],
+        Some(
+            serde_json::json!({ "agent_id": agent })
+                .to_string()
+                .into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    let direct = json["room"]["id"].as_str().unwrap().to_owned();
+    let (status, json, _) = put_backend_profile(
+        &f.router,
+        Some(&token),
+        &direct,
+        Some("bw-direct-put"),
+        put_body(0, "私聊"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
+    assert_eq!(json["error"]["code"], "invalid_room_kind");
+
+    // 失败路径没有多出版本：Agent 的群只有 v1，Human 的群只有 v1。
+    assert_eq!(profile_version_count(&f.pool, &room).await, 1);
+    assert_eq!(profile_version_count(&f.pool, &human_room).await, 1);
+    assert_eq!(profile_version_count(&f.pool, &direct).await, 0);
+}

@@ -3,8 +3,8 @@
 //! 契约：CORE_V1_ROOM_PROFILE.md §3–§5。用例层只做规则编排：解析/规范化
 //! Room ID 与幂等键、以 domain 校验 `base_version` 与正文（1..2000 UTF-8
 //! 字节、禁 NUL、`trim` 后非空）、生成请求摘要，再调用窄存储端口在单个
-//! `BEGIN IMMEDIATE` 事务内完成授权（该房当前 active owner 且为 active
-//! Human，**先于重放裁决**）→ 幂等/并发裁决 → 写不可变版本行 + 幂等见证 →
+//! `BEGIN IMMEDIATE` 事务内完成授权（该房当前 active owner，**不限参与者
+//! kind**，**先于重放裁决**）→ 幂等/并发裁决 → 写不可变版本行 + 幂等见证 →
 //! commit。
 //!
 //! 三个读入口：
@@ -117,13 +117,14 @@ fn map_put_room_profile_store_error(e: StoreError) -> RoomProfilePutError {
     }
 }
 
-/// PUT /v1/rooms/{room_id}/profile：该 group 房当前 active owner（Human）唯一
-/// 写路径。每条成功写入追加一个不可变简介版本行（+1）与幂等见证；同 key
+/// PUT 群简介：该 group 房当前 active owner（Human 或 Agent）唯一写路径。
+/// 每条成功写入追加一个不可变简介版本行（+1）与幂等见证；同 key
 /// 同摘要恒重放既有结果（`created=false`），同 key 不同摘要
 /// `idempotency_conflict`，新 key 要求 `base_version == 当前最新`。
 ///
-/// 授权（该房 active owner 且为 active Human）由存储端口在 `BEGIN IMMEDIATE`
-/// 事务内先于任何幂等裁决完成：owner 转让后旧 owner 一律不得经重放访问结果。
+/// 授权（该房当前 active owner，不限参与者 kind）由存储端口在
+/// `BEGIN IMMEDIATE` 事务内先于任何幂等裁决完成：owner 转让后旧 owner
+/// 一律不得经重放访问结果。
 pub async fn put_room_profile(
     presentation_store: &dyn ParticipantPresentationStore,
     actor: &Participant,
