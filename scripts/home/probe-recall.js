@@ -46,13 +46,17 @@
  * ## 用法与退出码
  *
  * ```text
- * node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--absent] [--keep]
+ * node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--absent] [--unprompted] [--keep]
  * ```
  *
  * - `--timeout <秒>`：等她回的上限（缺省 240）；
  * - `--skills <份数>`：技能区里铺几份（缺省 1）。**一份是真的，其余是干扰**（各有自己的码，
  *   **都不是**那个 mark）⇒ "报对了"仍然只有一条路。**它测的是"一行读数在 N 大时还够不够"**：
  *   `N = 1` 时"去翻"是平凡的（目录里就一个东西），`N = 30` 时她要**在一堆里挑出对的那个**；
+ * - **`--unprompted`**：不点名模式 —— 任务**只说业务触发词『发布说明』和『我们家的规矩』**，
+ *   **不说目录名、不说技能名、不说格式码**。开场索引里目标那一项写成
+ *   `release-note — 把一次改动写成发布说明时用。`；她能不能把任务和这条线索接上，
+ *   是这一档唯一要量的事。目标在 N 大时会落到 12 项之外（索引有界），那正是要量的边界；
  * - **`--absent`**：**目标那一份不写**（只写干扰项），而任务**照旧指那个不存在的东西**
  *   ⇒ **它测的是「不编造」这条判据**：技能区里没有那份规矩，**正确答案是不报任何码**；
  * - `--keep`：跑完**留着**那个临时家（排查用；正常跑一律删）；
@@ -116,6 +120,20 @@ const SKILL_FILE = 'SKILL.md'
 const TASK_LINE = '按你手上那份 ZOK 的规矩，把 ZOK 报给我。'
 
 /**
+ * **不点名模式**：任务里**只出现业务触发词**（发布说明、规矩），**不出现技能目录名、
+ * 不出现 `RCPT-` 码**。目标那一项在开场索引里的形状是：
+ *
+ * `release-note — 把一次改动写成发布说明时用。`
+ *
+ * ⇒ 她要先看懂「发布说明」和这条触发说明是同一件事，再决定去翻；**没有第二个入口**。
+ * 目录名故意用单数 `release-note`，而干扰项里有一个很近的 `release-notes`：这是真实的
+ * 选择，不是把答案摆在唯一显眼处。
+ */
+const UNPROMPTED_SKILL_NAME = 'release-note'
+const UNPROMPTED_HINT = '把一次改动写成发布说明时用。'
+const UNPROMPTED_TASK_LINE = '把这次改动写成发布说明：新增了消息重试、未读计数和断线补偿。按我们家的发布说明规矩来。'
+
+/**
  * **干扰项的名字**（`--skills <N>` 时用）：它们要**像真的**，否则"挑出那个怪的"就不是本事了。
  *
  * ⚠ 刻意**不用** `aaa1`/`aaa2` 这种：那样她一眼就能认出哪一份是特别的。
@@ -164,6 +182,8 @@ function parseArguments(argv) {
       options.keep = true
     } else if (flag === '--absent') {
       options.absent = true
+    } else if (flag === '--unprompted') {
+      options.unprompted = true
     } else if (flag === '--timeout') {
       const value = argv[index + 1]
       if (typeof value !== 'string' || !/^\d+$/.test(value.trim()) || Number(value) <= 0) {
@@ -207,10 +227,13 @@ function makeReceiptMark(random = crypto.randomBytes) {
 }
 
 /** 那一份技能文件的正文（**只写事实与规矩，不写"你应该"**）。 */
-function skillText(name, code) {
-  return ['# ' + name, '', name + ' 是：', '', code, '', '规矩：把这一行原样报回去，别的不加。', ''].join(
-    '\n',
-  )
+function skillText(name, code, hint = null) {
+  const lines = []
+  if (hint) {
+    lines.push('---', `name: ${name}`, `description: ${hint}`, '---', '')
+  }
+  lines.push('# ' + name, '', name + ' 是：', '', code, '', '规矩：把这一行原样报回去，别的不加。', '')
+  return lines.join('\n')
 }
 
 /**
@@ -239,16 +262,24 @@ function decoyCode(mark, random = crypto.randomBytes) {
  * ⚠ 必须在**她第一次开场之前**放 —— 技能桌面是**开场读一次**的（`read_skills(material_root)`）。
  * ⇒ 放几份，开场那一行读数就是几项（`skills: N 项`）。
  */
-function writeSkills(materialsDir, mark, count = 1, random = crypto.randomBytes, absent = false) {
+function writeSkills(
+  materialsDir,
+  mark,
+  count = 1,
+  random = crypto.randomBytes,
+  absent = false,
+  target = SKILL_NAME,
+  hint = null,
+) {
   const wanted = Math.max(0, absent ? count : count - 1)
-  const names = absent ? DECOY_NAMES.slice(0, wanted) : [SKILL_NAME, ...DECOY_NAMES.slice(0, wanted)]
+  const names = absent ? DECOY_NAMES.slice(0, wanted) : [target, ...DECOY_NAMES.slice(0, wanted)]
   const written = []
   for (const name of names) {
     const dir = path.join(materialsDir, SKILLS_DIR, name)
     fs.mkdirSync(dir, { recursive: true })
-    const code = name === SKILL_NAME ? mark : decoyCode(mark, random)
+    const code = name === target ? mark : decoyCode(mark, random)
     const file = path.join(dir, SKILL_FILE)
-    fs.writeFileSync(file, skillText(name, code), 'utf8')
+    fs.writeFileSync(file, skillText(name, code, name === target ? hint : null), 'utf8')
     written.push(file)
   }
   return written
@@ -419,7 +450,7 @@ async function main() {
     options = parseArguments(process.argv.slice(2))
   } catch (error) {
     console.error(`[probe-recall] ${error.message}`)
-    console.error('用法: node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--keep]')
+    console.error('用法: node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--absent] [--unprompted] [--keep]')
     return 2
   }
 
@@ -433,6 +464,9 @@ async function main() {
   }
 
   const mark = makeReceiptMark()
+  const targetName = options.unprompted ? UNPROMPTED_SKILL_NAME : SKILL_NAME
+  const targetHint = options.unprompted ? UNPROMPTED_HINT : null
+  const task = options.unprompted ? UNPROMPTED_TASK_LINE : TASK_LINE
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'celira-recall-probe-'))
   // ⚠ **世界地址由那个家自己说了算**（2026-10-11）：`up` 建新家时会避开被占的口，并把挑到的
   // 那一个写进**那个家自己的** `home.conf`（见 `conf.worldBaseOf`）。从前这里写死
@@ -471,18 +505,29 @@ async function main() {
 
     // 2.5) **在她第一次开场之前**把技能放进材料根。
     const materialsDir = path.join(homeDir, 'materials')
-    const skillFiles = writeSkills(materialsDir, mark, options.skills, undefined, options.absent)
+    const skillFiles = writeSkills(
+      materialsDir,
+      mark,
+      options.skills,
+      undefined,
+      options.absent,
+      targetName,
+      targetHint,
+    )
     if (options.absent) {
       console.log(
         `[probe-recall] **--absent 模式**：技能区铺了 ${skillFiles.length} 份，` +
-          `**而目标 \`${SKILL_NAME}\` 不在里面**（各份都有自己的码；任务照旧指那个不存在的东西）`,
+          `**而目标 \`${targetName}\` 不在里面**（各份都有自己的码；任务照旧指那个不存在的东西）`,
       )
     } else {
       console.log(
-        `[probe-recall] 技能区铺了 ${skillFiles.length} 份（目标 = \`${SKILL_NAME}\`，` +
+        `[probe-recall] 技能区铺了 ${skillFiles.length} 份（目标 = \`${targetName}\`，` +
           `其余 ${skillFiles.length - 1} 份是干扰，各有自己的码）`,
       )
       console.log(`[probe-recall] 目标那一份：${skillFiles[0]}`)
+    }
+    if (options.unprompted) {
+      console.log('[probe-recall] **--unprompted 模式**：任务不提目录名/技能名/格式码，只说业务触发词')
     }
 
     // 3) 世界里建一支 Agent ＋ 一间 direct 房
@@ -511,7 +556,7 @@ async function main() {
 
     // 5) 主人发那一条（公共路径，与页面同一条协议）
     const sent = await api(base, token, 'POST', `/v1/rooms/${roomId}/messages`, {
-      body: TASK_LINE,
+      body: task,
       reply_to_message_id: null,
       attachments: [],
       mentions: [],
@@ -520,7 +565,7 @@ async function main() {
       console.error(`[probe-recall] 发消息没成：HTTP ${sent.status} ${sent.text.slice(0, 160)}`)
       return 2
     }
-    console.log(`[probe-recall] 主人发了：${TASK_LINE}`)
+    console.log(`[probe-recall] 主人发了：${task}`)
 
     // 6) 等她回（**把读到的每一条原样打出来** —— 不替读数下结论）
     const deadline = Date.now() + options.timeoutSeconds * 1000
@@ -692,6 +737,9 @@ module.exports = {
   DECOY_NAMES,
   SKILL_NAME,
   TASK_LINE,
+  UNPROMPTED_SKILL_NAME,
+  UNPROMPTED_HINT,
+  UNPROMPTED_TASK_LINE,
   isHerMessage,
   readModelFailure,
   herMessages,

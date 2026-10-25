@@ -27,6 +27,9 @@ const {
   DECOY_NAMES,
   SKILL_NAME,
   TASK_LINE,
+  UNPROMPTED_SKILL_NAME,
+  UNPROMPTED_HINT,
+  UNPROMPTED_TASK_LINE,
   isHerMessage,
   readModelFailure,
   herMessages,
@@ -117,6 +120,25 @@ check('参数：缺省 240 秒 / 不保留 / 1 份技能 / 不是 absent；三�
   assert.equal(parseArguments(['--skills', String(DECOY_NAMES.length + 1)]).skills, DECOY_NAMES.length + 1)
 })
 
+check('★ 不点名模式：任务不说技能名/目录名/格式码；技能用 description 给出业务触发', () => {
+  const parsed = parseArguments(['--unprompted'])
+  assert.equal(parsed.unprompted, true)
+  // 缺省不出现这个键：老调用方的 deepEqual 不被改坏。
+  assert.equal(Object.hasOwn(parseArguments([]), 'unprompted'), false)
+  // 任务里只有业务词，没有目录名，也没有码。
+  assert.ok(!UNPROMPTED_TASK_LINE.includes(UNPROMPTED_SKILL_NAME), '任务不许点目录名')
+  assert.ok(!UNPROMPTED_TASK_LINE.includes('RCPT-'), '任务不许出现格式码')
+  assert.ok(UNPROMPTED_TASK_LINE.includes('发布说明'), '任务要给业务触发词')
+  // 索引里能看到的是 `release-note — 把一次改动写成发布说明时用。`，
+  // 但码只能在正文里，不能进 description（否则开场索引自己泄题）。
+  const text = skillText(UNPROMPTED_SKILL_NAME, MARK, UNPROMPTED_HINT)
+  assert.ok(text.startsWith('---\n'))
+  assert.ok(text.includes(`name: ${UNPROMPTED_SKILL_NAME}`))
+  assert.ok(text.includes(`description: ${UNPROMPTED_HINT}`))
+  assert.ok(text.includes(MARK))
+  assert.ok(!text.includes(`description: ${MARK}`), '码不许进索引')
+})
+
 check('回执码：形状固定、**注入随机源可判错**、两次调用不同（不可猜是判据的前提）', () => {
   const injected = makeReceiptMark(() => Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]))
   assert.equal(injected, MARK, '注入固定字节 ⇒ 逐字可判')
@@ -174,6 +196,36 @@ check('★ 铺 N 份：只有目标那份写着 mark，**干扰项各有自己�
   }
 })
 
+check('★ 不点名铺 N 份：目标带 description，干扰项不带；目标码仍然唯一', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-recall-unprompted-'))
+  try {
+    const stub = () => Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
+    const files = writeSkills(
+      root,
+      MARK,
+      5,
+      stub,
+      false,
+      UNPROMPTED_SKILL_NAME,
+      UNPROMPTED_HINT,
+    )
+    assert.equal(files.length, 5)
+    const target = files.find((file) => file.includes(`${path.sep}${UNPROMPTED_SKILL_NAME}${path.sep}`))
+    assert.ok(target, '目标那一份要在')
+    assert.ok(fs.readFileSync(target, 'utf8').includes(MARK))
+    assert.ok(fs.readFileSync(target, 'utf8').includes(UNPROMPTED_HINT), '目标要有业务触发说明')
+    // `release-notes` 是近邻干扰项，必须真的存在，这样“挑对”才有意义。
+    assert.ok(fs.existsSync(path.join(root, 'skills', 'release-notes', 'SKILL.md')))
+    // 其余干扰项：一个都不许含目标码，也不许带目标 description。
+    for (const file of files.filter((each) => each !== target)) {
+      const text = fs.readFileSync(file, 'utf8')
+      assert.ok(!text.includes(MARK), `${file} 不许含目标码`)
+      assert.ok(!text.includes(UNPROMPTED_HINT), `${file} 不许带目标的触发说明`)
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
 check('★ --absent：**目标那一份不写**（技能区里没有 ZOK），干扰项照写', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-recall-absent-'))
   try {
@@ -190,6 +242,36 @@ check('★ --absent：**目标那一份不写**（技能区里没有 ZOK），�
     assert.ok(TASK_LINE.includes(SKILL_NAME))
     // 0 份也**不炸**：一个文件都不写（技能区不存在 ⇒ 开场那一块整块不出场）。
     assert.equal(writeSkills(root, MARK, 0, stub, true).length, 0)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+check('★ 不点名 + --absent：目标那一份不写，任务仍指向不存在的东西', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-recall-unprompted-absent-'))
+  try {
+    const stub = () => Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
+    const files = writeSkills(
+      root,
+      MARK,
+      5,
+      stub,
+      true,
+      UNPROMPTED_SKILL_NAME,
+      UNPROMPTED_HINT,
+    )
+    assert.equal(files.length, 5, 'absent 下 count 是干扰项份数')
+    for (const file of files) {
+      assert.notEqual(
+        path.basename(path.dirname(file)),
+        UNPROMPTED_SKILL_NAME,
+        '目标目录不许写',
+      )
+      assert.ok(!fs.readFileSync(file, 'utf8').includes(MARK), '干扰项不许含目标码')
+    }
+    assert.ok(!fs.existsSync(path.join(root, 'skills', UNPROMPTED_SKILL_NAME)))
+    assert.ok(UNPROMPTED_TASK_LINE.includes('发布说明'), '任务照旧说发布说明')
+    assert.ok(!UNPROMPTED_TASK_LINE.includes(UNPROMPTED_SKILL_NAME), '任务照旧不点名')
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
