@@ -46,7 +46,7 @@
  * ## 用法与退出码
  *
  * ```text
- * node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--absent] [--unprompted] [--keep]
+ * node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--absent] [--unprompted] [--no-index] [--keep]
  * ```
  *
  * - `--timeout <秒>`：等她回的上限（缺省 240）；
@@ -57,6 +57,9 @@
  *   **不说目录名、不说技能名、不说格式码**。开场索引里目标那一项写成
  *   `release-note — 把一次改动写成发布说明时用。`；她能不能把任务和这条线索接上，
  *   是这一档唯一要量的事。目标在 N 大时会落到 12 项之外（索引有界），那正是要量的边界；
+ * - **`--no-index`**：**无索引对照** —— 技能文件照铺，但把这一支的 `agent.conf` 改成
+ *   `skills=none` 后重启，开场索引**一项都不列**。若这种情况下她**仍然**找得到，说明任务成功
+ *   不能归功于那一行索引（她只是自己翻了）；若找不到，索引才是必要的线索；
  * - **`--absent`**：**目标那一份不写**（只写干扰项），而任务**照旧指那个不存在的东西**
  *   ⇒ **它测的是「不编造」这条判据**：技能区里没有那份规矩，**正确答案是不报任何码**；
  * - `--keep`：跑完**留着**那个临时家（排查用；正常跑一律删）；
@@ -184,6 +187,8 @@ function parseArguments(argv) {
       options.absent = true
     } else if (flag === '--unprompted') {
       options.unprompted = true
+    } else if (flag === '--no-index') {
+      options.noIndex = true
     } else if (flag === '--timeout') {
       const value = argv[index + 1]
       if (typeof value !== 'string' || !/^\d+$/.test(value.trim()) || Number(value) <= 0) {
@@ -314,6 +319,23 @@ function writeSkills(
     written.push(file)
   }
   return written
+}
+
+/**
+ * **无索引对照**：技能文件仍在，但把这一支的 `agent.conf` 改成 `skills=none`，让开场索引
+ * **一项都不列**。然后重启这一支（装配在起宿主那一刻定下，改完不重启等于没改）。
+ *
+ * 判据用途：如果 `--no-index` 下她仍然找得到，说明这次成功**不能归功于索引**（她只是自己翻了）；
+ * 如果找不到，索引才是必要的线索。`skills=none` 是软引用——正文仍可由 `files_*` 读到。
+ */
+function setAgentSkillsNone(homeDir, agentId) {
+  const conf = path.join(homeDir, 'agents', agentId, 'agent.conf')
+  const text = fs.readFileSync(conf, 'utf8')
+  const lines = text.split('\n')
+  const at = lines.findIndex((line) => /^skills\s*=/.test(line))
+  if (at >= 0) lines[at] = 'skills=none'
+  else lines.push('skills=none')
+  fs.writeFileSync(conf, lines.join('\n'), 'utf8')
 }
 
 /** 这条消息是她说的吗（判据只看**身份**，不看正文——与 `probe-loop.js` 同一份判据）。 */
@@ -481,7 +503,7 @@ async function main() {
     options = parseArguments(process.argv.slice(2))
   } catch (error) {
     console.error(`[probe-recall] ${error.message}`)
-    console.error('用法: node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--absent] [--unprompted] [--keep]')
+    console.error('用法: node scripts/home/probe-recall.js [--timeout <秒>] [--skills <份数>] [--absent] [--unprompted] [--no-index] [--keep]')
     return 2
   }
 
@@ -577,13 +599,59 @@ async function main() {
     console.log(`[probe-recall] Agent = ${agentId.slice(0, 8)}… ｜ 房 = ${roomId.slice(0, 8)}…`)
 
     // 4) 把她安在**这个临时家**上（环境 ＋ 凭据 ＋ 宿主）
-    const adopted = runHome(['up', '--agent', agentId], homeDir)
-    if (adopted.status !== 0) {
+    //    `--no-index` 时先用 `--attach-only` **只接上、不起宿主**，改完 skills=none 再起第一段
+    //    （否则宿主已经开过一段，改配置就晚了）。
+    const adopt = options.noIndex
+      ? runHome(['up', '--agent', agentId, '--attach-only'], homeDir)
+      : runHome(['up', '--agent', agentId], homeDir)
+    if (adopt.status !== 0) {
       console.error('[probe-recall] 安家没成（up --agent 非 0）：')
-      console.error(String(adopted.stdout || '').split('\n').slice(-8).join('\n'))
+      console.error(String(adopt.stdout || '').split('\n').slice(-8).join('\n'))
       return 2
     }
     console.log('[probe-recall] 她安在这个临时家上了（环境 ＋ 凭据 ＋ 宿主）')
+
+    // 4.5) **无索引对照**：技能文件仍在，但把这一支的 `skills=` 改成 none 后再起第一段。
+    if (options.noIndex) {
+      setAgentSkillsNone(homeDir, agentId)
+      // `--attach-only` 这条路上宿主可能已经起过（或被别的东西拉起）⇒ 必须停一次再起。
+      // `down --agent` 在\"那一支正跑着\"时会返回非 0（admission=unfinished），但停本身是成功的；
+      // 判据看输出里的\"已停 / 已经在停着\"，不看退出码。
+      const stopped = runHome(['down', '--agent', agentId], homeDir)
+      const stoppedText = String(stopped.stdout || '')
+      if (stopped.status !== 0 && !/已停|已经在停着/.test(stoppedText)) {
+        console.error('[probe-recall] 无索引对照：停这一支没成（down --agent）：')
+        console.error(stoppedText.split('\n').slice(-8).join('\n'))
+        return 2
+      }
+      const restarted = runHome(['up', '--agent', agentId], homeDir)
+      if (restarted.status !== 0) {
+        console.error('[probe-recall] 无索引对照：改完 skills=none 后起宿主没成：')
+        console.error(String(restarted.stdout || '').split('\n').slice(-8).join('\n'))
+        return 2
+      }
+      // **对照生效的证据**：宿主自己打的那一行必须是 skills=none。不是的话，这一轮不算对照。
+      let hostLog = ''
+      try {
+        hostLog = fs.readFileSync(
+          path.join(homeDir, 'logs', 'agents', agentId, 'host.out'),
+          'utf8',
+        )
+      } catch {
+        // 读不到就按没生效处理（不猜）。
+      }
+      if (!/^skills=none\b/m.test(hostLog)) {
+        console.error(
+          '[probe-recall] 无索引对照没生效：宿主日志里不是 `skills=none` ⇒ **这一轮不跑**' +
+            '（否则会把\"索引在场\"的成功冒充成\"没有索引\"的成功）',
+        )
+        return 2
+      }
+      console.log(
+        `[probe-recall] **--no-index 对照**：技能区仍有 ${options.skills} 份，但这一支 ` +
+          '`skills=none` ⇒ 开场索引一项都不列（正文仍可经 files_* 读到）',
+      )
+    }
 
     // 5) 主人发那一条（公共路径，与页面同一条协议）
     const sent = await api(base, token, 'POST', `/v1/rooms/${roomId}/messages`, {
@@ -766,6 +834,7 @@ module.exports = {
   skillText,
   releaseNoteSkillText,
   writeSkills,
+  setAgentSkillsNone,
   DECOY_NAMES,
   SKILL_NAME,
   TASK_LINE,

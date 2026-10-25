@@ -25,6 +25,7 @@ const {
   skillText,
   releaseNoteSkillText,
   writeSkills,
+  setAgentSkillsNone,
   DECOY_NAMES,
   SKILL_NAME,
   TASK_LINE,
@@ -108,6 +109,9 @@ check('参数：缺省 240 秒 / 不保留 / 1 份技能 / 不是 absent；三�
     skills: 5,
     absent: true,
   })
+  // `--no-index` 只改一个键；缺省不出现（老调用方的 deepEqual 不被改坏）。
+  assert.equal(parseArguments(['--no-index']).noIndex, true)
+  assert.equal(Object.hasOwn(parseArguments([]), 'noIndex'), false)
   // 静默忽略未知参数 = 让人以为门禁按他想的那样跑了。
   assert.throws(() => parseArguments(['--timeout']), /正整数/)
   assert.throws(() => parseArguments(['--timeout', '0']), /正整数/)
@@ -177,6 +181,23 @@ check('技能正文：写着那个码（它是唯一能让"报对了"成立的�
   assert.ok(text.includes('ZOK'), '技能里的写法必须与任务里逐字相同（大小写也算）')
   assert.ok(!text.includes('zok'), '同一个东西只有一种写法 —— 不许再出现小写那一份')
   assert.ok(TASK_LINE.includes(SKILL_NAME), '任务里指的那个词，与技能目录名是同一个字符串')
+})
+
+check('★ 无索引对照：只改 skills= 那一行，别的登记原样保留', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-recall-no-index-'))
+  try {
+    const envRoot = path.join(home, 'agents', 'a-1')
+    fs.mkdirSync(envRoot, { recursive: true })
+    const conf = path.join(envRoot, 'agent.conf')
+    fs.writeFileSync(conf, 'agent_id=a-1\nroom_id=r-1\nskills=all\nterminal=full\n', 'utf8')
+    setAgentSkillsNone(home, 'a-1')
+    const text = fs.readFileSync(conf, 'utf8')
+    assert.ok(text.includes('skills=none'))
+    assert.equal(text.match(/^skills=/gm).length, 1, '只许有一行 skills=')
+    assert.ok(text.includes('agent_id=a-1') && text.includes('room_id=r-1') && text.includes('terminal=full'))
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
 })
 
 check('★ 铺 N 份：只有目标那份写着 mark，**干扰项各有自己的码**', () => {
