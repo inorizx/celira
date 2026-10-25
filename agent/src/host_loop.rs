@@ -546,6 +546,13 @@ impl RunNamer {
 pub struct Host<'a> {
     options: HostOptions<'a>,
     names: RunNamer,
+    /// **宿主级的 MCP 通道租约池**：`--mcp` 与 `mcp.conf` 共用这一张。
+    ///
+    /// 它不是"这一次活动的通道"——通道与 Run 是两层寿命（见 [`crate::mcp::ChannelPool`]）。
+    /// 本件只在**两段之间**收：开段之前 `sweep` + 按本段声明 `retain`。
+    /// ⚠ 本件取**第一台 access** 的池；调用方必须让这组 access 共用同一张（生产
+    /// `resolve_mcp` 就是这么建的），否则上限与租期只覆盖第一张池。
+    mcp_channels: std::sync::Arc<crate::mcp::ChannelPool>,
     /// **「新」的起点**（本进程内记的账；还没跑过任何活动就是 `None`）。
     ///
     /// 门铃只说「有新的」，主体知道「新」从哪个时刻起算，才能用 `im_rooms(since=…)` 只问增量。
@@ -565,9 +572,18 @@ pub struct Host<'a> {
 
 impl<'a> Host<'a> {
     pub fn new(options: HostOptions<'a>) -> Self {
+        // 宿主声明的第一条 access 握着开机时造的那张池；没有 `--mcp` 时现造一张给
+        // `mcp.conf` 用。同一张池 = 同一套上限与租期。
+        let mcp_channels = options
+            .declarations
+            .mcp
+            .first()
+            .map(|access| access.channels())
+            .unwrap_or_else(crate::mcp::ChannelPool::host_default);
         Self {
             options,
             names: RunNamer::new(),
+            mcp_channels,
             since: None,
             coalesce: std::time::Duration::ZERO,
         }
@@ -740,6 +756,9 @@ impl<'a> Host<'a> {
         model: &mut M,
         boundary: &mut dyn FnMut(&mut M) -> Result<(), HostFailure>,
     ) -> Result<RunReading, HostFailure> {
+        // **两段之间**才收通道：上一段 Run 已经收场，这一段的"在场"还没开始。空闲到期与
+        // 超上限都在这里处理（见 `mcp::ChannelPool`：Run 进行中绝不回收）。
+        self.mcp_channels.sweep();
         let options = &self.options;
         let run = self.names.next_run_id();
         let mut environment = open_when_free(
@@ -768,10 +787,18 @@ impl<'a> Host<'a> {
                     &options.declarations.mcp,
                     options.environment_root,
                     options.declarations.terminal.is_some(),
+                    &self.mcp_channels,
                 );
                 for note in notes {
                     eprintln!("[mcp] {note}");
                 }
+                // 主体删掉的那几行：这一段的声明里没有它，就把它的通道收掉。**只在这里**
+                // （两段之间）——本段已经展开的动作不能在中途变假。
+                let active: Vec<String> = mcp
+                    .iter()
+                    .map(|access| access.declaration().name().to_string())
+                    .collect();
+                self.mcp_channels.retain(&active);
                 let mut declarations = options.declarations.clone();
                 declarations.mcp = mcp;
                 declarations

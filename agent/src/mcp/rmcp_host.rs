@@ -23,8 +23,9 @@ use std::time::Duration;
 use rmcp::{
     ClientHandler, ClientLifecycleMode, ClientServiceExt,
     model::{
-        CallToolRequestParams, ClientCapabilities, ClientConfig, Implementation, ProtocolVersion,
-        ServerNotification, SubscriptionFilter, Tool,
+        CallToolRequestParams, ClientCapabilities, ClientConfig, Implementation,
+        PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, Resource,
+        ResourceContents, ServerNotification, SubscriptionFilter, Tool,
     },
     service::{
         ClientInitializeError, MaybeSendFuture, NotificationContext, RoleClient, RunningService,
@@ -40,8 +41,9 @@ use rmcp::{
 use super::stdio::StdioTransport;
 use super::wire::{describe_error, read_result};
 use super::{
-    CallFault, CallReply, McpDeclaration, McpEndpoint, McpFailure, McpNotification, RawTool,
-    Transport, clip, sanitize,
+    CallFault, CallReply, MAX_RESOURCE_LABEL_BYTES, MAX_RESOURCE_URI_BYTES, MAX_RESOURCES_PER_PAGE,
+    MAX_TEXT_BYTES, McpDeclaration, McpEndpoint, McpFailure, McpNotification, RawResource, RawTool,
+    ResourceBody, ResourceContent, ResourcePage, Transport, clip, foreign_line, sanitize,
 };
 
 /// `rmcp` 客户端的固定类型：handler 只做一件事——把通知收进共享队列。
@@ -59,6 +61,16 @@ enum Command {
         timeout: Duration,
         reply: Sender<Result<CallReply, CallFault>>,
     },
+    ListResources {
+        cursor: Option<String>,
+        timeout: Duration,
+        reply: Sender<Result<ResourcePage, CallFault>>,
+    },
+    ReadResource {
+        uri: String,
+        timeout: Duration,
+        reply: Sender<Result<Vec<ResourceContent>, CallFault>>,
+    },
     SubscribeTools {
         timeout: Duration,
         reply: Sender<Result<bool, CallFault>>,
@@ -70,6 +82,8 @@ enum Command {
 struct Ready {
     result: Result<(), CallFault>,
     detail: Option<String>,
+    /// 对面在握手时声明了 `resources` 吗（能力事实，只读一次）。
+    resources: bool,
 }
 
 /// 通知接收器：legacy 路径由 handler 回调推入；现代订阅路径由单独任务推入。
@@ -118,6 +132,8 @@ pub struct RmcpTransport {
     scrubbed: usize,
     unscrubbed: Vec<String>,
     connected: bool,
+    /// 对面声明的 `resources` 能力（握手时读到；`connect` 之前一律 `false`）。
+    resources: bool,
 }
 
 impl RmcpTransport {
@@ -150,6 +166,7 @@ impl RmcpTransport {
                         let _ = ready_tx.send(Ready {
                             result: Err(CallFault::Refused(McpFailure::SpawnFailure)),
                             detail: Some(format!("MCP 宿主运行时没起来：{error}")),
+                            resources: false,
                         });
                         return;
                     }
@@ -174,6 +191,7 @@ impl RmcpTransport {
             scrubbed,
             unscrubbed,
             connected: false,
+            resources: false,
         })
     }
 
@@ -215,10 +233,15 @@ impl Transport for RmcpTransport {
             return Err(CallFault::Refused(McpFailure::HandshakeFailure));
         };
         match ready.recv_timeout(timeout) {
-            Ok(Ready { result, detail }) => {
+            Ok(Ready {
+                result,
+                detail,
+                resources,
+            }) => {
                 self.detail = detail.map(|text| clip(&sanitize(&text), 2048).0);
                 result?;
                 self.connected = true;
+                self.resources = resources;
                 Ok(())
             }
             Err(_) => Err(CallFault::Refused(McpFailure::HandshakeFailure)),
@@ -238,6 +261,35 @@ impl Transport for RmcpTransport {
         self.request(timeout, |reply| Command::CallTool {
             name: tool.to_string(),
             arguments,
+            timeout,
+            reply,
+        })
+    }
+
+    /// 对面在握手时声明了 `resources` 才有这一面。
+    fn supports_resources(&self) -> bool {
+        self.resources
+    }
+
+    fn list_resources(
+        &mut self,
+        cursor: Option<String>,
+        timeout: Duration,
+    ) -> Result<ResourcePage, CallFault> {
+        self.request(timeout, |reply| Command::ListResources {
+            cursor,
+            timeout,
+            reply,
+        })
+    }
+
+    fn read_resource(
+        &mut self,
+        uri: &str,
+        timeout: Duration,
+    ) -> Result<Vec<ResourceContent>, CallFault> {
+        self.request(timeout, |reply| Command::ReadResource {
+            uri: uri.to_string(),
             timeout,
             reply,
         })
@@ -298,6 +350,7 @@ async fn host_main(
             let _ = ready.send(Ready {
                 result: Err(fault),
                 detail,
+                resources: false,
             });
             return;
         }
@@ -308,9 +361,18 @@ async fn host_main(
     // ⚠ 订阅由上层在拿到初始清单之后显式触发（`subscribe_tools_changed`），
     // 不能在 `connect` 里抢跑：那会让初始清单变成“订阅后的清单”。
     let mut subscribed = false;
+    // 资源是**握手时自报的能力**：对面没说有，就一个资源动作都不挂（也不去探）。
+    // 判据只看能力表，不看"`resources/list` 会不会报错"——后者会把一台不支持资源的
+    // server 的一次错误答复误读成"它有资源、只是坏了"。
+    let resources = client
+        .peer()
+        .peer_info()
+        .map(|info| info.capabilities.resources.is_some())
+        .unwrap_or(false);
     let _ = ready.send(Ready {
         result: Ok(()),
         detail: None,
+        resources,
     });
 
     while let Some(command) = commands.recv().await {
@@ -330,6 +392,22 @@ async fn host_main(
                 reply,
             } => {
                 let result = call_tool(&client, &name, arguments, timeout).await;
+                let _ = reply.send(result);
+            }
+            Command::ListResources {
+                cursor,
+                timeout,
+                reply,
+            } => {
+                let result = list_resources(&client, cursor, timeout).await;
+                let _ = reply.send(result);
+            }
+            Command::ReadResource {
+                uri,
+                timeout,
+                reply,
+            } => {
+                let result = read_resource(&client, &uri, timeout).await;
                 let _ = reply.send(result);
             }
             Command::SubscribeTools { timeout, reply } => {
@@ -569,6 +647,156 @@ async fn call_tool(
             _ => Err(CallFault::Indeterminate(McpFailure::Transport)),
         },
         Err(_) => Err(CallFault::Indeterminate(McpFailure::Timeout)),
+    }
+}
+
+async fn read_resource(
+    client: &Client,
+    uri: &str,
+    timeout: Duration,
+) -> Result<Vec<ResourceContent>, CallFault> {
+    let params = ReadResourceRequestParams::new(uri.to_string());
+    match tokio::time::timeout(timeout, client.read_resource(params)).await {
+        Ok(Ok(result)) => Ok(resource_blocks(result.contents)),
+        // 资源读的错误对象只归词表（`server-error`）：今天的 `Transport` 读路径没有承载
+        // 对面原文的字段（`CallReply::Refused` 是 tools 那条路的形状）。这是**如实登记的
+        // 缺口**，不是"忘了"——要补它得先想清"同一句原文在两条路上算不算同一个东西"。
+        Ok(Err(error)) => match error {
+            rmcp::ServiceError::McpError(_) => Err(CallFault::Refused(McpFailure::ServerError)),
+            rmcp::ServiceError::Timeout { .. } => Err(CallFault::Refused(McpFailure::Timeout)),
+            _ => Err(CallFault::Refused(McpFailure::Transport)),
+        },
+        Err(_) => Err(CallFault::Refused(McpFailure::Timeout)),
+    }
+}
+
+async fn list_resources(
+    client: &Client,
+    cursor: Option<String>,
+    timeout: Duration,
+) -> Result<ResourcePage, CallFault> {
+    let params = PaginatedRequestParams::default().with_cursor(cursor);
+    match tokio::time::timeout(timeout, client.list_resources(Some(params))).await {
+        Ok(Ok(page)) => {
+            // 一页的上限是**回执有界**的那一面：超了整页不搬（不静默截断，那会让
+            // "下一页游标"与"这一页少了几条"对不上）。
+            if page.resources.len() > MAX_RESOURCES_PER_PAGE {
+                return Err(CallFault::Refused(McpFailure::ToolsFailed));
+            }
+            Ok(ResourcePage {
+                resources: page.resources.into_iter().map(raw_resource).collect(),
+                // 游标是**对面的不透明记号**：只消毒，不改写、不编号。
+                // 超过字节上限就**整页失败**，不递一个被截断的游标出去——那会让下一页
+                // 静默变成另一页（而"静默截断"在这条线上一律违禁）。
+                next_cursor: match page.next_cursor.as_deref() {
+                    Some(cursor) => {
+                        let clean = sanitize(cursor);
+                        let (clipped, truncated) = clip(&clean, MAX_RESOURCE_URI_BYTES);
+                        if truncated {
+                            return Err(CallFault::Refused(McpFailure::ToolsFailed));
+                        }
+                        Some(clipped)
+                    }
+                    None => None,
+                },
+            })
+        }
+        // 清单拉不到这一格复用既有词（`tools-failed` 是"清单拉不到"，不是"工具坏了"）——
+        // 不为 resources 另造一个对外词。
+        Ok(Err(error)) => Err(list_fault(error)),
+        Err(_) => Err(CallFault::Refused(McpFailure::Timeout)),
+    }
+}
+
+/// 对面的一条资源 → 我们的有界读数（**外来文本全部消毒 + 截断**）。
+fn raw_resource(resource: Resource) -> RawResource {
+    let (uri, uri_truncated) = bound_uri(&resource.uri);
+    RawResource {
+        uri,
+        name: foreign_line(&resource.name, MAX_RESOURCE_LABEL_BYTES),
+        title: resource
+            .title
+            .as_deref()
+            .map(|text| foreign_line(text, MAX_RESOURCE_LABEL_BYTES)),
+        description: resource
+            .description
+            .as_deref()
+            .map(|text| foreign_line(text, MAX_RESOURCE_LABEL_BYTES)),
+        mime_type: resource
+            .mime_type
+            .as_deref()
+            .map(|text| foreign_line(text, MAX_RESOURCE_LABEL_BYTES)),
+        size: resource.size,
+        uri_truncated,
+    }
+}
+
+/// URI 的边界处理：消毒（控制字符与换行能伪造回执行）+ 截断 + **显式标记**。
+///
+/// ⚠ 截断之后这个 URI 原样读不回来——所以标记必须出现在回执里，而不是让主体拿着
+/// 半个地址去撞一次失败才知道。
+fn bound_uri(uri: &str) -> (String, bool) {
+    let clean = sanitize(uri);
+    clip(&clean, MAX_RESOURCE_URI_BYTES)
+}
+
+/// 对面一次读答复里的内容块 → **最多一块**有界正文（其余如实报数）。
+fn resource_blocks(raw: Vec<ResourceContents>) -> Vec<ResourceContent> {
+    let mut blocks = raw.into_iter();
+    let Some(first) = blocks.next() else {
+        return Vec::new();
+    };
+    let omitted = blocks.count();
+    vec![resource_content(first, omitted)]
+}
+
+fn resource_content(content: ResourceContents, omitted: usize) -> ResourceContent {
+    match content {
+        ResourceContents::TextResourceContents {
+            uri,
+            mime_type,
+            text,
+            ..
+        } => {
+            let text_bytes = text.len();
+            let (text, truncated) = clip(&text, MAX_TEXT_BYTES);
+            ResourceContent {
+                uri: bound_uri(&uri).0,
+                mime_type: mime_type
+                    .as_deref()
+                    .map(|text| foreign_line(text, MAX_RESOURCE_LABEL_BYTES)),
+                body: ResourceBody::Text {
+                    text,
+                    text_bytes,
+                    truncated,
+                },
+                omitted,
+            }
+        }
+        // **blob 不搬原文**：base64 不是给模型读的正文，搬过去只是把无界字节换个名字。
+        // 只报它有多大（编码后的字符数）——"有这一块、有多大"是读数，"里面是什么"另说。
+        ResourceContents::BlobResourceContents {
+            uri,
+            mime_type,
+            blob,
+            ..
+        } => ResourceContent {
+            uri: bound_uri(&uri).0,
+            mime_type: mime_type
+                .as_deref()
+                .map(|text| foreign_line(text, MAX_RESOURCE_LABEL_BYTES)),
+            body: ResourceBody::Blob {
+                encoded_bytes: blob.len(),
+            },
+            omitted,
+        },
+        // SDK 的枚举留了扩展位：不认识的形状如实说"搬不了"，不猜它是什么。
+        _ => ResourceContent {
+            uri: String::new(),
+            mime_type: None,
+            body: ResourceBody::Unsupported,
+            omitted,
+        },
     }
 }
 

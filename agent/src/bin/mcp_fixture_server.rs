@@ -11,8 +11,16 @@
 //!    没展开之前那个文件不该存在）；
 //! 3. 一组刻意做坏的动词（超长正文、非文本块、`isError`、错误对象、噪声行、慢、掉线）。
 //!
-//! 用法：`mcp_fixture_server [--secret <值>] [--marker <路径>] [--era <世代>] [--input-required] [--tools-change]`，
+//! 用法：`mcp_fixture_server [--secret <值>] [--marker <路径>] [--era <世代>] [--input-required] [--tools-change] [--resources] [--no-tools]`，
 //! 读标准输入、写标准输出，每行一条 JSON。
+//!
+//! `--resources`（2026-10-25）：握手时声明 `resources`，并提供两页资源清单
+//! （`fixture://readme` 文本 ＋ `fixture://logo` blob，第一页带 `nextCursor = page-2`）
+//! 与 `resources/read`（`fixture://missing` 回错误对象）——它只给 resources 数据面当演员。
+//!
+//! `--no-tools`（2026-10-25）：`tools/list` 回空清单、能力表里也不声明 `tools`
+//! ——它给"纯资源型 server 仍能展开"当演员。两个旗标都不给时，行为与旧夹具逐字节相同
+//! （13 条工具、只声明 `tools`）。
 //!
 //! `--tools-change`（2026-10-25）：modern 代收到 `subscriptions/listen` 时先回
 //! `notifications/subscriptions/acknowledged`，再发一条 `notifications/tools/list_changed`；
@@ -50,6 +58,10 @@ fn main() -> ExitCode {
     let input_required = arguments.iter().any(|each| each == "--input-required");
     // `--tools-change`：订阅后发一条清单变更通知，并让后续 `tools/list` 多一条动词。
     let tools_change = arguments.iter().any(|each| each == "--tools-change");
+    // `--resources`：声明 resources 并答 `resources/list` / `resources/read`。
+    let resources = arguments.iter().any(|each| each == "--resources");
+    // `--no-tools`：纯资源型 server——清单为空，能力表里也不声明 tools。
+    let tools_enabled = !arguments.iter().any(|each| each == "--no-tools");
     // 订阅是否已经发生：只有发生之后，`tools/list` 才换成新清单（展开那一次仍旧拿旧清单）。
     let mut tools_changed = false;
 
@@ -114,7 +126,7 @@ fn main() -> ExitCode {
                         id,
                         json!({
                             "protocolVersion": "2024-11-05",
-                            "capabilities": {"tools": {}},
+                            "capabilities": capabilities(tools_enabled, resources),
                             "serverInfo": {"name": "celira-mcp-fixture", "version": "0"},
                         }),
                     );
@@ -129,7 +141,7 @@ fn main() -> ExitCode {
                         json!({
                             "resultType": "complete",
                             "supportedVersions": supported_versions(&era),
-                            "capabilities": {"tools": {}},
+                            "capabilities": capabilities(tools_enabled, resources),
                             "ttlMs": 0,
                             "cacheScope": "private",
                             "_meta": {
@@ -149,12 +161,43 @@ fn main() -> ExitCode {
                 if modern_without_meta(&era, &message) {
                     error(&mut stdout, id, -32602, "fixture: modern 请求缺 `_meta`");
                 } else {
-                    let tools = if tools_changed {
+                    let tools = if !tools_enabled {
+                        json!([])
+                    } else if tools_changed {
                         catalogue_changed()
                     } else {
                         catalogue()
                     };
                     reply(&mut stdout, id, json!({"tools": tools}));
+                }
+            }
+            "resources/list" => {
+                if !resources {
+                    error(&mut stdout, id, -32601, "fixture: 不认识的 method");
+                } else {
+                    let cursor = message
+                        .pointer("/params/cursor")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    reply(&mut stdout, id, resource_page(cursor.as_deref()));
+                }
+            }
+            "resources/read" => {
+                if !resources {
+                    error(&mut stdout, id, -32601, "fixture: 不认识的 method");
+                } else {
+                    let uri = message
+                        .pointer("/params/uri")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    match resource_read(uri) {
+                        Ok(result) => {
+                            reply(&mut stdout, id, result);
+                        }
+                        Err(reason) => {
+                            error(&mut stdout, id, -32002, reason);
+                        }
+                    }
                 }
             }
             "subscriptions/listen" => {
@@ -238,6 +281,72 @@ fn argument(arguments: &[String], name: &str) -> Option<String> {
         .position(|each| each == name)
         .and_then(|index| arguments.get(index + 1))
         .cloned()
+}
+
+/// 握手自报的能力表（`--no-tools` / `--resources` 只改这一张表）。
+fn capabilities(tools: bool, resources: bool) -> Value {
+    let mut declared = serde_json::Map::new();
+    if tools {
+        declared.insert("tools".to_string(), json!({}));
+    }
+    if resources {
+        declared.insert("resources".to_string(), json!({}));
+    }
+    Value::Object(declared)
+}
+
+/// 资源清单的第二页游标（第一页回执里给出去，测试拿它翻页）。
+const RESOURCE_PAGE_TWO: &str = "page-2";
+
+/// 文本资源的正文（测试按这句判"真的读到了正文"）。
+const RESOURCE_TEXT: &str = "fixture 资源正文：readme\n";
+
+/// 一页资源清单：第一页给 readme ＋ 游标，`cursor = page-2` 给 blob 那条。
+fn resource_page(cursor: Option<&str>) -> Value {
+    match cursor {
+        Some(RESOURCE_PAGE_TWO) => json!({
+            "resources": [{
+                "uri": "fixture://logo",
+                "name": "logo",
+                "title": "夹具图标",
+                "description": "一块二进制资源（blob）：只该报 mime 与大小。",
+                "mimeType": "image/png",
+                "size": 8
+            }]
+        }),
+        _ => json!({
+            "resources": [{
+                "uri": "fixture://readme",
+                "name": "readme",
+                "title": "夹具说明",
+                "description": "一块文本资源。",
+                "mimeType": "text/markdown",
+                "size": RESOURCE_TEXT.len()
+            }],
+            "nextCursor": RESOURCE_PAGE_TWO
+        }),
+    }
+}
+
+/// 一次资源读取：一条文本、一条 blob、其余像真的 server 一样报"没有这条资源"。
+fn resource_read(uri: &str) -> Result<Value, &'static str> {
+    match uri {
+        "fixture://readme" => Ok(json!({
+            "contents": [{
+                "uri": "fixture://readme",
+                "mimeType": "text/markdown",
+                "text": RESOURCE_TEXT
+            }]
+        })),
+        "fixture://logo" => Ok(json!({
+            "contents": [{
+                "uri": "fixture://logo",
+                "mimeType": "image/png",
+                "blob": "iVBORw0KGgo="
+            }]
+        })),
+        _ => Err("fixture: 没有这条资源"),
+    }
 }
 
 /// 清单变更通知之后的那份清单：原清单 ＋ 一条 `after`。

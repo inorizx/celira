@@ -63,7 +63,7 @@
 | `src/sandbox_backend.rs` | **沙箱后端端口**（2026-10-23，`terminal=sandbox` 那一档的第一刀）：「**哪只手执行**」是可插拔的，**权限语义不可插拔**（`docs/runtime/terminal/` 那份裁决稿 §4）。一份请求 `SandboxRequest`（环境根 / `cwd` / 命令 / shell）＋ 一个端口 `SandboxBackend`：`name`（审计用的稳定名字）/ `guarantees`（**真的**兑现什么，八格封闭取值——说不出来的写 `none`，今天 bwrap 的 `resources=none` 就是如实登记的缺口）/ `probe`（**这台机器上可用吗**，真跑不是 `which`）/ `command`（只拼 argv，**不起进程**：起进程仍只有编排层那一处）。第一支实现 `BwrapBackend`：`--ro-bind / /` ＋ `--dev` / `--proc` / `--tmpfs /tmp` ＋ `--bind <环境根> <环境根>` ＋ 四个命名空间（net / pid / ipc / uts）＋ `--die-with-parent` / `--new-session` / `--chdir`；探针在沙箱**里面**量五样：命名空间标识必须与本进程不同、`/etc` 写不进去（只读系统）、`/proc/net/*` 只有 `lo` 且没有路由（断网）、`/tmp` 写得进去（挂载真的做上了）——**不看退出码**（一个把 `--unshare-net` 悄悄忽略掉的包装器同样返回 0）。**不可用就是拒绝**：`choose()` 一支都不过 ⇒ `sandbox-unavailable`，**不退回 `full`、不在宿主裸跑**；`systemd-run --user` **不是兜底**（本机实证：接受属性但不建命名空间）。第二支实现 `IdentityBackend`（2026-10-23，不建任何命名空间）：写面靠 **uid（DAC）**、断网靠 **seccomp**、句柄靠 **`close_range`**——探针四格全是真跑（有效 uid 不是 0、环境根里建得出文件、`/etc` 建不出、一条**装了同一套 confinement 的真子进程**连不出网且看不见继承的 fd）；保证集照实降级为 `files=workspace-writable,dac-only`、`network=none-ip`、`pid=none` / `ipc=none` / `uts=none`。命令行是**裸 shell**（`<shell> -c`），由 `Confinement::SeccompNoIp` 告诉编排层在 `execve` 前装过滤器与清 fd。**入口的身份纪律**（`check_entry_identity` / `choose_for_entry`）：以 root 组装 `sandbox` 档 ⇒ 拒绝；选中 identity 而环境根 owner 不是当前有效 uid ⇒ 拒绝并给 `chown -R` 修复行（**不 chown、不回退**）——两者报 `SANDBOX_IDENTITY_MISMATCH`，与「没有后端」的 `sandbox-unavailable` **刻意不是同一个词**。名字里的「供应商」那族词按语言守卫留在模型适配层。见 §3.25 |
 | `src/seccomp.rs` | **子进程的系统调用过滤器**（2026-10-23，identity 沙箱后端的断网与句柄纪律）：一份 **classic BPF** 程序（13 条）＋ 两次 `prctl`（`PR_SET_NO_NEW_PRIVS` 然后 `PR_SET_SECCOMP`），装法逐条对应 2026-10-23 真机实测。拒 `socket(AF_INET)` / `socket(AF_INET6)`（`EACCES`）与 `io_uring_setup`（否则可用它的套接字操作绕开 `socket`），别的族（unix 套接字）与读文件照旧放行，架构不符则杀整条进程。`confine_child` 是 `pre_exec` 钩子的全部内容：**装过滤器 ＋ `close_range(3, ~0U, CLOEXEC)`**（调用方的已连接套接字进不来）——两半必须一起装，装一半不算兑现。⚠ 旗标是 4（`CLOEXEC`）而不是规格写的 0：立刻关闭会连 `std` 的错误管一起关掉，`execve` 失败时子进程 abort 成 134、父进程却拿到 `Ok`（本机两条路都量过；`CLOEXEC` 给的是同一条"执行之后不继承"的保证，且保住 `spawn-failure` 分类）。`FILTER` 的跳转目标在单测里逐条钉住（classic BPF 的 `jt` / `jf` 只向前，规格里那条「命中就返回」因此排成前向等价体，语义逐字相同）。没有 libc / nix / seccompiler：`core::arch::asm!` 直接发系统调用（x86_64 与 aarch64 两套；别的架构 `install` 返回 `SeccompUnavailable`，**不装一个猜出来的表**）。`SUPPORTED` / `SOCKET_SYSCALL` / `IO_URING_SETUP_SYSCALL` / `CLOSE_RANGE_FIRST` / `CLOSE_RANGE_LAST` 是可读的那几格。见 §3.25 |
 | `src/platform.rs` | **平台缝**（Linux 臂那一刀）：terminal 与 MCP **共用的一份平台知识**——默认 shell 名（`powershell.exe` / `cmd.exe` / `bash`）、怎么拼命令行（`bash -c`、`cmd.exe /C`，含各自的启动卫生：Windows 的 `-NoProfile`、Linux 摘掉 `BASH_ENV` / `ENV` 两个 `bash -c` 的 profile 缝）、怎么**击杀整棵进程树**（Windows＝`taskkill /T /F`；Linux＝子进程 `process_group(0)` 自持一组、按组 `SIGKILL`，手写 FFI、零新依赖）、以及**凭据洗**（系统自有前缀 `CELIRA_` ＋ 宿主点名的键名；**先清空再交**——只 `envs()` 是假墙；只报洗掉几个/洗不掉的点名，**取值一个字节都不落**）。形状与第五刀同一份：**契约唯一、实现多份**——墙只写一份（在各自的消费者里），**臂只留四件**，本件只做其中三件＋凭据洗（**非 UTF-8 怎么解**留在各自的臂里）。它**不认识任何消费者**（守卫：不许引用 `crate::terminal_app` / `crate::mcp`），不读环境根、不落盘；没有臂的平台上是 fail-closed（入口拒绝开启，本件不留近似实现）。见 §3.25 / §3.29 |
-| `src/mcp/`（`mod.rs` / `app.rs` / `rmcp_host.rs` / `stdio.rs` / `remote.rs` / `wire.rs` / `scheme.rs` / `wire_tokens.rs`） | **外部来源的第一台 App**（TASK_42；Linux 臂那一刀补 bash 臂；远程端点那一刀补网络通道）：市面上的 MCP server 在这里就是**一台被授权的 App**——宿主开机声明一次（`--mcp <名>=stdio:<命令>` 或 `<名>=<加密地址>`，可重复），主体要用的时候再展开；它与出厂内置件走**同一份窄契约**（`AppPort`），因此 **OS 一行不用认识 MCP**。三条正交事实：授权面归宿主（**装配期**，装 / 卸要重启宿主）、通道归宿主级（**懒**：声明 ≠ 起进程）、动词面归那一次活动的展开状态。两条通道走同一份 `Transport` 契约：本地 stdio（洗凭据、收进程树）与网络端点（地址墙、不跟随重定向、答复有界、凭据只从环境取）；效果档两档（默认 `unverifiable-write`；`,read-only` = 宿主显式背书）；四堵墙（转发窗口 / 回执有界 / 词表封闭 / **凭据洗**——判据与实现在 `platform.rs` 只有一份）；没有臂的平台入口**拒绝开启**（不静默换近似行为）。见 §3.29 |
+| `src/mcp/`（`mod.rs` / `app.rs` / `rmcp_host.rs` / `stdio.rs` / `remote.rs` / `wire.rs` / `scheme.rs` / `wire_tokens.rs`） | **外部来源的第一台 App**（TASK_42；Linux 臂那一刀补 bash 臂；远程端点那一刀补网络通道）：市面上的 MCP server 在这里就是**一台被授权的 App**——宿主开机声明一次（`--mcp <名>=stdio:<命令>` 或 `<名>=<加密地址>`，可重复），主体要用的时候再展开；它与出厂内置件走**同一份窄契约**（`AppPort`），因此 **OS 一行不用认识 MCP**。三条正交事实：授权面归宿主（**装配期**，装 / 卸要重启宿主）、通道归宿主级（**懒**：声明 ≠ 起进程；宿主级租约：缺省空闲 30 分钟、最多 8 条、只在两段 Run 之间回收）、动词面归那一次活动的展开状态。两条通道走同一份 `Transport` 契约：本地 stdio（洗凭据、收进程树）与网络端点（地址墙、不跟随重定向、答复有界、凭据只从环境取）；效果档两档（默认 `unverifiable-write`；`,read-only` = 宿主显式背书）；四堵墙（转发窗口 / 回执有界 / 词表封闭 / **凭据洗**——判据与实现在 `platform.rs` 只有一份）；没有臂的平台入口**拒绝开启**（不静默换近似行为）。见 §3.29 |
 | `src/skills_desktop.rs` | **系统服务层第五个件**（TASK_41）：**技能桌面**——报材料区 `<材料根>/skills/` 的**一级条目**（＝直接**子目录**数：散 skill 与包都算一项，散**文件**不算）：头一行 `skills: N 项（要翻看用 files_list，路径 skills/）`，然后最多 **12** 行**名字 ＋ 一句触发**（`description` 按预算取整句；名字 64 / 触发 160 字节封顶，超出说「另 N 项」）；**只读、纯投影、零正文**（`SKILL.md` 只读开头 frontmatter 两行，正文仍然只能 `files_read` 读）；`skills/` 不存在 ⇒ **整块不出场**（不是空标题，也不是 `0 项`），存在但空 ⇒ 如实说「技能区为空」。见 §3.28 |
 | `src/handoff.rs` | **交接（handoff）**：主体**在上一次活动里写给下一次开场的自己**的那一篇——存储 `<环境根>/handoff`（自持物，与 `self_concept` 同层）；**写**由她自己的动词 `write_handoff`（OS 自有第六件；域规则与回执措辞在本件，路由事实在 `os`），装配期读回、**由组件区摆出来**（Run 级插槽里的一格，**开场一次**；它**不占链的一层**，见 §3.22）。⚠ **它与 `self_concept` 不是一回事**：自识回答「我是谁」（常驻、跨段为真），交接回答「这一段我干到哪、下一段接着做什么」（**有确定的交付时刻**）。**三态不许压成两态**：`Absent`（文件不在、或只有一个空文件 ⇒ 开场**优雅跳过**，连标签都不出现——"**写了才有、不写就没有**"）／`Present`／`Unreadable`（如实标出，**不冒充"主体没有交接"**）。**一次播放**：`HandoffBoard::new` 收一个 `delivered`，`true` ⇒ 一个字都不说（否则一份没改的交接会每一段都重播）；那一格由调用方从**已有事实**算出来（判据：**交付过 ⟺ 之前哪一段想过活动的开场里摆过它**——按**正文**比，所以"那几段"而不是"紧邻上一次"，否则同一份会隔一段重播，见 §3.22），本模块**零新写者**。字节上限 `MAX_HANDOFF_BYTES = 2 KiB`（超限在**写入那一侧**被拒、不截断，旧的一份原样保留） |
 | `src/self_concept.rs` | **自识（self_concept）**（TASK_70）：主体**从自己的经历里提炼出来的**、关于自己是个什么样的一篇——存储 `<环境根>/self_concept`（自持物，与 `pinned_actions` 同层）；装配期读回、开场注入（`self_concept` 那一块，另摆 `identity` 身份行），**Run 中途不变**；写权归自己（`write_self_concept` 是 OS 自己的动词）；**三态不许压成两态**：`Absent`（文件不在、或只有一个空文件 ⇒ 开场**优雅跳过**，不注入空壳）／`Present`／`Unreadable`（**这一次没读到** ⇒ 如实标出，**不冒充"主体没有自识"**）；字节上限 `MAX_SELF_CONCEPT_BYTES = 4 KiB`（超限在**写入那一侧**被拒，TASK_76）；产品**不预装任何标准人格文本**（那是替所有用户的世界定"官方人格"） |
@@ -87,7 +87,7 @@
 | `src/bin/agent_host_status.rs` | 产品宿主最小切片：一条只读命令把已确认事实读成"它是谁 / 现在什么状态 / 我该不该出手"（三节 + 一行行动建议 + 读数语义退出码）；**读者打开**（不取写资格——她正在跑活动时照样读得到，见 §3.3）、不写任何记录、不调模型、不读凭据（见 §3.14） |
 | `src/bin/agent_host_acknowledge.rs` | 宿主**行政动作**的入口：显式确认（并清除）上一次保存失败留下的暂停标记。两步形状（先看原因、再 `--confirm`），四节行式 + 读数语义退出码 0/1/2/3/4；**只**调用既有的 `store::clear_paused`（不改 store、不修存储、不继续/重放/删除任何东西）（见 §3.17） |
 | `src/bin/im_probe.rs` | **执行端真机探针**（只读）：把只读的 im 动词对着**真 im** 跑一遍，每个都必须回 `success`；写动词一律不探（会改真家世界）。退出码 4 = 有 `unknown`（边界对不上）、3 = 有确定的 `failure`。消费者是 `node scripts/home/probe-agent-im.js`（触发条件写在 `AGENTS.md`） |
-| `src/bin/mcp_fixture_server.rs` | **MCP 夹具 server**（离线）：给 `tests/mcp_app.rs` 当"外面那台 server"——它自己说的工具清单（13 条）就是用例的期望；不是产品的一部分（见 §3.29） |
+| `src/bin/mcp_fixture_server.rs` | **MCP 夹具 server**（离线）：给 `tests/mcp_app.rs` / `tests/mcp_resources.rs` / `tests/mcp_lifecycle.rs` 当"外面那台 server"——它自己说的工具清单（13 条）就是用例的期望；`--resources` 再演两页资源（文本 ＋ blob），`--no-tools` 演纯资源型（见 §3.29） |
 | `src/bin/write_refusal_fixture.rs` | **写入被真拒绝的夹具**（只在 Unix 成立）：用 `RLIMIT_FSIZE` ＋ 忽略 `SIGXFSZ` 造一次**内核级**的写失败，父进程在它退出后断言读数与盘上形状；正对照（同一支夹具、只不装上限）由同一个模式参数给出（见 §4「一次写入失败之后继续追加」那一行）。⚠ 它只被 Unix 臂用，因此它的 import 与常量都带 `cfg(unix)`——否则 Windows 构建里是死代码，而门禁带 `-D warnings` |
 
 一次性路径：`run_read_only_files`（空输入）、`run_read_only_files_with_input`（显式输入）、`run_read_only_files_manually`（手动来源）均复用 `run_read_only_files_from` 和同一 Core 循环。便利入口用 NoCommit，不耐久保存；`run_read_only_files_from` 实际接受调用方提供的 RunRequest/commit，不能一概说它必为空提交。
@@ -778,14 +778,28 @@ agent_run run ... --notes-create
 接"，在**实现不在我们手里**。
 
 **主体自己那一份**：`<环境根>/mcp.conf`（自持物，与 `notes` 同层）——一行一台
-`名=stdio:<命令>[,read-only][,timeout=<秒>]`，**每一段活动开局读一次** ⇒ 主体改完自己的清单，
-**下一段**就多一台（进程不用重开）。两道闸：**只有 `terminal=full` 时才读**（没开时它会是绕过终端档的
+`名=stdio:<命令>[,read-only][,timeout=<秒>][,keep-alive|,idle=<秒>]`，**每一段活动开局读一次** ⇒
+主体改完自己的清单，**下一段**就多一台（进程不用重开）。两道闸：**只有 `terminal=full` 时才读**（没开时它会是绕过终端档的
 后门——挂一台 `stdio:任意命令` 等于有手）；**同名以宿主为准**（不能用同名换掉启动者给的那条命令）。
 坏行**跳过并记一句**（fail-soft：那是主体自己的文件），凭据洗名单与宿主声明**同一份**
 （`mcp::credential_names`）。判据在 [`mcp/mod.rs`](src/mcp/mod.rs) 的 `declarations_for_run`。
 
+**通道租约（2026-10-25）**：通道的寿命不再由「`McpAccess` 被克隆到哪」碰巧决定，而由**宿主级的
+一张池**（`mcp::ChannelPool`，按 server 名索引）统一发放。`--mcp` 与 `mcp.conf` 共用同一张池 ⇒
+同一条寿命规则；`with_pool` 是生产路径，`McpAccess::new` 只留给「这个对象就是全部世界」的测试/
+自包含对象。四条判据：① 首次显式展开才连（声明 ≠ 起进程，保留）；② **一段 Run 进行中绝不回收**
+——OS 说“这个 App 在场”，它的动作就必须可用；③ 只在**两段 Run 之间**（`run_segment` 开头）做
+`sweep`（空闲到期 ＋ 超上限 LRU）与 `retain`（本段没再声明的 server 当场收），因此 Run 结尾不需要
+任何清理、下一段也不继承展开状态；④ 故障仍在调用路径上**当场收、不自动重连**，下一次显式展开才
+重建。缺省租期 **30 分钟**（`,idle=<秒>` 可调，0–86400；`,keep-alive` = 不按时间收）；同时最多
+**8 条**通道（超过按最久没用的先走；收束只发生在**两段之间**——一段 Run 里一次展开超过 8 台会
+暂时超出，下一次开段前收到上限）。回收打一行宿主读数（哪台、空闲多久/为何被挤掉），
+`ChannelPool::reclaimed_count` 是测试用的计数。**没有后台定时器**：宿主睡着时不会为了
+回收而醒；下一次开段之前才 sweep。
+
 **协议层归 SDK，产品边界归 Celira（2026-10-25）**：通道的同步窄契约仍是
-`Transport`（`connect` / `list_tools` / `call_tool` ＋ 两个可选通知钩子），但生产实现换成
+`Transport`（`connect` / `list_tools` / `call_tool` ＋ 两个可选通知钩子；资源面是三个
+**默认关闭**的可选钩子 `supports_resources` / `list_resources` / `read_resource`），但生产实现换成
 `rmcp` 3.7.0 的客户端：异步 I/O、生命周期协商、stdio 子进程、Streamable HTTP、现代订阅
 都收在 `mcp/rmcp_host.rs` 的独立 tokio 宿主线程里；Agent 的 Run / Turn / Trace / Ledger
 仍然是同步、确定性状态机。现代 server 先走 `server/discover`，失败再走 legacy
@@ -795,17 +809,24 @@ rmcp 握手失败时用旧 stdio 读一次“对面到底说了什么”，成�
 `2026-07-28` 的 `subscriptions/listen` / `notifications/tools/list_changed` 仍只当**变更信号**：
 通知正文不落，Runtime 在下一轮重拉 `tools/list`，模型只看到 `app-changed`（哪个 App 变了），
 要细节自己展开那台 App。<br>
-本次**只把 tools 作为 App 动作面**：MCP 的 resources / prompts 不是 Celira 的 App 动作，
-因此不会凭空变成 Agent 动词；server 仍可连接，但它们的资源/提示不在这份动词面里。断线后的
-stdio 自动重连、resources/prompts 通知、多订阅解复用与通用插件事件总线仍**不做**；远程 HTTP
-的过期会话重建由 SDK 配置负责，不承诺 stdio 进程死后自动复活。
+**动作面 = tools ＋ 两个通用资源动作（2026-10-25）**：tools 是动作；server 若在握手时声明
+`resources`，展开后那台 App 里另有两个**合成的只读动作**——`<名>_resources_list`（可选
+`cursor`，一次一页）与 `<名>_resources_read`（必填 `uri`）。**不是每资源一个动词**：资源是
+数据，一条资源一个动作会让每轮摆进视野的动词面随对面的数据长大；清单与正文都只进**回执**
+（清单给 name / uri / mime / size 与下一页游标，正文只在 `resources_read` 那一次调用里读、
+**不自动进模型上下文**，blob 只报 mime 与大小、不搬原文）。两条永远 `read-only`（与宿主给
+整台的档位无关：读资源改变不了外面的世界），失败用既有词表、不新造对外词。`prompts` 仍
+**不是**动作，采样 / elicitation 也不做，Core / Run / Turn 一行未动。没声明 `resources`
+的 server 一个资源动作都不多出。断线后的 stdio 自动重连、resources / prompts 通知、多订阅
+解复用与通用插件事件总线仍**不做**；远程 HTTP 的过期会话重建由 SDK 配置负责，不承诺 stdio
+进程死后自动复活。
 
 **权威位置（本节不再重复它们的内容）**：
 
 - **授权面 / 懒展开 / 三件事的分工 / 两档效果 / 四堵墙 / 平台缝 / 一个类别的九件纪律**
   → [`mcp/mod.rs`](src/mcp/mod.rs) 的 `//!`
-- **动词面：清单的机械检查（整台或全无）、参数表两类与"表达不了"、免查预算、回执**
-  → [`mcp/app.rs`](src/mcp/app.rs) 的 `//!` 与 `map_tools`
+- **动词面：清单的机械检查（整台或全无）、参数表两类与"表达不了"、免查预算、回执，以及资源数据面的两个通用只读动作（不是每资源一个动词）**
+  → [`mcp/app.rs`](src/mcp/app.rs) 的 `//!`、`map_tools` 与 `resource_specs`
 - **通道（生产）**：`rmcp` 生命周期、异步宿主线程、stdio / Streamable HTTP、现代订阅 —
   → [`mcp/rmcp_host.rs`](src/mcp/rmcp_host.rs) 的 `//!`
 - **通道（本地/网络的旧基线）**：两代会说、探代只在失败路径、收树、`input_required` 那一格 —
@@ -818,15 +839,21 @@ stdio 自动重连、resources/prompts 通知、多订阅解复用与通用插�
 - **主体自己的清单（`mcp.conf`）：读的时机、两道闸、fail-soft、与宿主同名的取舍**
   → [`mcp/mod.rs`](src/mcp/mod.rs) 的 `declarations_for_run` 与 `read_self_declarations`
 - **证明** → [`tests/mcp_app.rs`](tests/mcp_app.rs)（整场活动不展开时，子进程的启动标记文件从头到尾
-  不存在；rmcp 生产通道的现代/legacy、通知与回执）＋ [`tests/mcp_http.rs`](tests/mcp_http.rs)
+  不存在；rmcp 生产通道的现代/legacy、通知与回执）＋ [`tests/mcp_resources.rs`](tests/mcp_resources.rs)
+  （真进程：声明 resources 的 server 多出两个只读动作、分页、正文按需读、blob 不搬；
+  纯资源型仍能展开；没声明 resources 的旧夹具一个资源动作都不多出）＋
+  [`tests/mcp_lifecycle.rs`](tests/mcp_lifecycle.rs)（真 pid：跨 Run 复用同一条通道；`,idle=1`
+  闲够后被 `sweep` 收、下一次展开是新 pid；`,keep-alive` 不换 pid；删声明后 `retain` 当场收）＋
+  [`tests/mcp_http.rs`](tests/mcp_http.rs)
   （真 Streamable HTTP 往返：握手、`tools/list`、`tools/call`）＋ [`tests/mcp_remote.rs`](tests/mcp_remote.rs)
   （旧远程基线的地址墙、会话头、事件流）＋ [`tests/minimal_agent.rs`](tests/minimal_agent.rs)
   （`BOUNDARY_MODULES` 与那条反向断言）
 - **对外入口（怎么写一台接给我们）** → [`MCP_SERVER_GUIDE.md`](MCP_SERVER_GUIDE.md)（它不另立权威）
 
-⚠ **如实登记的覆盖边界**：① `read-only` / `timeout` **写反顺序不报错**（解析从末尾逐条剥 ⇒ 静默落回
-更严那档），这一种**今天没有用例钉着**；② 九件里其余七件**今天住在 `mcp/` 里**、与协议无关，
-**不假装已中立**——触发条件是**第二个外部来源来了**（判据不是"该不该重构"）。
+⚠ **如实登记的覆盖边界**：① 回收是**开段前**的 sweep，不是后台定时器 ⇒ 宿主若长时间不醒，一条
+已空闲的通道会占着内存直到下一次开段（这是刻意的：不为回收单独造一个唤醒源）；② 九件里其余七件
+**今天住在 `mcp/` 里**、与协议无关，**不假装已中立**——触发条件是**第二个外部来源来了**（判据不是
+"该不该重构"）。
 
 ### 3.30 第二条线协议：Responses
 

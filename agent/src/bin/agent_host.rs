@@ -94,13 +94,16 @@ const USAGE: &str = "\
                     作品目录写）；`full` ＝ 任意文件夹（`files_*` 的地址一律写绝对路径）。
                     这一档由主人给，不是 Agent 能申请的；未知档位直接拒绝，不静默降档。
   --mcp <声明>      装一台外部来源的 App（MCP server），可重复（一台一条）。
-                    形状：`<名>=stdio:<命令>[,read-only][,timeout=<秒>]`
+                    形状：`<名>=stdio:<命令>[,read-only][,timeout=<秒>][,keep-alive|,idle=<秒>]`
                       <名>      动词前缀：它的动词叫 `<名>_<工具名>`（ASCII 字母开头）。
-                      stdio     通道（v1 只有这一种）；命令交给 Windows 自带命令行解释器。
+                      stdio     通道（本机子进程；命令交给本机命令行解释器）。
                       read-only 宿主显式背书「这台不改外面的世界」；不给就是最严那档
                                 （unverifiable-write：那件写没有同参复核可配）。
                       timeout   转发窗口秒数（1–600，缺省 120）。
-                    装了不用一分钱不花：子进程不起、清单不拉，直到 `open_app` 那一下。
+                      idle      空闲租期秒数（0–86400，缺省 1800 = 30 分钟；0 = 不按时间收）。
+                      keep-alive 等价 idle=0：有状态 server（浏览器会话、DB 连接）用它。
+                    装了不用一分钱不花：子进程不起、清单不拉，直到 `open_app` 那一下；
+                    首次展开后空闲到期（或超过同时 8 条）会在两段 Run 之间被宿主收掉。
                     装/卸要重启本进程——授权面是装配期事实，不在 Run 中途变。
   --model <id>      模型名：默认档下可单独切本家的另一个档位；换家档下是必答件之一。
   --model-endpoint  声明模型端点（OpenAI 兼容的 chat completions）。一给就进换家档：
@@ -391,7 +394,9 @@ fn main() -> ExitCode {
     // 外部来源的 App 的**授权面**（`--mcp`，可重复）：在横幅之前解析完——横幅要打印生效的
     // 档位、窗口与**洗凭据读数**（那时还没起任何子进程：读数与"什么时候起进程"无关），
     // 而"声明读不懂"必须在起监听之前就拒绝。
-    let mcp = match resolve_mcp(&options.mcp) {
+    // 宿主级的通道池：`--mcp` 装的那几台与主体 `mcp.conf` 里的那几台共用同一套上限与租期。
+    let mcp_channels = celira_agent::mcp::ChannelPool::host_default();
+    let mcp = match resolve_mcp(&options.mcp, &mcp_channels) {
         Ok(mcp) => mcp,
         Err((message, code)) => {
             eprintln!("{message}");
@@ -433,10 +438,15 @@ fn main() -> ExitCode {
         };
         let _ = writeln!(
             out,
-            "mcp={} effect={} timeout={} scrub={} unscrubbed={} channel={}",
+            "mcp={} effect={} timeout={} idle={} scrub={} unscrubbed={} channel={}",
             escape_field(declaration.name()),
             declaration.effect().as_str(),
             declaration.timeout_seconds(),
+            match declaration.idle_seconds() {
+                Some(0) => "keep-alive".to_string(),
+                Some(seconds) => seconds.to_string(),
+                None => celira_agent::mcp::DEFAULT_CHANNEL_IDLE_SECONDS.to_string(),
+            },
             scrubbed,
             if unscrubbed.is_empty() {
                 "none".to_string()
@@ -976,7 +986,10 @@ fn resolve_web(tier: Option<&str>) -> Result<WebTier, (String, i32)> {
 ///
 /// 三条都是 fail-closed：声明读不懂 ⇒ 拒绝启动（不猜）；两台同名 ⇒ 拒绝启动（动词前缀会撞，
 /// 路由到谁都没有正确答案）；本平台没有 stdio 通道的实现 ⇒ 拒绝启动（不换一个近似行为）。
-fn resolve_mcp(declarations: &[String]) -> Result<Vec<McpAccess>, (String, i32)> {
+fn resolve_mcp(
+    declarations: &[String],
+    channels: &std::sync::Arc<celira_agent::mcp::ChannelPool>,
+) -> Result<Vec<McpAccess>, (String, i32)> {
     if declarations.is_empty() {
         return Ok(Vec::new());
     }
@@ -1004,7 +1017,11 @@ fn resolve_mcp(declarations: &[String]) -> Result<Vec<McpAccess>, (String, i32)>
                 1,
             ));
         }
-        accesses.push(McpAccess::new(declaration, credential_names()));
+        accesses.push(McpAccess::with_pool(
+            declaration,
+            credential_names(),
+            std::sync::Arc::clone(channels),
+        ));
     }
     Ok(accesses)
 }

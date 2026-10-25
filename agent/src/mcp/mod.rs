@@ -11,7 +11,8 @@
 //! ```text
 //! 宿主（命令行）    —— 声明：名字、命令、效果档、超时、要洗的凭据键名
 //! 本层（App）      —— 动词面：名字、骨架、参数表、效果类别、回执；墙全部在本层
-//! 通道（transport）—— 只做三件事：connect（起进程 + 握手）/ list_tools / call_tool
+//! 通道（transport）—— 三个协议动作：connect / list_tools / call_tool；
+//!                     另有**可选**的资源钩子（list_resources / read_resource），默认关闭
 //! ```
 //!
 //! 通道被抽成一个**窄 trait**（[`Transport`]）：v1 只有 stdio 一个实现（[`stdio::StdioTransport`]），
@@ -29,6 +30,33 @@
 //! 生产展开只在 rmcp 握手失败时用旧 stdio 读一次"对面到底说了什么"；成功路径不走手写协议栈。
 //! 通知仍然只是**变更信号**——正文由 Runtime 重新 `tools/list` 拉取，本层不把它写进模型上下文。
 //!
+//! ## 资源（resources）：两个通用只读动作，不是每资源一个动词（2026-10-25）
+//!
+//! 一台 server 若在握手时声明 `resources`，展开之后它的 App 里**多出两个**动作：
+//!
+//! ```text
+//! <名>_resources_list   [cursor?]   一次一页；回执只有 name/uri/mime/size 与下一页游标
+//! <名>_resources_read   uri         按需读一块正文（文本有界，blob 只报大小）
+//! ```
+//!
+//! 三条判据，缺一条就会长成别的东西：
+//!
+//! - **资源不是动作**：一条资源一个动词，会让每轮摆进主体视野的动词面随对面的**数据**长大
+//!   （而动词面是能力面）。资源清单因此只进**回执**，动词面固定只有这两条。
+//! - **正文按需拉**：`resources/list` **不带正文**；正文只在 `resources_read` 那一次调用里读，
+//!   读完也只是那一次的回执——**不自动进模型上下文**（与 tools 同一条纪律）。
+//! - **prompts 不在这里**：它不是动作面的一部分，采样 / elicitation 也不做。
+//!
+//! 两条都是 [`McpEffect::ReadOnly`]——**与宿主给这台 server 的效果档无关**：`read-only` 那句
+//! 背书说的是工具，而"读资源"本来就改变不了外面的世界。后果是它们落进 [`fault_outcome`] 的
+//! 只读那一格：通道断在中间也只是明确失败，**不是** [`ActionOutcome::unknown`]。
+//! 失败用既有词表（`timeout` / `transport` / `server-error` / `tools-failed`），不新造对外词。
+//!
+//! 只有**对面真的声明了** `resources` 才挂这两个动作；旧 fixture 与没有资源面的通道
+//! （[`Transport::supports_resources`] 默认 `false`）因此逐字节保持 tools-only 的旧行为。
+//! 能力是**握手那一下的读数**：对面后来才长出 resources（没有重新握手）不会热加动作，
+//! `notifications/resources/list_changed` 今天也不订阅——重新展开才会重新读。
+//!
 //! ## 授权 = 装配期事实（装/卸要重启宿主）
 //!
 //! `--mcp` 一给，这台 server 就进了**授权面**：展开动作认得这个名字。不给就是没装——
@@ -45,9 +73,28 @@
 //! 真到**展开那一下**才：起进程 → 握手 → 拉清单 → 回执是门户卡片（动词骨架清单）。
 //! 从**下一轮**起那台 server 的动词骨架进 `tools` 数组，`inspect_action` 取详情照走。
 //!
-//! 子进程是**宿主级**的：首次展开起、宿主退出收（[`stdio::StdioTransport`] 的 `Drop` 收整棵树）。
-//! 展开状态本身仍然归**这一次活动**（OS 的 `RunExpansion`）——所以下一次 Run 主体要**再说一次**
-//! "我要用它"，而通道（进程）不必重建。
+//! 子进程是**宿主级租约**的：首次显式展开才起；空闲 [`DEFAULT_CHANNEL_IDLE_SECONDS`] 秒
+//! （`,idle=` 可调，`,keep-alive` 退出）或宿主退出时收；同时最多 [`MAX_OPEN_CHANNELS`] 条，
+//! 超了按最久没用的先走。展开状态本身仍然归**这一次活动**（OS 的 `RunExpansion`）——所以下一次
+//! Run 主体要**再说一次**"我要用它"，而通道（进程）通常不必重建。
+//!
+//! ## 通道租约：寿命归宿主，不归对象图（2026-10-25）
+//!
+//! 从前通道住在 `McpAccess` 的一个 `Arc<Mutex<Option<Box<dyn Transport>>>>` 里：谁克隆到它、
+//! 最后一个 `Arc` 什么时候掉，子进程就活到什么时候。于是同一条声明因为**构造位置**不同长出两套
+//! 寿命（`--mcp` 是宿主级、`mcp.conf` 是每段 Run 重建）。现在寿命由 [`ChannelPool`] 统一发放：
+//!
+//! - **一张池，按 server 名索引**：`--mcp` 与 `mcp.conf` 共用同一张（[`McpAccess::with_pool`]）；
+//!   `McpAccess::new` 只留给"这个对象就是全部世界"的测试与自包含对象。
+//! - **只在两段 Run 之间回收**：宿主在 [`crate::host_loop::Host`] 开段之前 `sweep`（空闲到期 ∪
+//!   超上限 LRU；一段 Run 里一次展开超过上限会暂时超出，下一次开段前收束），并按本段声明
+//!   `retain`（没再声明的 server 当场收）。一段 Run 进行中绝不回收：
+//!   OS 说"这个 App 在场"，它的动作就必须可用。
+//! - **故障仍当场收、不自动重连**：调用路径上的任何故障把这一格的租约置空；下一次**显式展开**才重建。
+//! - **回收留读数**：每次收掉都打一行（哪台、空闲多久/为何被挤掉），`reclaimed_count` 给测试用。
+//!
+//! 代价与边界：**没有后台定时器**——宿主长时间不醒时，已空闲的通道会占着内存到下一次开段；
+//! 这是刻意的（不为回收单独造一个唤醒源）。
 //!
 //! ⇒ **"临时接入"不是含糊状态，是三个精确的落点**：身份（装配期）／在场（那一次活动）／通道
 //! （宿主级）。因此它**不构成"它不该是 App"的理由**——App 契约本来就有"在场"那一格
@@ -56,13 +103,16 @@
 //! ## 效果档（宿主显式背书，只有两档）
 //!
 //! ```text
-//! --mcp <名>=stdio:<命令>              ⇒ unverifiable-write（最严：默认档）
-//! --mcp <名>=stdio:<命令>,read-only    ⇒ read-only（宿主显式背书"这台只读"）
-//! --mcp <名>=stdio:<命令>,timeout=<秒> ⇒ 转发窗口（1–600，缺省 120）
+//! --mcp <名>=stdio:<命令>                        ⇒ unverifiable-write（最严：默认档）
+//! --mcp <名>=stdio:<命令>,read-only              ⇒ read-only（宿主显式背书这台只读）
+//! --mcp <名>=stdio:<命令>,timeout=<秒>           ⇒ 转发窗口（1–600，缺省 120）
+//! --mcp <名>=stdio:<命令>,idle=<秒>              ⇒ 通道空闲租期（0–86400，缺省 1800）
+//! --mcp <名>=stdio:<命令>,keep-alive             ⇒ 不按时间收（等价 idle=0）
 //! ```
 //!
-//! ⚠ **两个后缀都在时 `read-only` 收尾**（`…,timeout=30,read-only`）：解析是**从末尾逐条剥**，
-//! 写反会**静默**落回最严那档（见 [`parse_declaration`]）。
+//! ⚠ 后缀是**从末尾逐条剥**的，几个开关**顺序不限**（每剥掉一个就回到循环开头）；唯一要避的是
+//! 命令/地址本身末尾恰好长得像某个开关。`read-only` 与 `timeout` 写反**不会**静默降档——这一点
+//! 现在有用例钉着（`suffix_options_are_peeled_in_any_order`）。
 //!
 //! **默认档是最严的**：外来工具的写效应**无法同参复核**（再调一次不是复核，是又一次调用），
 //! 因此它落在 [`crate::app_contract::EffectClass::UnverifiableWrite`]——TASK_36 为 terminal 立的
@@ -158,6 +208,7 @@
 use crate::app_contract::EffectClass;
 use crate::core::ActionOutcome;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 pub mod app;
 pub mod remote;
@@ -178,6 +229,21 @@ pub const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
 /// 转发窗口的硬上限（秒）：声明可以调，但**调不过它**。
 pub const MAX_TIMEOUT_SECONDS: u64 = 600;
 
+/// 通道**空闲多久就收**的缺省值（秒）：30 分钟。
+///
+/// 判据：一次对话的停顿通常以秒/分钟计，半小时足够覆盖；而"用了一次的 Playwright 挂一整天"
+/// 是真实成本。有状态的 server（浏览器会话、数据库连接）用 `,keep-alive` 显式退出。
+pub const DEFAULT_CHANNEL_IDLE_SECONDS: u64 = 30 * 60;
+
+/// 声明里 `,idle=` 的上限（秒）：一天。更长的时间用 `,keep-alive` 表达"不要按时间收"。
+pub const MAX_CHANNEL_IDLE_SECONDS: u64 = 24 * 60 * 60;
+
+/// 宿主同时最多开着几条 MCP 通道：超过就按"最久没用的先走"收。
+///
+/// 它不是 MCP 协议的上限，是**这台宿主愿意替外部进程承担的进程数**。真实用法是手边几台；
+/// 8 条足够覆盖，且给重进程（几百 MB 一台）留了边界。
+pub const MAX_OPEN_CHANNELS: usize = 8;
+
 /// 单次调用搬回来的正文上限（字节）：超限**截断并带标记**。
 ///
 /// 它是"读的时候就有的界"：不是读回来再砍（那要求先把无界正文读进内存），而是读到这个数就不再
@@ -188,6 +254,24 @@ pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 ///
 /// 它是"每轮都要摆进主体的视野的动词面"的机械上限，不是一个调优参数。真实 server 远低于它。
 pub const MAX_TOOLS: usize = 128;
+
+/// 一页 `resources/list` 最多搬多少条：超限**这一页不搬**（如实报分类）。
+///
+/// 与 [`MAX_TOOLS`] 同一条理由的另一面：资源不进动词面，但一页回执也要有界——
+/// 不能因为对面说"我有一百万条资源"就把一百万条**搬进回执**。分页游标原样透传，
+/// 因此这个上限**不会**让我们漏掉后面的页，只让这一页如实失败。
+///
+/// 取 32（比 [`MAX_TOOLS`] 小得多）：每条资源的回执带 uri＋四种标签，32 条 × 各自的
+/// 字节上限仍在一条可读回执的量级里；资源是**数据**，没人需要在一页里拿到 128 条。
+/// ⚠ 界画在**本层搬运的那一面**：SDK 已经把那页解析成结构（与 `list_all_tools` 同一个
+/// 既有性质），本层不再把超限的页继续交给 App。
+pub const MAX_RESOURCES_PER_PAGE: usize = 32;
+
+/// 资源 URI 的字节上限：超限**截断并显式标出**（那个 URI 原样读不回来）。
+pub const MAX_RESOURCE_URI_BYTES: usize = 512;
+
+/// 资源**标签**（名字 / 标题 / 说明 / 媒体类型）的字节上限：它们进的是回执，是元数据。
+pub const MAX_RESOURCE_LABEL_BYTES: usize = 200;
 
 /// 骨架（每一轮都在 `tools` 数组里）的字节上限：污染与长度都在这里被机械处理。
 pub const MAX_SKELETON_BYTES: usize = 200;
@@ -349,6 +433,8 @@ pub struct McpDeclaration {
     endpoint: McpEndpoint,
     effect: McpEffect,
     timeout_seconds: u64,
+    /// 空闲多久收（`None` = 用池的缺省值；`Some(0)` = 不按时间收，等价 `keep-alive`）。
+    idle_seconds: Option<u64>,
 }
 
 /// 一条声明走的**通道**。
@@ -417,13 +503,18 @@ impl McpDeclaration {
     pub fn timeout_seconds(&self) -> u64 {
         self.timeout_seconds
     }
+
+    /// 这台 server 的通道空闲多久收（`None` = 用池的缺省值；`Some(0)` = 不按时间收）。
+    pub fn idle_seconds(&self) -> Option<u64> {
+        self.idle_seconds
+    }
 }
 
 /// 解析 `--mcp` 的一条声明；失败给**一个不带取值的稳定短语**（入口直接打出来）。
 ///
 /// 两种形状：
-/// - `<名>=stdio:<命令>[,read-only][,timeout=<秒>]`
-/// - `<名>=<网络地址>[,credential-env=<环境变量名>][,read-only][,timeout=<秒>]`
+/// - `<名>=stdio:<命令>[,read-only][,timeout=<秒>][,keep-alive|,idle=<秒>]`
+/// - `<名>=<网络地址>[,credential-env=<环境变量名>][,read-only][,timeout=<秒>][,keep-alive|,idle=<秒>]`
 ///   （本机回环允许明文地址，只供本地测试）
 ///
 /// 可选项**从末尾逐条剥**（不按逗号切，那样会把命令或地址里的逗号也切掉），顺序不限。
@@ -438,10 +529,35 @@ pub fn parse_declaration(text: &str) -> Result<McpDeclaration, String> {
     let mut body = rest.trim().to_string();
     let mut effect = McpEffect::UnverifiableWrite;
     let mut timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
+    let mut idle_seconds: Option<u64> = None;
     let mut credential_env: Option<String> = None;
     loop {
         if let Some(head) = body.strip_suffix(",read-only") {
             effect = McpEffect::ReadOnly;
+            body = head.to_string();
+            continue;
+        }
+        if let Some(head) = body.strip_suffix(",keep-alive") {
+            if idle_seconds.is_some() {
+                return Err("`keep-alive` 与 `idle=` 只能写一个".to_string());
+            }
+            idle_seconds = Some(0);
+            body = head.to_string();
+            continue;
+        }
+        if let Some((head, raw)) = body.rsplit_once(",idle=") {
+            if idle_seconds.is_some() {
+                return Err("`keep-alive` 与 `idle=` 只能写一个".to_string());
+            }
+            let seconds: u64 = raw
+                .parse()
+                .map_err(|_| "`idle=` 的值不是整数".to_string())?;
+            if seconds > MAX_CHANNEL_IDLE_SECONDS {
+                return Err(format!(
+                    "`idle=` 必须在 0–{MAX_CHANNEL_IDLE_SECONDS} 秒之间（0 = 不按时间收）"
+                ));
+            }
+            idle_seconds = Some(seconds);
             body = head.to_string();
             continue;
         }
@@ -531,6 +647,7 @@ pub fn parse_declaration(text: &str) -> Result<McpDeclaration, String> {
         endpoint,
         effect,
         timeout_seconds,
+        idle_seconds,
     })
 }
 
@@ -614,32 +731,270 @@ pub(crate) fn verb_fits(server: &str, tool: &str) -> bool {
     server.len() + 1 + tool.len() <= name_limit()
 }
 
-/// 宿主给一台 server 的**访问声明**：解析出来的那几样 + 要洗的凭据键名 + **宿主级的通道持有**。
+/// 宿主给一台 server 的**访问声明**：解析出来的那几样 + 要洗的凭据键名 + **它挂在哪张宿主级通道池上**。
 ///
-/// 通道持有放在 [`std::sync::Arc`] 里，因为本类型会被**每一次活动的装配各克隆一份**（那是既有
-/// 装配形状），而子进程必须是宿主级的：第一次展开起，直到宿主退出。本类型**不派生 `Debug`**，
-/// 也**永远不携带任何取值**（洗凭据的读数只报键名、连命令原文都不打印在库里）。
+/// 通道**不归这个对象**：它归宿主级的 [`ChannelPool`]（按 server 名持租约）。本类型只是把
+/// "这台 server 叫什么、怎么洗凭据、租期多长" 带到每一次装配里——因此它可以被每一段 Run
+/// 各克隆一份，而子进程不会跟着装配复制或提前消失。
+///
+/// 本类型**不派生 `Debug`**，也**永远不携带任何取值**（洗凭据的读数只报键名、连命令原文都不
+/// 打印在库里）。
 #[derive(Clone)]
 pub struct McpAccess {
     declaration: McpDeclaration,
     scrub: Vec<String>,
-    state: std::sync::Arc<SharedTransport>,
+    channels: std::sync::Arc<ChannelPool>,
 }
 
-/// 一台 server 在**宿主进程里**的那一格：通道。
+/// **宿主级的通道租约池**：一个 server 名一条租约（子进程或远程会话）。
 ///
-/// `None` = 还没连（首次展开才连），或者**上一次它坏了**（我们把它收了，不自动重连）。
-/// 它跨活动存活（"第一次展开起、宿主退出收"），而"这一次活动有没有展开过"**不在这里**——
-/// 那是 OS 的 `RunExpansion`，每一次 Run 各自从空开始。
-pub(crate) type SharedTransport = std::sync::Mutex<Option<Box<dyn Transport>>>;
+/// 它回答的是"这台 server 的端点还活着吗、活了多久"，**不回答**"这一段 Run 有没有展开过"——
+/// 后者仍然是 OS 的 `RunExpansion`，每段 Run 各自从空开始。
+///
+/// ## 三条纪律
+///
+/// 1. **只在 Run 之间回收**：`sweep()` 由宿主在开一段之前调用。一段 Run 进行中，OS 说"这个
+///    App 在场"，它的动作就必须可用——中途把通道抽掉会让目录里明明在的动作一调就 `transport`。
+///    因此本池**不挂后台定时器**，也不在取通道时驱逐。
+/// 2. **失败即弃、不自动重连**：调用路径上的任何故障由调用方当场清空这一格；下一次
+///    **显式展开**才重建。自动复活会把一次失败变成看不见的重试。
+/// 3. **回收留读数**：空闲回收与上限驱逐都打一行（哪台、空闲多久/为什么），否则"这次为什么
+///    慢了"永远无法解释。
+pub struct ChannelPool {
+    inner: std::sync::Mutex<PoolInner>,
+    max: usize,
+    idle: Duration,
+}
+
+struct PoolInner {
+    /// 按 server 名（不是动词前缀）索引：与 `--mcp` / `mcp.conf` 的声明同一个键。
+    slots: std::collections::BTreeMap<String, std::sync::Arc<ChannelSlot>>,
+    /// 到今天为止收掉过几条通道（空闲 + 驱逐 + 取消声明）：回收读数的计数。
+    reclaimed: usize,
+}
+
+/// 一个 server 名下的那一格：租约 ＋ 它的空闲期限。
+pub(crate) struct ChannelSlot {
+    pub(crate) state: std::sync::Mutex<SlotState>,
+}
+
+pub(crate) struct SlotState {
+    /// `None` = 还没连（首次展开才连），或者**上一次它坏了**（我们把它收了，不自动重连）。
+    pub(crate) lease: Option<Lease>,
+    /// 空闲多久收（`Duration::ZERO` = 不按时间收，等价 `keep-alive`）。
+    pub(crate) idle: Duration,
+}
+
+/// 一条活着的通道：传输本体 ＋ 最后一次被用来做事的时刻。
+pub(crate) struct Lease {
+    pub(crate) transport: Box<dyn Transport>,
+    pub(crate) last_used: Instant,
+}
+
+impl ChannelPool {
+    /// 造一张池（测试与宿主各取所需；生产用 [`ChannelPool::host_default`]）。
+    pub fn new(max: usize, idle: Duration) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            inner: std::sync::Mutex::new(PoolInner {
+                slots: std::collections::BTreeMap::new(),
+                reclaimed: 0,
+            }),
+            max: max.max(1),
+            idle,
+        })
+    }
+
+    /// 生产宿主的缺省租约：最多 [`MAX_OPEN_CHANNELS`] 条，空闲 [`DEFAULT_CHANNEL_IDLE_SECONDS`]
+    /// 秒后收。
+    pub fn host_default() -> std::sync::Arc<Self> {
+        Self::new(
+            MAX_OPEN_CHANNELS,
+            Duration::from_secs(DEFAULT_CHANNEL_IDLE_SECONDS),
+        )
+    }
+
+    /// 一条不与人共享的池（`McpAccess::new` 的旧语义：没有上限、不按时间收）。
+    ///
+    /// 它只给"这个对象自己就是全部世界"的场合用（测试、自包含对象）；生产宿主必须用
+    /// [`ChannelPool::host_default`] 并把同一份交给每一台 access，否则上限与租期都不成立。
+    fn private() -> std::sync::Arc<Self> {
+        Self::new(1, Duration::ZERO)
+    }
+
+    /// 池的缺省空闲期限（声明没写 `,idle=` / `,keep-alive` 时用它）。
+    pub fn default_idle(&self) -> Duration {
+        self.idle
+    }
+
+    /// 取（或建立）一个 server 名下的那一格；同时把这一份声明里的空闲期限落进去。
+    ///
+    /// 同一个名字在下一段 Run 的 `mcp.conf` 里再次被声明时，期限以**最新这份声明**为准；
+    /// 宿主声明与主体声明同名的那一路会在合并时被丢掉，并由 `reset_idle` 把宿主的期限写回。
+    pub(crate) fn slot(&self, name: &str, idle: Duration) -> std::sync::Arc<ChannelSlot> {
+        let mut inner = self.inner.lock().expect("通道池只被短临界区持有");
+        if let Some(slot) = inner.slots.get(name) {
+            slot.state.lock().expect("通道那一格只被短临界区持有").idle = idle;
+            return std::sync::Arc::clone(slot);
+        }
+        let slot = std::sync::Arc::new(ChannelSlot {
+            state: std::sync::Mutex::new(SlotState { lease: None, idle }),
+        });
+        inner
+            .slots
+            .insert(name.to_string(), std::sync::Arc::clone(&slot));
+        slot
+    }
+
+    /// 收掉**当前没有空闲期限**（`Duration::ZERO`）以外、已经闲够了的通道。
+    ///
+    /// 调用点只有一个：宿主**开一段之前**（两次 Run 之间）。回收动作本身不产生模型内容，
+    /// 只留一行读数。
+    pub fn sweep(&self) {
+        let slots: Vec<(String, std::sync::Arc<ChannelSlot>)> = {
+            let inner = self.inner.lock().expect("通道池只被短临界区持有");
+            inner
+                .slots
+                .iter()
+                .map(|(name, slot)| (name.clone(), std::sync::Arc::clone(slot)))
+                .collect()
+        };
+        let now = Instant::now();
+        let mut open: Vec<(String, std::sync::Arc<ChannelSlot>, Instant)> = Vec::new();
+        for (name, slot) in slots {
+            let (idle, last_used) = {
+                let state = slot.state.lock().expect("通道那一格只被短临界区持有");
+                let Some(lease) = state.lease.as_ref() else {
+                    continue;
+                };
+                (state.idle, lease.last_used)
+            };
+            if !idle.is_zero() && now.saturating_duration_since(last_used) >= idle {
+                if let Some(lease) = slot
+                    .state
+                    .lock()
+                    .expect("通道那一格只被短临界区持有")
+                    .lease
+                    .take()
+                {
+                    let idle_seconds = now.saturating_duration_since(last_used).as_secs();
+                    self.reclaimed();
+                    drop(lease);
+                    eprintln!(
+                        "[mcp] 收掉空闲通道 `{name}`（空闲 {idle_seconds} 秒 ≥ {} 秒）",
+                        idle.as_secs()
+                    );
+                }
+            } else {
+                open.push((name, slot, last_used));
+            }
+        }
+
+        // 上限：**最久没用的先走**。走到这里时上一段 Run 已经收场，所以租约被收不会让任何
+        // "在场"的动作变成假的——下一段 Run 本来就从未展开开始。
+        let excess = open.len().saturating_sub(self.max);
+        if excess > 0 {
+            open.sort_by_key(|(_, _, last_used)| *last_used);
+            for (name, slot, _) in open.into_iter().take(excess) {
+                if let Some(lease) = slot
+                    .state
+                    .lock()
+                    .expect("通道那一格只被短临界区持有")
+                    .lease
+                    .take()
+                {
+                    self.reclaimed();
+                    drop(lease);
+                    eprintln!(
+                        "[mcp] 收掉通道 `{name}`（同时打开的通道超过上限 {}）",
+                        self.max
+                    );
+                }
+            }
+        }
+    }
+
+    /// 只保留**这一段 Run 仍然声明着**的 server；其余的通道收掉。
+    ///
+    /// 它兑现的是"主体改 `mcp.conf`，下一段就少一台"：删掉那一行之后，那一台不该继续
+    /// 在宿主里占着一个进程。
+    pub fn retain(&self, active: &[String]) {
+        let removed: Vec<(String, std::sync::Arc<ChannelSlot>)> = {
+            let mut inner = self.inner.lock().expect("通道池只被短临界区持有");
+            let names: Vec<String> = inner.slots.keys().cloned().collect();
+            names
+                .into_iter()
+                .filter(|name| !active.iter().any(|declared| declared == name))
+                .filter_map(|name| inner.slots.remove(&name).map(|slot| (name, slot)))
+                .collect()
+        };
+        for (name, slot) in removed {
+            if let Some(lease) = slot
+                .state
+                .lock()
+                .expect("通道那一格只被短临界区持有")
+                .lease
+                .take()
+            {
+                self.reclaimed();
+                drop(lease);
+                eprintln!("[mcp] 收掉 `{name}` 的通道（这一段没有再声明它）");
+            }
+        }
+    }
+
+    /// 现在开着几条通道。
+    pub fn open_count(&self) -> usize {
+        let slots: Vec<std::sync::Arc<ChannelSlot>> = {
+            let inner = self.inner.lock().expect("通道池只被短临界区持有");
+            inner.slots.values().map(std::sync::Arc::clone).collect()
+        };
+        slots
+            .iter()
+            .filter(|slot| {
+                slot.state
+                    .lock()
+                    .expect("通道那一格只被短临界区持有")
+                    .lease
+                    .is_some()
+            })
+            .count()
+    }
+
+    /// 到今天为止收掉过几条（空闲 / 驱逐 / 取消声明）。
+    pub fn reclaimed_count(&self) -> usize {
+        self.inner.lock().expect("通道池只被短临界区持有").reclaimed
+    }
+
+    fn reclaimed(&self) {
+        self.inner.lock().expect("通道池只被短临界区持有").reclaimed += 1;
+    }
+}
 
 impl McpAccess {
-    /// 用一份解析好的声明与要洗的键名建立访问声明（通道还没建）。
+    /// 用一份解析好的声明与要洗的键名建立访问声明（通道还没建；租约归一张私有池）。
     pub fn new(declaration: McpDeclaration, scrub: Vec<String>) -> Self {
+        Self::with_pool(declaration, scrub, ChannelPool::private())
+    }
+
+    /// 把这份声明挂到**宿主共用的那张池**上（生产路径）。
+    ///
+    /// `--mcp` 与 `mcp.conf` 必须走同一个池：寿命规则只有一条，不因为谁声明的而分岔。
+    pub fn with_pool(
+        declaration: McpDeclaration,
+        scrub: Vec<String>,
+        channels: std::sync::Arc<ChannelPool>,
+    ) -> Self {
+        let idle = declaration
+            .idle_seconds()
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| channels.default_idle());
+        // 先把这一份声明登记的期限落进池里（即使这一台这一段没被展开，`retain` 也知道它属于
+        // 当前声明集）。真正取用那一格时仍按名字现取，见 [`McpAccess::slot`]。
+        let _ = channels.slot(declaration.name(), idle);
         Self {
             declaration,
             scrub,
-            state: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            channels,
         }
     }
 
@@ -652,11 +1007,26 @@ impl McpAccess {
         scrub: Vec<String>,
         transport: Box<dyn Transport>,
     ) -> Self {
-        Self {
-            declaration,
-            scrub,
-            state: std::sync::Arc::new(std::sync::Mutex::new(Some(transport))),
-        }
+        let access = Self::new(declaration, scrub);
+        let slot = access.slot();
+        slot.state.lock().expect("通道那一格只被短临界区持有").lease = Some(Lease {
+            transport,
+            last_used: Instant::now(),
+        });
+        access
+    }
+
+    /// 把这条声明的空闲期限重新落进池里。
+    ///
+    /// 用在**同名冲突**那一处：主体清单里的同名行先被构造成 access（这一步会写池里的期限），
+    /// 随后按"宿主为准"被丢掉——若不把宿主的期限写回去，一行同名文本就能偷偷改掉宿主那台的租期。
+    pub(crate) fn reset_idle(&self) {
+        let idle = self
+            .declaration
+            .idle_seconds()
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| self.channels.default_idle());
+        self.channels.slot(self.declaration.name(), idle);
     }
 
     /// 宿主面的声明。
@@ -664,9 +1034,22 @@ impl McpAccess {
         &self.declaration
     }
 
-    /// 共享的那一格（本模块内使用）。
-    pub(crate) fn state(&self) -> &std::sync::Arc<SharedTransport> {
-        &self.state
+    /// 宿主共用的那张池（宿主在开段之前用它 sweep / retain）。
+    pub fn channels(&self) -> std::sync::Arc<ChannelPool> {
+        std::sync::Arc::clone(&self.channels)
+    }
+
+    /// 这个 server 名下的那一格（本模块内使用）。
+    ///
+    /// **每次按名字现取**、不把 `Arc` 存在 access 里：`retain` 可以把一格从池里摘掉，下一次
+    /// 声明/展开会重新登记；否则一个仍被旧对象握着的格子会绕过上限与租期继续活着。
+    pub(crate) fn slot(&self) -> std::sync::Arc<ChannelSlot> {
+        let idle = self
+            .declaration
+            .idle_seconds()
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| self.channels.default_idle());
+        self.channels.slot(self.declaration.name(), idle)
     }
 
     /// 要洗的凭据键名（本模块内使用）。
@@ -725,6 +1108,39 @@ pub trait Transport: Send {
         arguments: serde_json::Value,
         timeout: std::time::Duration,
     ) -> Result<CallReply, CallFault>;
+
+    /// 这条通道对面声明了 `resources` 吗（**能力事实，不是我们的开关**）。
+    ///
+    /// 默认 `false`：旧基线通道（`stdio` / `remote`）与测试替身没有资源面，
+    /// 展开时因此**一个资源动作都不多出**——既有 tools-only 的行为逐字节不变。
+    fn supports_resources(&self) -> bool {
+        false
+    }
+
+    /// 拉一页资源清单（游标原样透传）。
+    ///
+    /// 默认就是"这条通道没有资源面"：它报的是**清单拉不到**（[`McpFailure::ToolsFailed`]
+    /// 是既有词表里那一格，不为资源另造一个对外词）。真正会被调到的实现只有
+    /// [`rmcp_host::RmcpTransport`]——上层只在 [`Transport::supports_resources`] 为真时
+    /// 才挂那两个动作，所以这条默认值**不该在正常路径上被走到**。
+    fn list_resources(
+        &mut self,
+        _cursor: Option<String>,
+        _timeout: std::time::Duration,
+    ) -> Result<ResourcePage, CallFault> {
+        Err(CallFault::Refused(McpFailure::ToolsFailed))
+    }
+
+    /// 读一条资源的正文（**有界**：文本截断带标记，blob 不搬原文）。
+    ///
+    /// 默认同 [`Transport::list_resources`]：没有资源面的通道如实拒绝。
+    fn read_resource(
+        &mut self,
+        _uri: &str,
+        _timeout: std::time::Duration,
+    ) -> Result<Vec<ResourceContent>, CallFault> {
+        Err(CallFault::Refused(McpFailure::ToolsFailed))
+    }
 
     /// 订阅**工具清单变更**（`subscriptions/listen`）。
     ///
@@ -790,6 +1206,78 @@ pub struct RawTool {
     pub description: Option<String>,
     /// 对面的参数模式原文（外部冻结形状；我们只按机械规则读得懂的那部分）。
     pub input_schema: serde_json::Value,
+}
+
+/// 对面清单里的一条资源（**不是动词**：资源是数据，只经两个通用只读动作取用）。
+///
+/// 所有文本都是**外来文本**：构造时消毒 + 截断（[`foreign_line`] / [`MAX_RESOURCE_LABEL_BYTES`]），
+/// 因为回执是行式版式，对面塞一个换行就能伪造一行读数。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawResource {
+    /// 资源的 URI（读取时原样递回去；超长会截断并置 [`RawResource::uri_truncated`]）。
+    pub uri: String,
+    /// 对面的程序名。
+    pub name: String,
+    /// 对面的展示标题（可选）。
+    pub title: Option<String>,
+    /// 对面的一句话说明（可选）。
+    pub description: Option<String>,
+    /// 媒体类型（可选）。
+    pub mime_type: Option<String>,
+    /// 对面自报的原始字节数（可选；**不校验**，它是读数不是承诺）。
+    pub size: Option<u64>,
+    /// URI 超长被截断了吗。
+    ///
+    /// 截断的 URI **原样读不回来**，因此这一格必须显式出现在回执里——静默截断违禁。
+    pub uri_truncated: bool,
+}
+
+/// 一页资源清单。
+///
+/// 游标是**对面的语义**：我们只透传，不解释、不编号、不自己造分页。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ResourcePage {
+    /// 这一页的资源。
+    pub resources: Vec<RawResource>,
+    /// 下一页的游标（没有 = 这是最后一页）。
+    pub next_cursor: Option<String>,
+}
+
+/// 一次 `resources/read` 搬回来的一块正文（**有界**：正文在通道里就截断）。
+///
+/// 一次答复最多搬**一块**：MCP 允许回多块内容，而一层只搬第一块，其余用
+/// [`ResourceContent::omitted`] 如实报数（不静默丢）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceContent {
+    /// 这一块自己带的 URI（对面会再报一次，可能与我们请求的不同）。
+    pub uri: String,
+    /// 媒体类型（可选）。
+    pub mime_type: Option<String>,
+    /// 正文——最多一块，且二进制不搬原文。
+    pub body: ResourceBody,
+    /// 同一次答复里我们**没搬**的后续内容块数（0 = 只有这一块）。
+    pub omitted: usize,
+}
+
+/// 资源正文的两种形状（＋不认识的形状）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResourceBody {
+    /// 文本正文（已在 [`MAX_TEXT_BYTES`] 处截断；`text_bytes` 是截断前的读数）。
+    Text {
+        /// 截断后的正文。
+        text: String,
+        /// 原文一共多少字节。
+        text_bytes: usize,
+        /// 有没有截断。
+        truncated: bool,
+    },
+    /// 二进制正文：**不搬原文字节**，只报它有多大。
+    Blob {
+        /// 对面给的 base64 文本有多少字节（不是解码后的字节数）。
+        encoded_bytes: usize,
+    },
+    /// 这一块既不是文本也不是 blob（SDK 的枚举留了扩展位）：如实说"搬不了"。
+    Unsupported,
 }
 
 /// 一次调用的答复（已经是**有界**的形状：正文在通道里就被截断）。
@@ -909,11 +1397,15 @@ pub fn credential_names() -> Vec<String> {
 /// 主体自己的外部工具清单（自持物，与 `notes` 同层、在环境根里）。
 pub const SELF_DECLARATIONS_FILE: &str = "mcp.conf";
 
-/// 读主体自己的清单：一行一条 `<名>=stdio:<命令>[,read-only][,timeout=<秒>]`；空行与 `#` 跳过。
+/// 读主体自己的清单：一行一条 `<名>=stdio:<命令>[,read-only][,timeout=<秒>][,keep-alive|,idle=<秒>]`；
+/// 空行与 `#` 跳过。通道挂到宿主共用的那张池上（与 `--mcp` 同一套租期规则）。
 ///
 /// 坏行**跳过并记一句话**，不让整段起不来——这是主体自己的文件，fail-soft 才合理
 /// （与宿主 `--mcp` 的 fail-closed 是两种情形：那份是启动者写的，错了该拦）。
-pub fn read_self_declarations(env_root: &Path) -> (Vec<McpAccess>, Vec<String>) {
+pub fn read_self_declarations(
+    env_root: &Path,
+    channels: &std::sync::Arc<ChannelPool>,
+) -> (Vec<McpAccess>, Vec<String>) {
     let mut accesses: Vec<McpAccess> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
     if !stdio_available() {
@@ -950,7 +1442,11 @@ pub fn read_self_declarations(env_root: &Path) -> (Vec<McpAccess>, Vec<String>) 
                     ));
                     continue;
                 }
-                accesses.push(McpAccess::new(declaration, credential_names()));
+                accesses.push(McpAccess::with_pool(
+                    declaration,
+                    credential_names(),
+                    std::sync::Arc::clone(channels),
+                ));
             }
             Err(reason) => notes.push(format!(
                 "{SELF_DECLARATIONS_FILE} 第 {} 行读不懂：{reason}",
@@ -974,6 +1470,13 @@ pub fn merge_own_declarations(
             .iter()
             .any(|each| each.declaration().name() == name.as_str())
         {
+            // 宿主的命令与**租期**都归宿主：同名行不能借 `,keep-alive` 改掉它的寿命。
+            if let Some(existing) = merged
+                .iter()
+                .find(|each| each.declaration().name() == name.as_str())
+            {
+                existing.reset_idle();
+            }
             notes.push(format!(
                 "`{name}` 与宿主声明同名，以宿主为准（不能用它替换那条命令）"
             ));
@@ -992,11 +1495,12 @@ pub fn declarations_for_run(
     base: &[McpAccess],
     env_root: &Path,
     has_terminal: bool,
+    channels: &std::sync::Arc<ChannelPool>,
 ) -> (Vec<McpAccess>, Vec<String>) {
     if !has_terminal {
         return (base.to_vec(), Vec::new());
     }
-    let (own, notes) = read_self_declarations(env_root);
+    let (own, notes) = read_self_declarations(env_root, channels);
     let (merged, conflicts) = merge_own_declarations(base, own);
     let mut all = notes;
     all.extend(conflicts);
@@ -1032,7 +1536,8 @@ mod tests {
              db=stdio:node db.js,read-only,timeout=30\nbrowser=stdio:other\n",
         )
         .unwrap();
-        let (accesses, notes) = read_self_declarations(&root);
+        let channels = ChannelPool::host_default();
+        let (accesses, notes) = read_self_declarations(&root, &channels);
         let names: Vec<&str> = accesses
             .iter()
             .map(|each| each.declaration().name())
@@ -1054,7 +1559,8 @@ mod tests {
             ),
         )
         .unwrap();
-        let (accesses, notes) = read_self_declarations(&root);
+        let channels = ChannelPool::host_default();
+        let (accesses, notes) = read_self_declarations(&root, &channels);
         let names: Vec<&str> = accesses
             .iter()
             .map(|each| each.declaration().name())
@@ -1086,9 +1592,213 @@ mod tests {
             parse_declaration("host=stdio:cmd").expect("合法"),
             credential_names(),
         )];
-        let (mcp, notes) = declarations_for_run(&host, &root, false);
+        let channels = ChannelPool::host_default();
+        let (mcp, notes) = declarations_for_run(&host, &root, false, &channels);
         assert_eq!(mcp.len(), 1, "没有终端档 ⇒ 只有宿主声明");
         assert_eq!(mcp[0].declaration().name(), "host");
         assert!(notes.is_empty(), "不读也不记");
+    }
+
+    // ---------------------------------------------------------------------
+    // 通道租约（2026-10-25）：空闲期限、上限、取消声明
+    // ---------------------------------------------------------------------
+
+    /// 一条只会被池子搬来搬去的假通道：它唯一要证明的事是"我什么时候真的被收掉"。
+    struct FakeTransport {
+        dropped: std::sync::Arc<AtomicU32>,
+    }
+
+    impl Drop for FakeTransport {
+        fn drop(&mut self) {
+            self.dropped.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl Transport for FakeTransport {
+        fn connect(&mut self, _: Duration) -> Result<(), CallFault> {
+            Ok(())
+        }
+        fn list_tools(&mut self, _: Duration) -> Result<Vec<RawTool>, CallFault> {
+            Err(CallFault::Refused(McpFailure::Transport))
+        }
+        fn call_tool(
+            &mut self,
+            _: &str,
+            _: serde_json::Value,
+            _: Duration,
+        ) -> Result<CallReply, CallFault> {
+            Err(CallFault::Refused(McpFailure::Transport))
+        }
+    }
+
+    fn fake_lease(
+        pool: &std::sync::Arc<ChannelPool>,
+        name: &str,
+        idle: Duration,
+        age: Duration,
+    ) -> std::sync::Arc<AtomicU32> {
+        let slot = pool.slot(name, idle);
+        let dropped = std::sync::Arc::new(AtomicU32::new(0));
+        slot.state.lock().expect("通道那一格只被短临界区持有").lease = Some(Lease {
+            transport: Box::new(FakeTransport {
+                dropped: std::sync::Arc::clone(&dropped),
+            }),
+            last_used: Instant::now()
+                .checked_sub(age)
+                .expect("测试用的时间偏移不该越过时钟起点"),
+        });
+        dropped
+    }
+
+    #[test]
+    fn suffix_options_are_peeled_in_any_order() {
+        let declaration = parse_declaration("notes=stdio:cmd,read-only,timeout=30").expect("合法");
+        assert_eq!(declaration.effect(), McpEffect::ReadOnly);
+        assert_eq!(declaration.timeout_seconds(), 30);
+        assert_eq!(declaration.idle_seconds(), None);
+
+        let declaration =
+            parse_declaration("notes=stdio:cmd,timeout=30,read-only,idle=7").expect("合法");
+        assert_eq!(declaration.effect(), McpEffect::ReadOnly);
+        assert_eq!(declaration.timeout_seconds(), 30);
+        assert_eq!(declaration.idle_seconds(), Some(7));
+    }
+
+    #[test]
+    fn a_declaration_can_carry_its_own_idle_lease() {
+        let idle = parse_declaration("lab=stdio:node x,idle=5").expect("合法");
+        assert_eq!(idle.idle_seconds(), Some(5));
+        let kept = parse_declaration("lab=stdio:node x,keep-alive").expect("合法");
+        assert_eq!(kept.idle_seconds(), Some(0));
+
+        assert!(
+            parse_declaration("lab=stdio:node x,keep-alive,idle=5").is_err(),
+            "两种写法只能选一个"
+        );
+        assert!(
+            parse_declaration(&format!(
+                "lab=stdio:node x,idle={}",
+                MAX_CHANNEL_IDLE_SECONDS + 1
+            ))
+            .is_err(),
+            "超过上限要拒绝，不能悄悄截断"
+        );
+        assert!(
+            parse_declaration("lab=stdio:node x,idle=abc").is_err(),
+            "不是整数就拒绝"
+        );
+    }
+
+    #[test]
+    fn the_pool_reaps_idle_channels_but_never_keep_alive_ones() {
+        let pool = ChannelPool::new(8, Duration::from_secs(1));
+        let idle = fake_lease(
+            &pool,
+            "idle",
+            Duration::from_secs(1),
+            Duration::from_secs(5),
+        );
+        let kept = fake_lease(&pool, "kept", Duration::ZERO, Duration::from_secs(5));
+
+        assert_eq!(pool.open_count(), 2);
+        pool.sweep();
+        assert_eq!(pool.open_count(), 1, "只有闲够的那一台被收");
+        assert_eq!(pool.reclaimed_count(), 1);
+        assert_eq!(idle.load(Ordering::SeqCst), 1);
+        assert_eq!(kept.load(Ordering::SeqCst), 0, "keep-alive 不按时间收");
+    }
+
+    #[test]
+    fn the_pool_reclaims_the_least_recently_used_when_over_the_cap() {
+        let pool = ChannelPool::new(2, Duration::from_secs(60));
+        let oldest = fake_lease(&pool, "a", Duration::from_secs(60), Duration::from_secs(30));
+        let middle = fake_lease(&pool, "b", Duration::from_secs(60), Duration::from_secs(20));
+        let newest = fake_lease(&pool, "c", Duration::from_secs(60), Duration::from_secs(10));
+
+        pool.sweep();
+        assert_eq!(pool.open_count(), 2, "上限是硬边界");
+        assert_eq!(oldest.load(Ordering::SeqCst), 1, "最久没用的先走");
+        assert_eq!(middle.load(Ordering::SeqCst), 0);
+        assert_eq!(newest.load(Ordering::SeqCst), 0);
+        assert_eq!(pool.reclaimed_count(), 1);
+    }
+
+    #[test]
+    fn removing_a_declaration_closes_its_channel_too() {
+        let pool = ChannelPool::new(8, Duration::from_secs(60));
+        let kept = fake_lease(&pool, "a", Duration::ZERO, Duration::from_secs(1));
+        let removed_b = fake_lease(&pool, "b", Duration::ZERO, Duration::from_secs(1));
+        let removed_c = fake_lease(&pool, "c", Duration::ZERO, Duration::from_secs(1));
+
+        pool.retain(&["a".to_string()]);
+        assert_eq!(kept.load(Ordering::SeqCst), 0);
+        assert_eq!(removed_b.load(Ordering::SeqCst), 1);
+        assert_eq!(removed_c.load(Ordering::SeqCst), 1);
+        assert_eq!(pool.open_count(), 1);
+    }
+
+    #[test]
+    fn the_own_file_and_the_launcher_share_one_pool() {
+        let root = env_root("one-pool");
+        std::fs::write(
+            root.join(SELF_DECLARATIONS_FILE),
+            "own=stdio:node x,keep-alive\n",
+        )
+        .unwrap();
+        let pool = ChannelPool::host_default();
+        let host = vec![McpAccess::with_pool(
+            parse_declaration("host=stdio:node h").expect("合法"),
+            credential_names(),
+            std::sync::Arc::clone(&pool),
+        )];
+        let (declared, notes) = declarations_for_run(&host, &root, true, &pool);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(declared.len(), 2);
+        assert!(
+            std::sync::Arc::ptr_eq(&declared[0].channels(), &declared[1].channels()),
+            "两种声明来源必须落在同一张池上——寿命规则只有一条"
+        );
+        assert_eq!(
+            declared[1]
+                .slot()
+                .state
+                .lock()
+                .expect("通道那一格只被短临界区持有")
+                .idle,
+            Duration::ZERO,
+            "`keep-alive` 落到这一格上"
+        );
+    }
+
+    #[test]
+    fn a_same_name_own_line_cannot_change_the_launcher_lease() {
+        let root = env_root("lease-conflict");
+        std::fs::write(
+            root.join(SELF_DECLARATIONS_FILE),
+            "db=stdio:own-command,keep-alive\n",
+        )
+        .unwrap();
+        let pool = ChannelPool::host_default();
+        let host = vec![McpAccess::with_pool(
+            parse_declaration("db=stdio:host-command,idle=60").expect("合法"),
+            credential_names(),
+            std::sync::Arc::clone(&pool),
+        )];
+        let (declared, notes) = declarations_for_run(&host, &root, true, &pool);
+        assert_eq!(declared.len(), 1, "同名以宿主为准");
+        assert!(
+            notes.iter().any(|note| note.contains("以宿主为准")),
+            "{notes:?}"
+        );
+        assert_eq!(
+            declared[0]
+                .slot()
+                .state
+                .lock()
+                .expect("通道那一格只被短临界区持有")
+                .idle,
+            Duration::from_secs(60),
+            "同名行不能借 keep-alive 改掉宿主那台的租期"
+        );
     }
 }

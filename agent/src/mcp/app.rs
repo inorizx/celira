@@ -17,6 +17,17 @@
 //!    只说"这是一段 JSON 文本"而不说里面有什么键，读的人只能猜、只能试。
 //!    它进的是**详情**（按需取），**不进骨架**（每一轮都在前缀里）。
 //!
+//! ## 资源数据面：两个通用只读动作（2026-10-25）
+//!
+//! 对面在握手时声明 `resources`，展开后动词面里就多两条**合成**动作：
+//! `<名>_resources_list`（可选 `cursor`）与 `<名>_resources_read`（必填 `uri`）。
+//! 它们不是对面的工具：不进 [`map_tools`] 的清单检查，名字与真实工具冲突时**让位**给对面
+//! （见 [`resource_specs`]）。两条都是 [`McpEffect::ReadOnly`]——**与宿主给整台的效果档无关**：
+//! 读资源改变不了外面的世界，`,`read-only` 那句背书说的是工具。
+//!
+//! `resources_list` 只回元数据与下一页游标；`resources_read` 才取正文（文本有界、blob 不搬原文）。
+//! 正文**不写回上下文**：它只出现在那一次调用的回执里，App 自己不留副本。
+//!
 //! ## 转发出去了、答复回来了就是成功
 //!
 //! 对面的 `isError` 是**读数**（工具自己说"这事没成"），不是我们的失败分类。这与 terminal 的
@@ -46,7 +57,7 @@
 //! 文本搬、转发前还原（形状说明进详情卡），值本来就是字符串（[`ActionParams`] 只装标量）。
 //! 从前那四种本地拒绝塌成一个分类，缺的是**值级诊断**——按"接不住结构"去开刀会做错事。
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value};
 
@@ -60,9 +71,10 @@ use crate::core::{
 use crate::foundation::{AgentId, OperationId, RunId};
 
 use super::{
-    CallFault, CallReply, MAX_PARAM_DOC_BYTES, MAX_SKELETON_BYTES, MAX_TEXT_BYTES,
+    CallFault, CallReply, Lease, MAX_PARAM_DOC_BYTES, MAX_SKELETON_BYTES, MAX_TEXT_BYTES,
     MAX_TIMEOUT_SECONDS, McpAccess, McpEffect, McpEndpoint, McpFailure, McpNotification,
-    PARAM_TIMEOUT, RawTool, RmcpTransport, Transport, clip, fault_outcome, foreign_line, sanitize,
+    PARAM_TIMEOUT, RawTool, ResourceBody, ResourceContent, ResourcePage, RmcpTransport, Transport,
+    clip, fault_outcome, foreign_line, sanitize,
 };
 
 /// 形状说明里最多列几个键；多的**如实报数**，不静默丢。
@@ -77,6 +89,40 @@ const MAX_SHAPE_KEYS: usize = 8;
 /// （`名 = 说明（必填）`），而那是**外来文本**——参数一多就必然超。
 /// 超了就**老实走"先看格式"**：多一个回合，胜过目录里塞一段读不完的话。
 const EXEMPT_PARAMS_BUDGET: usize = 120;
+
+/// 资源数据面那两个通用动作的后缀（动词名 = `<server>_<后缀>`）。
+///
+/// 它们**不是**对面上报的工具名：对面若真的报了同名工具，那两个合成动作会**跳过**
+/// （见 [`resource_specs`]）——工具名归对面，我们不能把它的动词改个名字。
+const SUFFIX_RESOURCES_LIST: &str = "resources_list";
+const SUFFIX_RESOURCES_READ: &str = "resources_read";
+
+/// 资源清单的分页参数名。
+const PARAM_CURSOR: &str = "cursor";
+
+/// 资源读取的 URI 参数名。
+const PARAM_URI: &str = "uri";
+
+/// 通道报告的那两行洗凭据读数：`(洗掉几个, 洗不掉的键名)`；`None` = 这条通道不起子进程。
+///
+/// 用具名类型收一下：它同时出现在调用返回、三种回执渲染与 `push_scrub` 上，
+/// 原样写出来会是一串括号（也过不了 clippy 的 `type_complexity`）。
+type ScrubReading = Option<(usize, Vec<String>)>;
+
+/// 一条动词面条目的**来源**。
+///
+/// 三种条目共用一个结构（参数表、骨架、详情、效果档），但**调用形状不同**：
+/// 工具走 `tools/call` 转发，资源走 `resources/list` / `resources/read` 两个通用动作。
+/// 它也是"每条动作带自己的效果"的落点——见 [`ToolSpec::effect`]。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpecKind {
+    /// 对面清单里的一条工具（名字与参数表都来自对面）。
+    Tool,
+    /// 合成的只读动作：列资源（不是对面的一条工具）。
+    ResourcesList,
+    /// 合成的只读动作：读一条资源（不是对面的一条工具）。
+    ResourcesRead,
+}
 
 /// 一条动词的**还原类型**：我们的参数全是字符串，转发之前要按对面声明的类型还原回去。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,8 +282,15 @@ impl JsonKind {
 struct ToolSpec {
     /// 我们的动词名：`<server>_<对面原名>`。
     action: String,
-    /// 对面的原名（转发时用它——**对面只认识自己的名字**）。
+    /// 对面的原名（转发时用它——**对面只认识自己的名字**）。合成动作没有这一格。
     tool: String,
+    /// 这一条是真实工具还是资源数据面的通用动作。
+    kind: SpecKind,
+    /// **这一条自己的**效果档。
+    ///
+    /// 工具跟宿主给这台 server 的声明走（默认最严、`,read-only` 才只读）；
+    /// 资源动作**永远只读**——读资源改变不了外面的世界，与那句背书无关。
+    effect: McpEffect,
     skeleton: String,
     details: String,
     params: Vec<ParamSpec>,
@@ -299,7 +352,8 @@ impl McpApp {
         let description = format!(
             "外部来源的 App：`{}` 那台 server 暴露的动词（宿主装机时声明，装了才在；用之前先展开）。\
              调用是转发：窗口 {} 秒（逐动词可以调），回执正文 ≤{} KiB 且超限截断带标记，\
-             非文本内容只报类型与条数、不透传；子进程环境里洗掉凭据。效果档 = {}（宿主声明）。",
+             非文本内容只报类型与条数、不透传；子进程环境里洗掉凭据。效果档 = {}（宿主声明）。\
+             若它声明 resources，展开后另有两个只读资源动作（只给清单与按需读取，资源本身不会各自变成动词）。",
             declaration.name(),
             declaration.timeout_seconds(),
             MAX_TEXT_BYTES / 1024,
@@ -318,20 +372,26 @@ impl McpApp {
         Capabilities::of(self.specs.iter().map(ToolSpec::capability).collect())
     }
 
-    /// 本件的效果档。
-    fn effect(&self) -> McpEffect {
-        self.access.declaration().effect()
-    }
-
     /// 转发的窗口（声明的那个）。
     fn default_timeout(&self) -> Duration {
         Duration::from_secs(self.access.declaration().timeout_seconds())
     }
 
-    /// 一次调用。
+    /// 一次调用：真实工具走转发，资源数据面的两个通用动作走只读读取。
+    ///
+    /// 三条路径共用同一份参数还原与诊断（[`build_arguments`]）；**效果档按每一条自己那一格**
+    /// （[`ToolSpec::effect`]）——工具跟宿主声明走，资源动作永远只读。
     fn call(&mut self, spec_index: usize, params: &ActionParams) -> ActionOutcome {
-        let effect = self.effect();
-        if self.specs[spec_index].trouble.is_some() {
+        let (kind, effect, action, troubled) = {
+            let spec = &self.specs[spec_index];
+            (
+                spec.kind,
+                spec.effect,
+                spec.action.clone(),
+                spec.trouble.is_some(),
+            )
+        };
+        if troubled {
             return ActionOutcome::failure(McpFailure::UnsupportedSchema.as_str());
         }
         let (arguments, timeout) =
@@ -340,35 +400,81 @@ impl McpApp {
                 // 本地拒绝照旧是 `invalid-argument` 一个词，**诊断贴在它旁边**（见 `refused_arguments`）。
                 Err(refusal) => return refused_arguments(&refusal),
             };
-        let tool = self.specs[spec_index].tool.clone();
         let name = self.access.declaration().name().to_string();
-        let mut state = self
-            .access
-            .state()
-            .lock()
-            .expect("通道那一格只被短临界区持有");
-        let reply = match state.as_mut() {
-            Some(transport) => transport.call_tool(&tool, arguments, timeout),
-            // 通道不在（还没展开、或者上一次它坏了被我们收了）：调用路径上**不自动重连**。
-            None => return ActionOutcome::failure(McpFailure::Transport.as_str()),
+        let content = match kind {
+            SpecKind::Tool => {
+                let tool = self.specs[spec_index].tool.clone();
+                through_channel(&self.access, |transport| {
+                    transport.call_tool(&tool, arguments, timeout)
+                })
+                .map(|(reply, reading)| {
+                    let receipt = render_reply(&name, &tool, &reply, reading);
+                    vec![ContentBlock::new(action.clone(), receipt)]
+                })
+            }
+            SpecKind::ResourcesList => {
+                // 空游标与"没给"是同一件事：都从第一页开始。
+                let cursor = arguments
+                    .get(PARAM_CURSOR)
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .filter(|cursor| !cursor.is_empty());
+                through_channel(&self.access, |transport| {
+                    transport.list_resources(cursor, timeout)
+                })
+                .map(|(page, reading)| {
+                    let receipt = render_resource_list(&name, &page, reading);
+                    vec![ContentBlock::new(action.clone(), receipt)]
+                })
+            }
+            SpecKind::ResourcesRead => {
+                let uri = arguments
+                    .get(PARAM_URI)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                through_channel(&self.access, |transport| {
+                    transport.read_resource(&uri, timeout)
+                })
+                .map(|(bodies, reading)| {
+                    let receipt = render_resource_read(&name, &uri, &bodies, reading);
+                    vec![ContentBlock::new(action.clone(), receipt)]
+                })
+            }
         };
-        match reply {
-            Ok(reply) => {
-                let reading = state
-                    .as_ref()
-                    .and_then(|transport| transport.credential_reading());
-                let receipt = render_reply(&name, &tool, &reply, reading);
-                ActionOutcome::success(vec![ContentBlock::new(
-                    self.specs[spec_index].action.clone(),
-                    receipt,
-                )])
-            }
-            Err(fault) => {
-                // 我们自己的机械故障：这条通道不能再用了（进程可能要收，也可能已经死了）。
-                // 收掉它不重连——"再来一次"是**下一次显式展开**的事，不是调用路径上的事。
-                *state = None;
-                fault_outcome(&fault, effect)
-            }
+        match content {
+            Ok(blocks) => ActionOutcome::success(blocks),
+            // 资源动作的效果是只读 ⇒ `fault_outcome` 不会落进 `unknown`：
+            // 读不改变世界，没有"可能已经发生"这一格。
+            Err(fault) => fault_outcome(&fault, effect),
+        }
+    }
+}
+
+/// 在通道那一格上做一次调用：拿锁 → 调用 → 读凭据读数；**故障即收通道**。
+///
+/// 收掉不重连：`再来一次`是**下一次显式展开**的事，不是调用路径上的事（既有纪律，未改）。
+fn through_channel<T>(
+    access: &McpAccess,
+    call: impl FnOnce(&mut dyn Transport) -> Result<T, CallFault>,
+) -> Result<(T, ScrubReading), CallFault> {
+    let slot = access.slot();
+    let mut state = slot.state.lock().expect("通道那一格只被短临界区持有");
+    let Some(lease) = state.lease.as_mut() else {
+        // 通道不在（还没展开、或者上一次它坏了被我们收了）：调用路径上**不自动重连**。
+        return Err(CallFault::Refused(McpFailure::Transport));
+    };
+    // 租期从**最后一次使用**起算；一次调用本身跨多久不算空闲。
+    lease.last_used = Instant::now();
+    match call(&mut *lease.transport) {
+        Ok(value) => {
+            let reading = lease.transport.credential_reading();
+            Ok((value, reading))
+        }
+        Err(fault) => {
+            // 我们自己的机械故障：这条通道不能再用了（进程可能要收，也可能已经死了）。
+            state.lease = None;
+            Err(fault)
         }
     }
 }
@@ -443,13 +549,10 @@ impl AppPort for McpApp {
     fn present(&mut self) -> Result<(), ExpansionRefusal> {
         let declaration = self.access.declaration().clone();
         let timeout = self.default_timeout();
-        let mut state = self
-            .access
-            .state()
-            .lock()
-            .expect("通道那一格只被短临界区持有");
+        let slot = self.access.slot();
+        let mut state = slot.state.lock().expect("通道那一格只被短临界区持有");
 
-        if state.is_none() {
+        if state.lease.is_none() {
             // 生产通道由 `rmcp` 宿主承担；stdio 与 Streamable 网络通道在宿主内部按声明的
             // endpoint 分流，上层只看见同一份同步 `Transport`。
             let transport: Box<dyn Transport> = match declaration.endpoint() {
@@ -468,17 +571,24 @@ impl AppPort for McpApp {
                     Box::new(transport)
                 }
             };
-            *state = Some(transport);
+            state.lease = Some(Lease {
+                transport,
+                last_used: Instant::now(),
+            });
         }
 
-        let listed = match state.as_mut() {
-            Some(transport) => transport.list_tools(timeout),
+        let listed = match state.lease.as_mut() {
+            Some(lease) => {
+                // 展开也是一次真实使用：租期从这里重新起算。
+                lease.last_used = Instant::now();
+                lease.transport.list_tools(timeout)
+            }
             None => Err(CallFault::Refused(McpFailure::Transport)),
         };
         let raw: Vec<RawTool> = match listed {
             Ok(raw) => raw,
             Err(fault) => {
-                *state = None;
+                state.lease = None;
                 return Err(ExpansionRefusal::classified(fault.class().as_str()));
             }
         };
@@ -489,19 +599,32 @@ impl AppPort for McpApp {
             declaration.timeout_seconds(),
             &raw,
         ) {
-            Ok(specs) => {
+            Ok(mut specs) => {
+                // 资源只有**对面声明了**才有这一面；没有就一个动作都不多出（旧行为逐字节不变）。
+                let resources = state
+                    .lease
+                    .as_ref()
+                    .map(|lease| lease.transport.supports_resources())
+                    .unwrap_or(false);
+                if resources {
+                    specs.extend(resource_specs(
+                        declaration.name(),
+                        declaration.timeout_seconds(),
+                        &specs,
+                    ));
+                }
                 self.specs = specs;
                 self.tools_changed = false;
                 // 订阅是**增量**，不是展开的必要条件：订阅不上（legacy / 远程一问一答 /
                 // 对面拒绝）不影响这次展开，清单已经拿到了。
-                if let Some(transport) = state.as_mut() {
-                    let _ = transport.subscribe_tools_changed(timeout);
+                if let Some(lease) = state.lease.as_mut() {
+                    let _ = lease.transport.subscribe_tools_changed(timeout);
                 }
                 Ok(())
             }
             Err(class) => {
                 // 清单不是我们能搬运的形状：整台不上场，通道也不留。
-                *state = None;
+                state.lease = None;
                 Err(ExpansionRefusal::classified(class.as_str()))
             }
         }
@@ -514,31 +637,40 @@ impl AppPort for McpApp {
     fn refresh_capabilities(&mut self) -> bool {
         let declaration = self.access.declaration().clone();
         let timeout = self.default_timeout();
-        let mut state = self
-            .access
-            .state()
-            .lock()
-            .expect("通道那一格只被短临界区持有");
-        let Some(transport) = state.as_mut() else {
+        let slot = self.access.slot();
+        let mut state = slot.state.lock().expect("通道那一格只被短临界区持有");
+        let Some(lease) = state.lease.as_mut() else {
             return false;
         };
-        if !transport
+        lease.last_used = Instant::now();
+        if !lease
+            .transport
             .poll_notifications()
             .contains(&McpNotification::ToolsListChanged)
         {
             return false;
         }
-        let raw = match transport.list_tools(timeout) {
+        let raw = match lease.transport.list_tools(timeout) {
             Ok(raw) => raw,
             Err(_) => return false,
         };
+        let resources = lease.transport.supports_resources();
         let specs = match map_tools(
             declaration.name(),
             declaration.effect(),
             declaration.timeout_seconds(),
             &raw,
         ) {
-            Ok(specs) => specs,
+            Ok(mut specs) => {
+                if resources {
+                    specs.extend(resource_specs(
+                        declaration.name(),
+                        declaration.timeout_seconds(),
+                        &specs,
+                    ));
+                }
+                specs
+            }
             Err(_) => return false,
         };
         self.specs = specs;
@@ -553,18 +685,29 @@ impl AppPort for McpApp {
         changed
     }
 
-    /// 每一条动词的效果类别：**整台一个档**（一台 server 一授权，不逐工具判）。
+    /// 每一条动作**自己那一格**的效果类别。
     ///
-    /// 默认档是 [`EffectClass::UnverifiableWrite`]：外来工具的写效应没有同参复核可配
+    /// 工具：**整台一个档**（一台 server 一授权，不逐工具判）。默认档是
+    /// [`EffectClass::UnverifiableWrite`]：外来工具的写效应没有同参复核可配
     /// （再调一次不是复核，是又一次调用）——因此它**不配复核能力**，也就**没有机械的解除手段**。
+    /// 只读档是宿主的显式背书。
+    ///
+    /// 资源动作：**永远只读**，与那句背书无关——读资源改变不了外面的世界。这一格不是
+    /// "我们替 server 判了"，是动作本身的形状（`resources/list` / `resources/read` 是读）。
+    ///
     /// ⚠ 这里原来写的是"未决一旦挂上就只有宿主 acknowledge 这一条出路"——那是**未决效果门**的
     /// 说法，门已退役（门是指令，而世界只该给信息）：今天"那次写到底发生了没有"由主体自己去看
-    /// （它家里的账本 `trace.ndjson`）。只读档是宿主的显式背书。
+    /// （它家里的账本 `trace.ndjson`）。
     fn declared_effects(&self) -> Vec<EffectDeclaration> {
-        let class = self.effect().class();
         self.specs
             .iter()
-            .map(|spec| EffectDeclaration::new(ActionId::new(spec.action.clone()), class, None))
+            .map(|spec| {
+                EffectDeclaration::new(
+                    ActionId::new(spec.action.clone()),
+                    spec.effect.class(),
+                    None,
+                )
+            })
             .collect()
     }
 
@@ -645,10 +788,7 @@ fn build_spec(
         params.push(ParamSpec::new(
             PARAM_TIMEOUT,
             false,
-            format!(
-                "这次等多久（秒，1–{MAX_TIMEOUT_SECONDS}；不给就用 {} 秒）",
-                timeout_seconds
-            ),
+            timeout_doc(timeout_seconds),
         ));
     }
     let skeleton = match tool.description.as_deref() {
@@ -682,6 +822,8 @@ fn build_spec(
     ToolSpec {
         action: action.to_string(),
         tool: tool.name.clone(),
+        kind: SpecKind::Tool,
+        effect,
         skeleton,
         details,
         params,
@@ -689,6 +831,84 @@ fn build_spec(
         trouble,
         timeout_knob,
     }
+}
+
+/// 我们那个可选超时旋钮的一句说明（工具与资源动作共用，避免两处措辞分叉）。
+fn timeout_doc(timeout_seconds: u64) -> String {
+    format!("这次等多久（秒，1–{MAX_TIMEOUT_SECONDS}；不给就用 {timeout_seconds} 秒）")
+}
+
+/// 资源数据面的两个**通用只读动作**（不是每资源一个动词）。
+///
+/// 判据：资源是**数据**，动作是**能力**。一条资源一个动词会让每轮摆进主体视野的动词面
+/// 随对面的数据长大；两个通用动作把它固定成两条，资源清单只进回执。
+///
+/// 名字冲突：对面自己报了同名工具（`<server>_resources_list` / `<server>_resources_read`）时，
+/// **跳过那一条合成动作**，不整台失败——工具名归对面（它可能真的有一个叫 `resources_list`
+/// 的工具），我们不能把它的动词改名；另一个通用动作照旧挂上。代价如实登记：那条资源动作
+/// 这时不可用（名字被对面的工具占了），但**不会**把对面的工具悄悄变成只读动作——每个
+/// spec 自己带效果（见 [`ToolSpec::effect`]）。
+fn resource_specs(server: &str, timeout_seconds: u64, existing: &[ToolSpec]) -> Vec<ToolSpec> {
+    let mut specs = Vec::new();
+
+    let list_action = format!("{server}_{SUFFIX_RESOURCES_LIST}");
+    if !existing.iter().any(|spec| spec.action == list_action) {
+        specs.push(ToolSpec {
+            action: list_action,
+            tool: String::new(),
+            kind: SpecKind::ResourcesList,
+            effect: McpEffect::ReadOnly,
+            skeleton: "列出这台 server 的资源（只读；只给清单，正文按需读）".to_string(),
+            details: format!(
+                "外部来源的只读数据面（`{server}` 那台 server 在握手时声明了 `resources`）：\
+                 一次一页，回执只给 name / uri / mime / size 与下一页游标（`cursor`），不带正文。\
+                 资源不是动词——这台 server 的资源不会各自变成动作。\
+                 效果档 = read-only（读不改变外面的世界）。"
+            ),
+            params: vec![
+                ParamSpec::new(
+                    PARAM_CURSOR,
+                    false,
+                    "上一页回执给的 next-cursor；不给就是第一页",
+                ),
+                ParamSpec::new(PARAM_TIMEOUT, false, timeout_doc(timeout_seconds)),
+            ],
+            kinds: vec![(PARAM_CURSOR.to_string(), JsonKind::Text)],
+            trouble: None,
+            timeout_knob: true,
+        });
+    }
+
+    let read_action = format!("{server}_{SUFFIX_RESOURCES_READ}");
+    if !existing.iter().any(|spec| spec.action == read_action) {
+        specs.push(ToolSpec {
+            action: read_action,
+            tool: String::new(),
+            kind: SpecKind::ResourcesRead,
+            effect: McpEffect::ReadOnly,
+            skeleton: "按 URI 读一条资源（只读；正文只有这一次调用才取）".to_string(),
+            details: format!(
+                "外部来源的只读数据面（`{server}` 那台 server 在握手时声明了 `resources`）：\
+                 `uri` 从 resources_list 的回执里抄。正文按需取，读完只进这一次的回执，\
+                 不会自动进模型上下文；文本 ≤{} KiB（超限截断并标出），\
+                 二进制（blob）只报 mime 与大小、不搬原文。效果档 = read-only。",
+                MAX_TEXT_BYTES / 1024
+            ),
+            params: vec![
+                ParamSpec::new(
+                    PARAM_URI,
+                    true,
+                    "要读的资源 URI（从 resources_list 的回执里抄）",
+                ),
+                ParamSpec::new(PARAM_TIMEOUT, false, timeout_doc(timeout_seconds)),
+            ],
+            kinds: vec![(PARAM_URI.to_string(), JsonKind::Text)],
+            trouble: None,
+            timeout_knob: true,
+        });
+    }
+
+    specs
 }
 
 /// 对面的参数模式 → 我们的参数表（标量，以及按一段 JSON 文本搬的对象/数组；读不出来就给一个原因）。
@@ -1037,12 +1257,7 @@ fn classify_error_code(code: Option<i64>) -> &'static str {
 }
 
 /// 一次答复 → 主体的回执。
-fn render_reply(
-    server: &str,
-    tool: &str,
-    reply: &CallReply,
-    reading: Option<(usize, Vec<String>)>,
-) -> String {
+fn render_reply(server: &str, tool: &str, reply: &CallReply, reading: ScrubReading) -> String {
     let mut out = String::new();
     out.push_str(&format!("server = {server}\n"));
     out.push_str(&format!("tool = {tool}\n"));
@@ -1096,8 +1311,131 @@ fn render_reply(
     out
 }
 
+/// 一页资源清单 → 回执（**只有元数据**：正文一律不在这一格）。
+///
+/// 这是"资源正文不自动进模型上下文"的第一半：清单只给 name / uri / mime / size
+/// （外加对面给了的标题与说明），要正文得再调 `resources_read`。
+fn render_resource_list(server: &str, page: &ResourcePage, reading: ScrubReading) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("server = {server}\n"));
+    out.push_str("action = resources/list\n");
+    out.push_str(&format!("count = {}\n", page.resources.len()));
+    if page.resources.is_empty() {
+        out.push_str("resource-list = 0 项（这台 server 现在没有声明任何资源）\n");
+    }
+    for resource in &page.resources {
+        out.push_str(&format!("resource = {}\n", resource.name));
+        out.push_str(&format!("  uri = {}\n", resource.uri));
+        out.push_str(&format!(
+            "  mime = {}\n",
+            resource.mime_type.as_deref().unwrap_or("unknown")
+        ));
+        out.push_str(&format!(
+            "  size = {}\n",
+            resource
+                .size
+                .map(|size| format!("{size} bytes"))
+                .unwrap_or_else(|| "unknown".to_string())
+        ));
+        if let Some(title) = resource.title.as_deref().filter(|title| !title.is_empty()) {
+            out.push_str(&format!("  title = {title}\n"));
+        }
+        if let Some(described) = resource
+            .description
+            .as_deref()
+            .filter(|text| !text.is_empty())
+        {
+            out.push_str(&format!("  description = {described}\n"));
+        }
+        if resource.uri_truncated {
+            out.push_str("  uri-truncated = true（这个 URI 太长，已截断：原样读不回来）\n");
+        }
+    }
+    match &page.next_cursor {
+        Some(cursor) => out.push_str(&format!("next-cursor = {cursor}\n")),
+        None => out.push_str("next-cursor = none（没有更多页）\n"),
+    }
+    push_scrub(&mut out, reading);
+    out
+}
+
+/// 一次资源读取 → 回执。
+///
+/// **正文只进这一次回执**：读到的字节不在 App 里留副本，也不会被下一轮自动注入。
+/// blob 不搬原文，只报它有多大；文本超限截断并带标记。
+fn render_resource_read(
+    server: &str,
+    requested_uri: &str,
+    bodies: &[ResourceContent],
+    reading: ScrubReading,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("server = {server}\n"));
+    out.push_str("action = resources/read\n");
+    out.push_str(&format!("requested-uri = {}\n", sanitize(requested_uri)));
+    let Some(first) = bodies.first() else {
+        out.push_str("state = replied\n");
+        out.push_str("content = 0 块（对面没有给正文）\n");
+        push_scrub(&mut out, reading);
+        return out;
+    };
+    out.push_str("state = replied\n");
+    out.push_str(&format!(
+        "uri = {}\n",
+        if first.uri.is_empty() {
+            "unknown（对面没给可读的 URI）"
+        } else {
+            first.uri.as_str()
+        }
+    ));
+    out.push_str(&format!(
+        "mime = {}\n",
+        first.mime_type.as_deref().unwrap_or("unknown")
+    ));
+    if first.omitted > 0 {
+        out.push_str(&format!(
+            "omitted-blocks = {}（同一次答复只搬第一块）\n",
+            first.omitted
+        ));
+    }
+    match &first.body {
+        ResourceBody::Text {
+            text,
+            text_bytes,
+            truncated,
+        } => {
+            out.push_str(&format!(
+                "text = {text_bytes} bytes, truncated = {truncated}\n"
+            ));
+            push_scrub(&mut out, reading);
+            out.push_str("--- content ---\n");
+            out.push_str(text);
+            if *truncated {
+                out.push_str(&format!(
+                    "\n（此处截断：资源正文超过 {} KiB，只给出前 {} KiB 字节）\n",
+                    MAX_TEXT_BYTES / 1024,
+                    MAX_TEXT_BYTES / 1024
+                ));
+            } else if !text.is_empty() && !text.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        ResourceBody::Blob { encoded_bytes } => {
+            out.push_str(&format!(
+                "body = blob（base64 编码 {encoded_bytes} 字符，未搬正文）\n"
+            ));
+            push_scrub(&mut out, reading);
+        }
+        ResourceBody::Unsupported => {
+            out.push_str("body = unsupported（这一块既不是文本也不是 blob，本层搬不了）\n");
+            push_scrub(&mut out, reading);
+        }
+    }
+    out
+}
+
 /// 洗凭据那两行读数（通道不起子进程时如实说"不适用"）。
-fn push_scrub(out: &mut String, reading: Option<(usize, Vec<String>)>) {
+fn push_scrub(out: &mut String, reading: ScrubReading) {
     match reading {
         Some((scrubbed, unscrubbed)) => {
             out.push_str(&format!("scrubbed = {scrubbed}\n"));

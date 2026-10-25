@@ -2401,7 +2401,7 @@ const CORE_ALLOWED_PHRASES: [(&str, &str); 22] = [
 /// 工具名的长度上限归适配层（那是 wire 事实），而外部来源的 App 造动词名时必须**读那一份**，
 /// 不许另抄一个数字。放行的是这条路径——`provider` 那个词在本文件里换个形态出现照旧违规
 /// （短词扫描照旧生效）。
-const SUBSTRING_ALLOWED_PHRASES: [(&str, &str); 5] = [
+const SUBSTRING_ALLOWED_PHRASES: [(&str, &str); 7] = [
     ("im_app.rs", "\"messages\""),
     ("im_app.rs", "\"/messages\""),
     ("mcp/mod.rs", "provider_adapter::TOOL_NAME_MAX"),
@@ -2410,6 +2410,13 @@ const SUBSTRING_ALLOWED_PHRASES: [(&str, &str); 5] = [
     // 不是我们的词；别的形态、别的文件照旧违规。
     ("mcp/mod.rs", "\"DEEPSEEK_API_KEY\""),
     ("mcp/mod.rs", "\"TAVILY_API_KEY\""),
+    // 2026-10-25：MCP `resources/read` 的答复在**那个协议**里就叫 `contents`——字段是
+    // `ReadResourceResult::contents`，类型是 `ResourceContents`（变体 `TextResourceContents`
+    // / `BlobResourceContents`）。这些是 SDK 边界的**协议名字**，不是我们的词，因此只在这个
+    // 文件、只按这两条短语放行；别的形态、别的文件照旧违规（下面那条 `result.contents`
+    // 是字段访问，上面那条覆盖类型名与变体名）。
+    ("mcp/rmcp_host.rs", "ResourceContents"),
+    ("mcp/rmcp_host.rs", "result.contents"),
 ];
 
 /// 按 [`CORE_ALLOWED_PHRASES`] 把允许的短语从待扫描文本里去掉（只对点名的那个文件生效）。

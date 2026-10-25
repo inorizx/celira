@@ -119,8 +119,9 @@ const USAGE: &str = "\
          不静默降级。不给端点就是『这次没有 im app』（这次的能力面里不出现它）。凭据的具体
          取值不打印、不落盘。
          --mcp 装一台外部来源的 App（MCP server），可重复（一台一条）。形状：
-         `<名>=stdio:<命令>[,read-only][,timeout=<秒>]`。不给就是没装：子进程不起、清单不拉，
-         直到 `open_app` 那一下才真的连上——装了不用一分钱不花。
+         `<名>=stdio:<命令>[,read-only][,timeout=<秒>][,keep-alive|,idle=<秒>]`。不给就是没装：子进程不起、清单不拉，
+         直到 `open_app` 那一下才真的连上——装了不用一分钱不花；首次展开后空闲到期
+         （缺省 30 分钟，`,keep-alive` 可退出）会在两段 Run 之间被宿主收掉。
          `<名>` 是动词前缀（动词叫 `<名>_<工具名>`，ASCII 字母开头）；`,read-only` 是宿主
          显式背书「这台不改外面的世界」，不给就是最严那档（unverifiable-write：那件写
          没有同参复核可配）。装/卸要重启本进程——授权面是装配期事实，
@@ -318,7 +319,9 @@ fn start(
     request.declarations.files = files_scope.unwrap_or_default();
     // 外部来源的 App 的**授权面**：声明读不懂 / 两台同名 / 本平台没有通道实现 —— 都在这里
     // 直接拒绝（fail-closed，不猜、不静默换行为）。**可重复**，一台 server 一条。
-    request.declarations.mcp = match resolve_mcp(&mcp) {
+    // 一次性入口的通道池：这一段 Run 内有效（进程收场即随之收）。
+    let mcp_channels = celira_agent::mcp::ChannelPool::host_default();
+    request.declarations.mcp = match resolve_mcp(&mcp, &mcp_channels) {
         Ok(mcp) => mcp,
         Err((message, code)) => {
             eprintln!("{message}");
@@ -1123,7 +1126,10 @@ fn default_terminal(environment_root: &Path) -> Option<TerminalAccess> {
 ///
 /// 三条都是 fail-closed：声明读不懂 ⇒ 拒绝（不猜）；两台同名 ⇒ 拒绝（动词前缀会撞，
 /// 路由到谁都没有正确答案）；本平台没有 stdio 通道的实现 ⇒ 拒绝（不换一个近似行为）。
-fn resolve_mcp(declarations: &[String]) -> Result<Vec<McpAccess>, (String, i32)> {
+fn resolve_mcp(
+    declarations: &[String],
+    channels: &std::sync::Arc<celira_agent::mcp::ChannelPool>,
+) -> Result<Vec<McpAccess>, (String, i32)> {
     if declarations.is_empty() {
         return Ok(Vec::new());
     }
@@ -1147,7 +1153,11 @@ fn resolve_mcp(declarations: &[String]) -> Result<Vec<McpAccess>, (String, i32)>
                 1,
             ));
         }
-        accesses.push(McpAccess::new(declaration, credential_names()));
+        accesses.push(McpAccess::with_pool(
+            declaration,
+            credential_names(),
+            std::sync::Arc::clone(channels),
+        ));
     }
     Ok(accesses)
 }
