@@ -110,6 +110,17 @@ pub struct ListMessagesResponse {
     pub request_id: String,
 }
 
+/// GET /v1/backend/rooms/{room_id}/messages 响应：在人类历史响应形状之上
+/// **附加**一个顶层 `room` 头（CORE_V1_ROOM_PROFILE.md §4.2）。`messages` /
+/// `next_before` / `request_id` 与人类历史逐字段同形，分页语义一字未动。
+#[derive(Debug, Clone, Serialize)]
+pub struct BackendListMessagesResponse {
+    pub messages: Vec<MessageView>,
+    pub next_before: Option<String>,
+    pub room: crate::protocol::room_profile::RoomHeaderView,
+    pub request_id: String,
+}
+
 /// DELETE /v1/rooms/{room_id}/messages/{message_id} 与
 /// DELETE /v1/backend/rooms/{room_id}/messages/{message_id} 成功响应
 /// （契约 CORE_V1_MESSAGE_RECALL.md §12.1）：首次撤回 201、幂等重放 200，

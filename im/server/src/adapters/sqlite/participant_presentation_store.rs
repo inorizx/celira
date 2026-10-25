@@ -1,20 +1,24 @@
 //! SQLite Participant Presentation adapter：实现
 //! `ports::participant_presentation::ParticipantPresentationStore`。
+//! 版本链事实三类：Participant Profile、Group Room Presentation 与（v1.1
+//! 附加切片）Group Room Profile 群简介；三者共用同一套「不可变版本 + 幂等
+//! 见证 + 单事务授权先于重放」的形状。
 //!
-//! 本模块是 Profile 与 Group Room Presentation 公共事实唯一允许接触 SQLite
-//! 文件的地方，独立于 generic repository 之外的窄 adapter。每一次
-//! `put_*` 都在**单个 `BEGIN IMMEDIATE` 事务**内完成：授权（active Owner /
-//! active group owner + active Agent member，**先于任何重放裁决**）→ 读
-//! scope + key 幂等记录与 digest → 同 key 同摘要恒重放既有结果（必要时读回
-//! 历史版本行，即使当前最新版本已被其他写入推进也不重新裁决 base_version）
-//! → 同 key 不同摘要 `IdempotencyConflict` → 新 key 要求
-//! `base_version == 当前最新` → 插入不可变版本行与幂等见证 → commit；任何
-//! 失败整体回滚，不留半个版本或半条幂等记录。幂等表只存 SHA-256 请求摘要与
-//! 结果版本，绝不携带正文/描述/预览。
+//! 本模块是 Profile / Group Room Presentation / Group Room Profile 公共事实
+//! 唯一允许接触 SQLite 文件的地方，独立于 generic repository 之外的窄
+//! adapter。每一次 `put_*` 都在**单个 `BEGIN IMMEDIATE` 事务**内完成：授权
+//! （active Owner / active group owner + active Agent member / 该房 active
+//! owner 且为 active Human，**先于任何重放裁决**）→ 读 scope + key 幂等记录
+//! 与 digest → 同 key 同摘要恒重放既有结果（必要时读回历史版本行，即使当前
+//! 最新版本已被其他写入推进也不重新裁决 base_version）→ 同 key 不同摘要
+//! `IdempotencyConflict` → 新 key 要求 `base_version == 当前最新` → 插入
+//! 不可变版本行与幂等见证 → commit；任何失败整体回滚，不留半个版本或半条
+//! 幂等记录。幂等表只存 SHA-256 请求摘要与结果版本，绝不携带正文/描述/预览。
 //!
-//! 契约：CORE_V1_PARTICIPANT_PRESENTATION.md §4–§6。数据库触发器/CHECK 只
-//! 证明引用/身份一致性与世界卫生，不见证同事务原子性；同事务原子性由本
-//! adapter 的单个 `BEGIN IMMEDIATE` 保证。
+//! 契约：CORE_V1_PARTICIPANT_PRESENTATION.md §4–§6、
+//! CORE_V1_ROOM_PROFILE.md §3–§6。数据库触发器/CHECK 只证明引用/身份一致性
+//! 与世界卫生，不见证同事务原子性；同事务原子性由本 adapter 的单个
+//! `BEGIN IMMEDIATE` 保证。
 
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnection, SqlitePool};
@@ -30,10 +34,12 @@ use crate::domain::participant_presentation::{
     ShortDescription,
 };
 use crate::domain::room::RoomId;
+use crate::domain::room_profile::{RoomDescription, RoomProfileVersion, RoomProfileVersionRow};
 use crate::domain::time::UtcMillis;
 use crate::ports::participant_presentation::{
     LatestAvatar, MemberPresentationSummary, ParticipantPresentationStore, ProfilePutOutcome,
-    ProfileRead, RoomPresentationPutOutcome, RoomPresentationRead, StoreError,
+    ProfileRead, RoomPresentationPutOutcome, RoomPresentationRead, RoomProfileHeader,
+    RoomProfilePutOutcome, RoomProfileRead, StoreError,
 };
 use crate::ports::room::ParticipantProfile;
 use crate::ports::storage::{StorageError, StorageFailureKind};
@@ -596,6 +602,231 @@ impl ParticipantPresentationStore for SqliteParticipantPresentationStore {
         }
     }
 
+    async fn put_room_profile_version(
+        &self,
+        key: &IdempotencyKey,
+        request_digest: &RequestDigest,
+        base_version: &BaseVersion,
+        record: &RoomProfileVersionRow,
+        now: UtcMillis,
+    ) -> Result<RoomProfilePutOutcome, StoreError> {
+        let mut conn = self.pool.acquire().await.map_err(db_error)?;
+        let mut tx = conn
+            .begin_with(SQL_BEGIN_IMMEDIATE)
+            .await
+            .map_err(db_error)?;
+
+        let outcome: Result<RoomProfilePutOutcome, StoreError> = async {
+            // ① Room 存在且 active；不存在 / 非 active 一律 UnknownRoom（404，
+            // 不泄露存在性）。
+            let room: Option<(String, String)> =
+                sqlx::query_as("SELECT kind, status FROM rooms WHERE id = ?")
+                    .bind(record.room_id.as_str())
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+            let Some((room_kind, room_status)) = room else {
+                return Err(StoreError::UnknownRoom);
+            };
+            if room_status != "active" {
+                return Err(StoreError::UnknownRoom);
+            }
+            // ② actor 必须是该房当前 active 成员；不是成员 / 从未来过 / 已离开
+            // 一律 NotRoomMember（路由出 404，与未知房同形）。这条必须排在
+            // kind 之前：否则非成员能靠 400 探出一间 direct 房存在。
+            let member: Option<(String, String, String)> = sqlx::query_as(
+                "SELECT o.role, p.kind, p.status \
+                 FROM room_memberships o \
+                 JOIN participants p ON p.id = o.participant_id \
+                 WHERE o.room_id = ? AND o.participant_id = ? AND o.active_marker = 1",
+            )
+            .bind(record.room_id.as_str())
+            .bind(record.updated_by.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            let Some((role, actor_kind, actor_status)) = member else {
+                return Err(StoreError::NotRoomMember);
+            };
+            // ③ 只有 group 房有群简介（direct / human_direct → 400）。
+            if room_kind != "group" {
+                return Err(StoreError::NotGroupRoom);
+            }
+            // ④ 只有该房当前 active owner 可写；owner 可以是 Agent（owner =
+            // 创建者），但本端点只有 Human 认证面 ⇒ 非 active Human 一律按
+            // 「不是可写群主」拒绝（403），绝不落库（DB 触发器同一判据兜底）。
+            if role != "owner" || actor_kind != "human" || actor_status != "active" {
+                return Err(StoreError::NotRoomOwner);
+            }
+            // ⑤ 幂等重放 / 冲突（授权已通过，重放不得绕过授权）。
+            let existing: Option<(String, i64)> = sqlx::query_as(
+                "SELECT request_digest, result_version FROM room_profile_put_idempotency \
+                 WHERE actor_human_id = ? AND room_id = ? AND key = ?",
+            )
+            .bind(record.updated_by.as_str())
+            .bind(record.room_id.as_str())
+            .bind(key.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            let result_version = match existing {
+                Some((existing_digest, result_version)) => {
+                    if existing_digest != request_digest.as_str() {
+                        return Err(StoreError::IdempotencyConflict);
+                    }
+                    result_version
+                }
+                None => {
+                    // ⑥ 新 key 才裁决 base_version：必须等于当前最新（无行 = 0）。
+                    let latest: i64 = sqlx::query_scalar(
+                        "SELECT COALESCE(MAX(version), 0) FROM room_profile_versions \
+                         WHERE room_id = ?",
+                    )
+                    .bind(record.room_id.as_str())
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+                    if base_version.as_u64() != latest as u64 {
+                        return Err(StoreError::ConcurrentVersionChanged);
+                    }
+                    let new_version = latest + 1;
+                    sqlx::query(
+                        "INSERT INTO room_profile_versions \
+                         (room_id, version, description, updated_by, updated_at) \
+                         VALUES (?, ?, ?, ?, ?)",
+                    )
+                    .bind(record.room_id.as_str())
+                    .bind(new_version)
+                    .bind(record.description.as_str())
+                    .bind(record.updated_by.as_str())
+                    .bind(now.millis())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+                    sqlx::query(
+                        "INSERT INTO room_profile_put_idempotency \
+                         (actor_human_id, room_id, key, request_digest, result_version, created_at) \
+                         VALUES (?, ?, ?, ?, ?, ?)",
+                    )
+                    .bind(record.updated_by.as_str())
+                    .bind(record.room_id.as_str())
+                    .bind(key.as_str())
+                    .bind(request_digest.as_str())
+                    .bind(new_version)
+                    .bind(now.millis())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+                    let version = RoomProfileVersion::parse(new_version)
+                        .map_err(|e| corrupt(format!("stored room profile version invalid: {e}")))?;
+                    return Ok(RoomProfilePutOutcome {
+                        created: true,
+                        result: RoomProfileRead {
+                            room_id: record.room_id.clone(),
+                            version,
+                            description: record.description.clone(),
+                            updated_at: now,
+                        },
+                    });
+                }
+            };
+            // ⑦ 重放：读回首次成功的版本行（不追加版本、不重新裁决 base_version）。
+            let Some(historical) =
+                fetch_room_profile_row(&mut tx, &record.room_id, result_version).await?
+            else {
+                return Err(corrupt(
+                    "room profile idempotency record points to missing version",
+                ));
+            };
+            Ok(RoomProfilePutOutcome {
+                created: false,
+                result: historical,
+            })
+        }
+        .await;
+
+        match outcome {
+            Ok(outcome @ RoomProfilePutOutcome { created: true, .. }) => {
+                tx.commit().await.map_err(db_error)?;
+                Ok(outcome)
+            }
+            Ok(replayed) => {
+                finish_rollback(tx).await.map_err(StoreError::Database)?;
+                Ok(replayed)
+            }
+            Err(primary) => {
+                let primary_kind = primary_storage_kind(&primary);
+                Err(rollback_after_primary(tx, primary, primary_kind, StoreError::Database).await)
+            }
+        }
+    }
+
+    async fn latest_room_profile(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Option<RoomProfileRead>, StoreError> {
+        let mut conn = self.pool.acquire().await.map_err(db_error)?;
+        let row: Option<(i64, String, i64)> = sqlx::query_as(
+            "SELECT version, description, updated_at FROM room_profile_versions \
+             WHERE room_id = ? ORDER BY version DESC LIMIT 1",
+        )
+        .bind(room_id.as_str())
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(db_error)?;
+        row.map(|r| room_profile_read_from_row(room_id.clone(), r))
+            .transpose()
+    }
+
+    async fn room_profile_header(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Option<RoomProfileHeader>, StoreError> {
+        let mut conn = self.pool.acquire().await.map_err(db_error)?;
+        type HeaderRow = (
+            String,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<i64>,
+        );
+        let row: Option<HeaderRow> = sqlx::query_as(
+            "SELECT r.kind, r.name, v.version, v.description, v.updated_at \
+             FROM rooms r \
+             LEFT JOIN room_profile_versions v \
+                ON v.room_id = r.id \
+               AND v.version = (SELECT MAX(version) FROM room_profile_versions \
+                                WHERE room_id = r.id) \
+             WHERE r.id = ?",
+        )
+        .bind(room_id.as_str())
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(db_error)?;
+        let Some((kind, name, version, description, updated_at)) = row else {
+            return Ok(None);
+        };
+        let kind = crate::domain::room::RoomKind::parse(&kind)
+            .ok_or_else(|| corrupt(format!("unknown room kind {kind:?}")))?;
+        let profile = match (version, description, updated_at) {
+            (Some(version), Some(description), Some(updated_at)) => Some(
+                room_profile_read_from_row(room_id.clone(), (version, description, updated_at))?,
+            ),
+            (None, None, None) => None,
+            _ => {
+                return Err(corrupt(
+                    "stored room profile header has incomplete version fields",
+                ));
+            }
+        };
+        Ok(Some(RoomProfileHeader {
+            room_id: room_id.clone(),
+            kind,
+            name,
+            profile,
+        }))
+    }
+
     async fn latest_profile(
         &self,
         participant_id: &ParticipantId,
@@ -846,6 +1077,40 @@ async fn fetch_latest_version_row(
         },
     )
     .transpose()
+}
+
+/// 从版本行原始列解析 RoomProfileRead。
+fn room_profile_read_from_row(
+    room_id: RoomId,
+    (version, description, updated_at): (i64, String, i64),
+) -> Result<RoomProfileRead, StoreError> {
+    Ok(RoomProfileRead {
+        room_id,
+        version: RoomProfileVersion::parse(version)
+            .map_err(|e| corrupt(format!("stored room profile version invalid: {e}")))?,
+        description: RoomDescription::parse(&description)
+            .map_err(|e| corrupt(format!("stored room description invalid: {e}")))?,
+        updated_at: UtcMillis::from_millis(updated_at),
+    })
+}
+
+/// 幂等记录指向的 Room Profile 版本行（重放时读回历史结果；不分版本新旧）。
+async fn fetch_room_profile_row(
+    conn: &mut SqliteConnection,
+    room_id: &RoomId,
+    version: i64,
+) -> Result<Option<RoomProfileRead>, StoreError> {
+    let row: Option<(i64, String, i64)> = sqlx::query_as(
+        "SELECT version, description, updated_at FROM room_profile_versions \
+         WHERE room_id = ? AND version = ?",
+    )
+    .bind(room_id.as_str())
+    .bind(version)
+    .fetch_optional(conn)
+    .await
+    .map_err(db_error)?;
+    row.map(|r| room_profile_read_from_row(room_id.clone(), r))
+        .transpose()
 }
 
 /// 幂等记录指向的历史 Presentation 版本行原始列。

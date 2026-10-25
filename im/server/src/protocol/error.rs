@@ -129,6 +129,17 @@ pub mod codes {
     /// Room Presentation PUT：新 key 但 base_version 与当前最新不一致（409，
     /// 不追加版本）。
     pub const ROOM_PRESENTATION_STALE: &str = "room_presentation_stale";
+    /// 群简介 PUT：actor 是该群 active 成员但不是当前群主（403，明确 ACL
+    /// 拒绝——身份已由 Human Session 证明，群主资格是可观察公共事实）。
+    pub const NOT_ROOM_OWNER: &str = "not_room_owner";
+    /// 群简介 PUT：目标 Room 不是 group（direct / human_direct 没有群简介，
+    /// 400）。
+    pub const INVALID_ROOM_KIND: &str = "invalid_room_kind";
+    /// 群简介 PUT 输入不合法：正文为空、trim 后为空、含 U+0000 或超过 2000
+    /// UTF-8 字节（400）。
+    pub const INVALID_PROFILE_DESCRIPTION: &str = "invalid_profile_description";
+    /// 群简介 PUT：新 key 但 base_version 与当前最新不一致（409，不追加版本）。
+    pub const PROFILE_VERSION_CONFLICT: &str = "profile_version_conflict";
     /// 目标 Room 不是 group（direct / human_direct 等不支持的类型没有 Group
     /// Room Presentation，400）。
     pub const ROOM_PRESENTATION_NOT_SUPPORTED: &str = "room_presentation_not_supported";

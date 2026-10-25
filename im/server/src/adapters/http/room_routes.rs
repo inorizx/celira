@@ -19,16 +19,18 @@ use crate::adapters::http::agent_routes::{KeyError, idempotency_key_from_headers
 use crate::adapters::http::auth::CurrentAuth;
 use crate::adapters::http::human_event_routes::wake_humans;
 use crate::adapters::http::middleware::RequestId;
+use crate::adapters::http::room_profile_routes::room_profile_view;
 use crate::adapters::http::routes::{
     MAX_AGENT_CREATE_BODY_BYTES, error_response, store_error_response,
 };
 use crate::application::room::{
     AdvanceReadCursorError, CreateDirectRoomError, CreateRoomError, InviteMemberError,
     LeaveMembershipError, RemoveMemberError, RoomQueryError, TransferOwnerError,
-    advance_read_cursor, create_direct_room, create_group, create_human_direct_room, get_room,
+    advance_read_cursor, create_direct_room, create_group, create_human_direct_room,
     get_room_members, invite_group_member, leave_membership, list_rooms, remove_group_member,
     transfer_group_owner,
 };
+use crate::application::room_profile::get_room_detail;
 use crate::domain::human_event::{HumanEventKind, HumanEventSource};
 use crate::domain::participant::Participant;
 use crate::domain::room::{Membership, PeerRead, ReadState, Room};
@@ -759,20 +761,29 @@ async fn list_rooms_route(
 }
 
 /// GET /v1/rooms/{room_id}：member-scoped 管理视图；unknown、bad-id、
-/// not-member 统一 404 `room_not_found`。
+/// not-member 统一 404 `room_not_found`。`profile` 是 v1.1 附加切片的群简介
+/// （无简介或非 group 为 null）；列表端点不带这一格。
 async fn get_room_route(
     State(state): State<AppState>,
     auth: CurrentAuth,
     Path(room_id): Path<String>,
     request_id: RequestId,
 ) -> Response {
-    match get_room(state.room.as_ref(), &auth.participant.id, &room_id).await {
-        Ok(item) => Json(GetRoomResponse {
-            room: room_view(&item.room),
-            membership: membership_view(&item.membership),
-            peer: item.peer.as_ref().map(peer_view),
-            read_state: read_state_view(&item.read_state),
-            peer_read: peer_read_view(item.peer_read),
+    match get_room_detail(
+        state.room.as_ref(),
+        state.presentation.as_ref(),
+        &auth.participant.id,
+        &room_id,
+    )
+    .await
+    {
+        Ok(detail) => Json(GetRoomResponse {
+            room: room_view(&detail.room.room),
+            membership: membership_view(&detail.room.membership),
+            peer: detail.room.peer.as_ref().map(peer_view),
+            read_state: read_state_view(&detail.room.read_state),
+            peer_read: peer_read_view(detail.room.peer_read),
+            profile: detail.profile.as_ref().map(room_profile_view),
             request_id: request_id.0,
         })
         .into_response(),

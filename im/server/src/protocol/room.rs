@@ -171,6 +171,10 @@ pub struct ListRoomsResponse {
 }
 
 /// GET /v1/rooms/{room_id} 响应（不内嵌完整成员列表）。
+///
+/// `profile` 是 v1.1 附加切片的群简介（CORE_V1_ROOM_PROFILE.md §4.1）：
+/// 无简介或非 group 恒为 null。列表端点 `GET /v1/rooms` 与 `RoomView`
+/// **不带**这一格。
 #[derive(Debug, Clone, Serialize)]
 pub struct GetRoomResponse {
     pub room: RoomView,
@@ -178,6 +182,7 @@ pub struct GetRoomResponse {
     pub peer: Option<ParticipantMinView>,
     pub read_state: ReadStateView,
     pub peer_read: Option<String>,
+    pub profile: Option<crate::protocol::room_profile::RoomProfileView>,
     pub request_id: String,
 }
 

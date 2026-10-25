@@ -624,4 +624,8 @@ mod recall_store_tests;
 #[cfg(test)]
 mod room_attention_migration_tests;
 #[cfg(test)]
+mod room_profile_migration_tests;
+#[cfg(test)]
+mod room_profile_store_tests;
+#[cfg(test)]
 mod room_store_tests;

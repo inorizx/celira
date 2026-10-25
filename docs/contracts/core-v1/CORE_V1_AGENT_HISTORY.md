@@ -18,6 +18,12 @@
 > `organs::core` 与 `CELIRA_CORE_BIN` 为历史名，本仓库已分别更名
 > `extensions::im` 与 `CELIRA_IM_BIN`；正文保持冻结原文，历史细节归 Git。
 >
+> **v1.1 附加事实（2026-10-25，已获主人批准）**：本端点在 `messages` / `next_before` /
+> `request_id` 之外**附加**一个顶层 `room` 头（房间 id / kind / name + 最新简介
+> `profile`），来源是 `CORE_V1_ROOM_PROFILE.md` 的群简介版本链。它是**只读附加
+> 字段**：分页、消息投影、准入与错误码**一字未变**；人类历史端点不返回它。
+> 本切片仍不为历史读取新增任何表/列/索引/写入。
+>
 > ⚠ **2026-09-28（Completion / ACK 整体退役并删除）**：本文提到的 Completion 与 ACK（旧投递模型）**已连端点带表删除**（`completions` / `agent_delivery_positions`、`POST …/events/{event_id}/completion`、`POST …/events/{event_id}/ack`、`c1.be.ack` 哨兵与相关错误码；授权与原理见 `CORE_V1_AGENT_PROTOCOL.md` 文档头）。本文凡出现它们的句子都是**这一刀当时的范围声明**（"不改 X / 不产生 X"）——那句话本身仍然成立，只是里面的对照物已经不在了；按历史基线阅读。
 
 ## 1. 目标、范围与拓扑（C4 L1–2）
@@ -91,10 +97,14 @@ GET /v1/backend/rooms/{room_id}/messages?limit=...&before=...
   1–100）、`before` 可选 opaque cursor（引用一条该 Room 内可见 Message；
   unknown / 非法 / 跨端点类型 / 跨 Room / 不可见 cursor → 400 `invalid_request`，
   不泄露存在性）；
-- 响应：与人类历史端点同一 `ListMessagesResponse` 形状——`messages` 按
-  sequence 升序、`next_before` 为 opaque 分页游标（有更旧消息时为当前页第一
-  条 Message 的 cursor）或 null。**同一公共投影**（MessageView：id/room_id/
-  actor/body/mentions/attachments/reply_to_message_id/created_at/recalled_at）；
+- 响应：与人类历史端点同一消息形状——`messages` 按 sequence 升序、
+  `next_before` 为 opaque 分页游标（有更旧消息时为当前页第一条 Message 的
+  cursor）或 null。**同一公共投影**（MessageView：id/room_id/actor/body/
+  mentions/attachments/reply_to_message_id/created_at/recalled_at）；
+  **v1.1 附加**：顶层多一个 `room` 头（`{id, kind, name, profile}`，
+  `profile = {description, version} | null`），每一页同值，见
+  `CORE_V1_ROOM_PROFILE.md` §4.2；`messages` / `next_before` / `request_id`
+  与人类端点逐字段同形；
 - GET 只读：无 Idempotency-Key 要求（与人类历史端点一致）。
 
 ### 3.2 分页语义（opaque cursor）
@@ -115,7 +125,9 @@ GET /v1/backend/rooms/{room_id}/messages?limit=...&before=...
   `query_error_response` 把 `NotAMember` 收敛回 404 `room_not_found`——
   人类 wire 与该区分引入前逐字节一致）；
 - 零 SQLite 表/列/索引新增；零写语义；不产生 Event / Completion / ACK / Live
-  通知。
+  通知。⚠ v1.1 的 `room` 头读取 `room_profile_versions`（该表由
+  `CORE_V1_ROOM_PROFILE.md` 的群简介切片拥有与写入）；历史端点本身仍不新增
+  持久对象、不写任何一行。
 
 ## 5. 错误映射（稳定公共 code，统一 JSON 信封）
 
@@ -141,7 +153,9 @@ GET /v1/backend/rooms/{room_id}/messages?limit=...&before=...
 - I3 分页完整性：同一游标序列翻页无重复、无跳过（每页恰好 limit 条，末页可
   < limit；前后页消息 id 零重叠）；重放任意页产生确定性同集；
 - I4 同构：与本端点同级的人类历史端点返回同一消息集合（同 Room 同 reader
-  同授权窗口）——同一投影、同一分页规则、同一消息视图；
+  同授权窗口）——同一投影、同一分页规则、同一消息视图；**唯一差异是
+  v1.1 的顶层 `room` 头只出现在 Backend 面**（人类端点不返回它，消息集合
+  本身仍逐条相同）；
 - I5 只读：GET 无任何持久副作用、不产生 Event/通知；重复读取幂等（恒同集）。
 
 ## 7. Runtime 侧 `celira_read_history` 工具契约（D2 窄面厚背）

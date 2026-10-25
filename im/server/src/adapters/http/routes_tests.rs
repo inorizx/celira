@@ -425,6 +425,37 @@ impl crate::ports::participant_presentation::ParticipantPresentationStore for De
     > {
         Err(crate::ports::participant_presentation::StoreError::Database(denied()))
     }
+    async fn put_room_profile_version(
+        &self,
+        _key: &crate::domain::agent::IdempotencyKey,
+        _digest: &crate::domain::participant_presentation::RequestDigest,
+        _base_version: &crate::domain::participant_presentation::BaseVersion,
+        _record: &crate::domain::room_profile::RoomProfileVersionRow,
+        _now: crate::domain::time::UtcMillis,
+    ) -> Result<
+        crate::ports::participant_presentation::RoomProfilePutOutcome,
+        crate::ports::participant_presentation::StoreError,
+    > {
+        Err(crate::ports::participant_presentation::StoreError::Database(denied()))
+    }
+    async fn latest_room_profile(
+        &self,
+        _room_id: &crate::domain::room::RoomId,
+    ) -> Result<
+        Option<crate::ports::participant_presentation::RoomProfileRead>,
+        crate::ports::participant_presentation::StoreError,
+    > {
+        Err(crate::ports::participant_presentation::StoreError::Database(denied()))
+    }
+    async fn room_profile_header(
+        &self,
+        _room_id: &crate::domain::room::RoomId,
+    ) -> Result<
+        Option<crate::ports::participant_presentation::RoomProfileHeader>,
+        crate::ports::participant_presentation::StoreError,
+    > {
+        Err(crate::ports::participant_presentation::StoreError::Database(denied()))
+    }
     async fn latest_profile(
         &self,
         _participant_id: &crate::domain::participant::ParticipantId,

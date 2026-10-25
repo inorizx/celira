@@ -36,6 +36,7 @@ use crate::adapters::http::message_routes;
 use crate::adapters::http::middleware::{REQUEST_ID_HEADER, RequestId};
 use crate::adapters::http::participant_avatar_routes;
 use crate::adapters::http::participant_presentation_routes;
+use crate::adapters::http::room_profile_routes;
 use crate::adapters::http::room_routes;
 use crate::application::identity;
 use crate::application::readiness::{ReadyError, check_ready};
@@ -101,6 +102,10 @@ pub fn router() -> Router<AppState> {
         // Room 可见性与 Agent Owner 授权复用既有 Room/Agent 查询，路由只
         // 组合用例，不重复弱化检查。
         .merge(participant_presentation_routes::router())
+        // Group Room Profile（v1.1 附加切片，契约 CORE_V1_ROOM_PROFILE.md）：
+        // 群简介写端点（该房 active owner 且为 active Human；授权在存储事务内
+        // 先于重放裁决）。自带 16 KiB 请求体上限，故在 4 KiB 默认层之后合并。
+        .merge(room_profile_routes::router())
         // Participant Avatar 切片（窄解冻切片）：在 4 KiB 默认上限之后注册，
         // PUT 自带 2 MiB + 开销的独立上限（multipart）。写路径只对 active
         // Agent Owner，读路径与成员详情同一 Room 可见性裁决。

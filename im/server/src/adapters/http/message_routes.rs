@@ -30,11 +30,13 @@ use crate::adapters::http::backend_auth::BackendAuth;
 use crate::adapters::http::backend_stream_routes::{wake_agents, wake_agents_for_new_message};
 use crate::adapters::http::human_event_routes::wake_humans;
 use crate::adapters::http::middleware::RequestId;
+use crate::adapters::http::room_profile_routes::room_header_view;
 use crate::adapters::http::routes::{error_response, store_error_response};
 use crate::application::message::{
     MessageQueryError, RecallError, RecallOutcome, SendMessageError, list_messages, recall_message,
     send_message,
 };
+use crate::application::room_profile::room_header;
 use crate::domain::agent_event::AgentEventKind;
 use crate::domain::human_event::{HumanEventKind, HumanEventSource};
 use crate::domain::message::Message;
@@ -42,8 +44,8 @@ use crate::domain::participant::{DisplayName, Participant, ParticipantKind, Part
 use crate::ports::message::HistoryMessage;
 use crate::protocol::error::codes;
 use crate::protocol::message::{
-    HistoryQuery, ListMessagesResponse, MessageActorView, MessageView, RecallMessageResponse,
-    SendMessageRequest, SendMessageResponse,
+    BackendListMessagesResponse, HistoryQuery, ListMessagesResponse, MessageActorView, MessageView,
+    RecallMessageResponse, SendMessageRequest, SendMessageResponse,
 };
 
 /// Message 路由请求体上限：128 KiB，容纳合法正文的 JSON 转义表达。
@@ -716,9 +718,12 @@ async fn list_messages_route(
 /// room 的 active member（Room 不存在/bad-id → 404 room_not_found 同人类
 /// 路径；**Room 存在但非 active member → 403 not_room_member**——对齐 say
 /// 端点先例，agent 已通过凭据证明身份，成员资格是明确 ACL）。分页与消息
-/// 公共投影与人类历史路径完全同构（同一 `HistoryQuery`/`ListMessagesResponse`/
-/// opaque `before` 游标/`next_before`）；零写语义、零持久新增、不改变任何
-/// 既有端点。
+/// 公共投影与人类历史路径完全同构（同一 `HistoryQuery`/opaque `before`
+/// 游标/`next_before`）。
+///
+/// v1.1 附加切片（CORE_V1_ROOM_PROFILE.md §4.2）：在 **list_messages 成功
+/// 之后**追加一个顶层 `room` 头（房间身份三格 + 最新简介）。它只读、不改
+/// 分页与消息投影，也不参与准入——非成员仍是上面的 403，未知房仍是 404。
 async fn list_backend_messages_route(
     State(state): State<AppState>,
     auth: BackendAuth,
@@ -748,12 +753,28 @@ async fn list_backend_messages_route(
     )
     .await
     {
-        Ok(page) => Json(ListMessagesResponse {
-            messages: page.messages.iter().map(history_message_view).collect(),
-            next_before: page.next_before,
-            request_id,
-        })
-        .into_response(),
+        Ok(page) => {
+            // 准入已由上面成功返回证明；房间头只补上下文，不重做可见性裁决。
+            let header = match room_header(state.presentation.as_ref(), &room_id).await {
+                Ok(Some(header)) => header,
+                Ok(None) => {
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        codes::INTERNAL_ERROR,
+                        "room header unavailable",
+                        &request_id,
+                    );
+                }
+                Err(e) => return store_error_response("room_profile.header", &e, &request_id),
+            };
+            Json(BackendListMessagesResponse {
+                messages: page.messages.iter().map(history_message_view).collect(),
+                next_before: page.next_before,
+                room: room_header_view(&header),
+                request_id,
+            })
+            .into_response()
+        }
         Err(e) => backend_query_error_response(e, &request_id),
     }
 }

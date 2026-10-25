@@ -1,14 +1,15 @@
-//! Participant Presentation 存储窄端口（Profile + Group Room Presentation）。
+//! 公共呈现事实的存储窄端口：Participant Profile、Group Room Presentation
+//! 与（v1.1 附加切片）Group Room Profile 群简介。
 //!
-//! 契约（CORE_V1_PARTICIPANT_PRESENTATION.md §4–§6）：只声明 P0 写路径与最新
-//! 读取所需的持久化边界，不依赖具体数据库/HTTP 框架；不引入 generic
-//! repository。裁决由 storage adapter 在事务内执行，顺序为：**认证 →
-//! 授权 → 幂等重放/冲突 → base_version 裁决**；同 key + 同请求摘要恒重放
-//! 既有成功结果（即使用例中最新版本已被其他写入推进，也不重新裁决
-//! base_version 而变 stale），授权先于重放——已撤销/未授权 actor 一律不得重放。
-//! 存储层只表达「不可变版本 + 幂等记录」的能力与 typed 错误；`put_*` 在单个
-//! `BEGIN IMMEDIATE` 事务内完成，数据库守卫只证明引用/身份一致性（不单独证明
-//! 同事务），见 §6。
+//! 契约（CORE_V1_PARTICIPANT_PRESENTATION.md §4–§6、
+//! CORE_V1_ROOM_PROFILE.md §3–§6）：只声明写路径与最新读取所需的持久化边界，
+//! 不依赖具体数据库/HTTP 框架；不引入 generic repository。裁决由 storage
+//! adapter 在事务内执行，顺序为：**认证 → 授权 → 幂等重放/冲突 →
+//! base_version 裁决**；同 key + 同请求摘要恒重放既有成功结果（即使用例中
+//! 最新版本已被其他写入推进，也不重新裁决 base_version 而变 stale），授权先于
+//! 重放——已撤销/未授权 actor 一律不得重放。存储层只表达「不可变版本 + 幂等
+//! 记录」的能力与 typed 错误；`put_*` 在单个 `BEGIN IMMEDIATE` 事务内完成，
+//! 数据库守卫只证明引用/身份一致性（不单独证明同事务），见各契约 §6。
 
 use crate::domain::agent::IdempotencyKey;
 use crate::domain::participant::{ParticipantId, ParticipantKind};
@@ -18,7 +19,8 @@ use crate::domain::participant_presentation::{
     RequestDigest, RoomDisplayName, RoomPresentationVersion, RoomRoleDescription, RoomRoleName,
     ShortDescription,
 };
-use crate::domain::room::RoomId;
+use crate::domain::room::{RoomId, RoomKind};
+use crate::domain::room_profile::{RoomDescription, RoomProfileVersion, RoomProfileVersionRow};
 use crate::domain::time::UtcMillis;
 use crate::ports::room::ParticipantProfile;
 use crate::ports::storage::StorageError;
@@ -44,6 +46,16 @@ pub struct RoomPresentationPutOutcome {
     pub version: PresentationVersion,
     pub result_is_create: bool,
     pub result: RoomPresentationVersion,
+}
+
+/// Group Room Profile（群简介）幂等 PUT 的结果：`created=false` 表示同 key
+/// 同请求的重放，返回首次成功记录的结果（绝不追加第二个版本）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomProfilePutOutcome {
+    /// 本次调用是否产生了新的版本行；false = 幂等重放。
+    pub created: bool,
+    /// 结果版本（新写入或重放的既有结果）。
+    pub result: RoomProfileRead,
 }
 
 /// 读取投影：最新 Profile 版本行 + 发布者 kind（`published_by_kind` 是派生
@@ -74,6 +86,28 @@ pub struct RoomPresentationRead {
     pub published_by_id: ParticipantId,
     pub published_by_kind: ParticipantKind,
     pub published_at: UtcMillis,
+}
+
+/// 读取投影：某 group Room 的最新简介（无版本行 = 没有简介）。
+/// 公共 wire 只暴露 `description` / `version` / `updated_at`；`updated_by`
+/// 是内部身份见证，不进入响应。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomProfileRead {
+    pub room_id: RoomId,
+    pub version: RoomProfileVersion,
+    pub description: RoomDescription,
+    pub updated_at: UtcMillis,
+}
+
+/// 单房历史回执的**房间头**投影（CORE_V1_ROOM_PROFILE.md §4.2）：
+/// 房间身份三格（id / kind / name）＋ 最新简介（无简介或非 group 为 None）。
+/// 纯读取、不改变 History 的 messages 与分页。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomProfileHeader {
+    pub room_id: RoomId,
+    pub kind: RoomKind,
+    pub name: Option<String>,
+    pub profile: Option<RoomProfileRead>,
 }
 
 /// Member Presentation 摘要单项：某 Room 当前 active 成员（Human 与 Agent）
@@ -127,6 +161,12 @@ pub enum StoreError {
     /// actor 不是该 group Room 的 active owner（Human）。
     /// 公共映射：404 `room_not_found`（隐藏存在性）。
     NotGroupOwner,
+    /// actor 不是该 Room 的 active 成员（可能是从未来过、已离开、未知房）。
+    /// 群简介写路径公共映射：404 `room_not_found`（不泄露房间是否存在）。
+    NotRoomMember,
+    /// actor 是该 Room 的 active 成员但不是当前 active owner。
+    /// 群简介写路径公共映射：403 `not_room_owner`（明确 ACL 拒绝）。
+    NotRoomOwner,
     /// actor 不是目标 Agent 的 active Owner。
     /// 公共映射：404 `agent_not_found`（隐藏存在性）。
     NotAgentOwner,
@@ -152,6 +192,8 @@ impl std::fmt::Display for StoreError {
                 write!(f, "participant is not an active agent member of the room")
             }
             Self::NotGroupOwner => write!(f, "publisher is not the active group owner"),
+            Self::NotRoomMember => write!(f, "publisher is not an active member of the room"),
+            Self::NotRoomOwner => write!(f, "publisher is not the active owner of the room"),
             Self::NotAgentOwner => write!(f, "publisher is not an active owner of the agent"),
             Self::IdempotencyConflict => {
                 write!(f, "idempotency key already used with a different request")
@@ -212,6 +254,37 @@ pub trait ParticipantPresentationStore: Send + Sync {
         record: &RoomPresentationVersion,
         now: crate::domain::time::UtcMillis,
     ) -> Result<RoomPresentationPutOutcome, StoreError>;
+
+    /// 幂等写入 Group Room Profile（群简介）新版本
+    /// （CORE_V1_ROOM_PROFILE.md §3/§5/§6）。`record.updated_by` 必须同时是
+    /// 该 active group Room 的 **active owner** 与 active Human；否则
+    /// `NotRoomOwner`（active 成员但非 owner）或 `NotRoomMember` /
+    /// `UnknownRoom`（不泄露存在性），非 group → `NotGroupRoom`。
+    /// 裁决规则同其余版本链：同 key 同摘要恒重放（读回既有 `result`，不裁决
+    /// `base_version`）；同 key 不同摘要 → `IdempotencyConflict`；新 key 要求
+    /// `base_version` == 当前最新（无行视为 0）且 `record.version` == 其 + 1。
+    async fn put_room_profile_version(
+        &self,
+        key: &IdempotencyKey,
+        request_digest: &RequestDigest,
+        base_version: &BaseVersion,
+        record: &RoomProfileVersionRow,
+        now: crate::domain::time::UtcMillis,
+    ) -> Result<RoomProfilePutOutcome, StoreError>;
+
+    /// 读取某 Room 的最新简介；无版本行返回 None（= 没有简介）。
+    async fn latest_room_profile(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Option<RoomProfileRead>, StoreError>;
+
+    /// 读取单房历史回执的**房间头**：房间身份三格 + 最新简介（无简介 /
+    /// 非 group 为 None）。Room 不存在返回 None。纯读，不做可见性裁决——
+    /// 调用方（单房历史读面）必须先经既有成员准入。
+    async fn room_profile_header(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Option<RoomProfileHeader>, StoreError>;
 
     /// 读取某 Participant 最新 Profile（含发布者 kind 派生投影）；无记录返回
     /// None（= 版本 0 / null 空投影）。

@@ -20,6 +20,7 @@ pub mod participant;
 pub mod participant_avatar;
 pub mod participant_presentation;
 pub mod room;
+pub mod room_profile;
 pub mod time;
 pub mod token;
 
@@ -31,6 +32,8 @@ mod backend_tests;
 mod participant_presentation_tests;
 #[cfg(test)]
 mod participant_tests;
+#[cfg(test)]
+mod room_profile_tests;
 #[cfg(test)]
 mod time_tests;
 #[cfg(test)]

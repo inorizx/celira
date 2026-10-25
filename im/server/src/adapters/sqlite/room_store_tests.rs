@@ -2005,6 +2005,8 @@ async fn schema_contains_only_expected_tables_and_no_deferred_objects() {
         "room_presentation_versions",
         "participant_profile_put_idempotency",
         "room_presentation_put_idempotency",
+        "room_profile_versions",
+        "room_profile_put_idempotency",
         "pairing_transactions",
     ];
     for table in &tables {

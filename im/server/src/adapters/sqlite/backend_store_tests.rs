@@ -1357,6 +1357,8 @@ async fn schema_has_only_binding_and_credential_backend_objects() {
         "room_presentation_versions",
         "participant_profile_put_idempotency",
         "room_presentation_put_idempotency",
+        "room_profile_versions",
+        "room_profile_put_idempotency",
         "pairing_transactions",
     ];
     assert_eq!(tables.len(), expected.len(), "tables: {tables:?}");

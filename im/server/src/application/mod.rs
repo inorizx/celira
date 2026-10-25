@@ -31,3 +31,4 @@ pub mod participant_avatar;
 pub mod participant_presentation;
 pub mod readiness;
 pub mod room;
+pub mod room_profile;

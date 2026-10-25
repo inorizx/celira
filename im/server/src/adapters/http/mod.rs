@@ -28,6 +28,7 @@ pub mod message_routes;
 pub mod middleware;
 pub mod participant_avatar_routes;
 pub mod participant_presentation_routes;
+pub mod room_profile_routes;
 pub mod room_routes;
 pub mod routes;
 
@@ -75,6 +76,8 @@ mod participant_avatar_routes_tests;
 mod participant_presentation_routes_tests;
 #[cfg(test)]
 mod recall_routes_tests;
+#[cfg(test)]
+mod room_profile_routes_tests;
 #[cfg(test)]
 mod room_routes_tests;
 #[cfg(test)]
