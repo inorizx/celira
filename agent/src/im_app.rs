@@ -1,5 +1,5 @@
 //! im app：Celira IM 的**通信面**——通讯录、翻记录、说话、撤回、推进读位置、退出房间、群房治理
-//! （开房 / 邀请 / 移除 / 转让）与群内呈现、房间进行态，以及**附件**的收与发。
+//! （开房 / 邀请 / 移除 / 转让）与群内呈现、房间进行态、**房间简介**，以及**附件**的收与发。
 //!
 //! ⚠ **2026-10-02 拆包**：这个 App 从"整包"拆成三个**渐进式**的包——动词 id、参数表、回执文案、
 //! 失败分类、wire 字段与幂等键规则**一字不改**，只换"哪个 App 拥有哪几条动词"：
@@ -168,6 +168,22 @@ pub const CAPABILITY_READ_ATTACHMENT: &str = "im_read_attachment";
 /// ⚠ **覆盖边界如实登记**：今天**没有用例点名**这条动词——它只出现在能力面与效果声明里。
 /// 别把"目录里有"读成"证明过"。
 pub const CAPABILITY_WRITE_PRESENTATION: &str = "im_write_presentation";
+
+/// **写房间简介**动词（写面，2026-10-26）：这间群房是做什么的。
+///
+/// ⚠ **它是房间级的公共资料，不是"我在这间房里的呈现"**：简介挂在 Room 上、不挂在任何
+/// Participant 上（契约 `CORE_V1_ROOM_PROFILE.md` §2 那句话：「简介说的是'这间房是什么'，
+/// 不是'我在这间房里是谁'）」——后者是 [`CAPABILITY_WRITE_PRESENTATION`]，两者不共用版本链。
+///
+/// ⚠ **只有该房当前的 active owner 写得动**（Human 或 Agent；owner 是房内的治理角色，
+/// 不是参与者 kind）：active 成员但不是 owner ⇒ `not-room-owner`（新增的那一格，见
+/// [`ImFailure::NotRoomOwner`]）；非成员 / 不存在的房 ⇒ `unknown-room`（契约把两者合成
+/// 同一个 404，不泄露存在性）。
+///
+/// **读面不加动词**：写完之后用 [`CAPABILITY_READ_HISTORY`] 复核——房间头会给出新的
+/// `room_profile (v<版本>)`（`CORE_V1_ROOM_PROFILE.md` §4.2）。
+/// 没有简介时 `base_version` 写 `0`（首版 = 1）。
+pub const CAPABILITY_WRITE_ROOM_PROFILE: &str = "im_write_room_profile";
 /// **看房间的 live 快照**动词（只读面，批次四读取面对齐 V9）：**谁在这间房里、谁正在写**。
 pub const CAPABILITY_ROOM_LIVE: &str = "im_room_live";
 /// **声明"我正在这间房写"**动词（写面，2026-09-28 主体进行态）：一个**易失**信号，
@@ -245,6 +261,9 @@ pub const PARAM_FILE_NAME: &str = "file_name";
 pub const PARAM_ROOM_DISPLAY_NAME: &str = "room_display_name";
 pub const PARAM_ROOM_ROLE_NAME: &str = "room_role_name";
 pub const PARAM_ROOM_ROLE_DESCRIPTION: &str = "room_role_description";
+
+/// 房间简介正文的参数名（与 wire 字段**同名**：请求体里只有 `base_version` 与它）。
+pub const PARAM_DESCRIPTION: &str = "description";
 
 /// 预览渲染的字节上限（**呈现面惯例**：契约明言服务端不截断，截断是这一侧的机械动作）。
 pub const MAX_PREVIEW_BYTES: usize = 60;
@@ -574,6 +593,12 @@ const PARTICIPANT_ID_FIELD: &str = "participant_id";
 /// 群名上限（体上限 4 KiB 之内的一个稳妥值：单行、非空）。
 const MAX_NAME_BYTES: usize = 256;
 
+/// 房间简介正文的字节上限（契约：1..2000 **UTF-8 字节**，按 BLOB 长度）。
+///
+/// 超限**拒绝不截断**：截断会把"我写多了"变成"世界替我删了几句"，而简介是一份公共资料。
+/// 界与 `trim` 判空**都**在这一侧先判——非法输入一次都不出网。
+const MAX_ROOM_PROFILE_BYTES: usize = 2000;
+
 /// 主体标识上限（服务端的标识是 UUID 形状；给足余量，只为挡住病态输入）。
 ///
 /// ⚠ 它**不是** [`MAX_ID_BYTES`]（标识那一族的 64）：参与者这一格刻意更宽，而关系面
@@ -586,6 +611,8 @@ const READ_CURSOR_SUFFIX: &str = "/read-cursor";
 
 /// 我在某一间群房里的呈现路径（写；`{}` 是房间标识）。
 const MY_PRESENTATION_PATH: &str = "/v1/backend/rooms/{}/my-presentation";
+/// 某间房的简介路径（写；`{}` 是房间标识）——**房间级的公共资料**，不是我在房里的呈现。
+const ROOM_PROFILE_PATH: &str = "/v1/backend/rooms/{}/profile";
 /// 某间房的 live 快照路径（只读；`{}` 是房间标识）。
 const ROOM_LIVE_PATH: &str = "/v1/backend/rooms/{}/live";
 /// 某间房的 typing 声明路径（写面、无参数、204；`{}` 是房间标识）。
@@ -694,8 +721,10 @@ impl ImApp {
     /// 本 App 声明的全部能力（顺序固定）：通信面——通讯录 / 翻记录 / 读附件 / 说话与它的复核 /
     /// 撤回与它的复核 / 推进读位置 / 退房 / 房间进行态 / 成员清单；群房治理四条（开房 / 邀请 /
     /// 移除 / 转让房主）；另两条写：`im_typing`（第四档、免复核）与**群内呈现**
-    /// （复核面是通讯录——见 `declared_effects`）。**没被声明的动作是只读**（不声明 = 只读，
-    /// 默认方向通向更少的能力），因此 `im_read_attachment` 与各次复核一样：不需要任何授权。
+    /// （复核面是通讯录——见 `declared_effects`）；以及**房间简介**
+    /// （`im_write_room_profile`——复核面是翻记录的房间头）。**没被声明的动作是只读**
+    /// （不声明 = 只读，默认方向通向更少的能力），因此 `im_read_attachment` 与各次复核一样：
+    /// 不需要任何授权。
     ///
     /// ⚠ 社交与资料两组动词住在各自的新包里（`im-social` / `im-profile`）——它们**不预装**，
     /// 展开才上场；三个包共用一份通道机制（`im_channel`）。
@@ -1203,6 +1232,44 @@ impl ImApp {
                  `level` 不是那两个词 ⇒ `invalid-argument`（工具面先拒，一次都不出网）；\
                  世界回 400 ⇒ 同样 `invalid-argument`（不猜是哪一半）；\
                  其余非 2xx、以及 2xx 却读不出那一格 ⇒ 提交结果未确认（不猜、不重发）。",
+            ),
+            // **房间简介（2026-10-26）**：房间级的公共资料，写权归该房**当前 active owner**。
+            Capability::new(
+                ActionId::new(CAPABILITY_WRITE_ROOM_PROFILE),
+                "写这间群房的简介：这个群是做什么的（房间级公共资料，不是我在房里的呈现）",
+                vec![
+                    ParamSpec::new(PARAM_ROOM, true, "房间标识（取自 im_rooms）"),
+                    ParamSpec::new(
+                        PARAM_BASE_VERSION,
+                        true,
+                        "我认为的当前简介版本（0 = 这间房还没有简介）",
+                    ),
+                    ParamSpec::new(
+                        PARAM_DESCRIPTION,
+                        true,
+                        format!("简介正文（必填；trim 后非空、≤{MAX_ROOM_PROFILE_BYTES} 字节、原样保存）"),
+                    ),
+                ],
+            )
+            .with_details(
+                "它写的是「这间房是什么」（公共资料，挂在房上、不挂在任何人身上），\
+                 不是「我在这间房里是谁」——后者是 `im_write_presentation`。\n\
+                 ⚠ 只有这间房当前的 active owner 写得动（Human 或 Agent 同一条规则，\
+                 判据是房内的治理角色、不是参与者种类）：active 成员但不是 owner ⇒ \
+                 `not-room-owner`；非成员 / 房不存在 ⇒ `unknown-room`（契约合成同一个 404，\
+                 不泄露存在性）。owner 转让后立刻换人，不靠任何缓存。\n\
+                 基准版本：每间房一条独立版本链——先读一次房间头看现在第几版再写；\
+                 没有简介时 `base_version` 写 0（首版 = 1）；对不上 ⇒ `version-conflict`\
+                 （确定的拒绝、零新事实，先读再写）。\n\
+                 正文原样保存（不 trim、不做 Unicode 归一化；trim 只用来判空），\
+                 允许换行、Tab 与 Emoji；空 / 纯空白 / 含 NUL / 超 2000 UTF-8 字节 ⇒ \
+                 `invalid-argument`（本层先拒，一次都不出网）。\n\
+                 回执形状：`room`、`profile_version`、`description_bytes`、`replayed`\
+                 （同 key 同摘要重放 ⇒ `yes`、不追加版本）。\n\
+                 只读复核：`im_read_history`——房间头那行 `room_profile (v<版本>)` 就是答案\
+                 （不新增读简介的动词）。\n\
+                 失败：世界回 400 ⇒ `invalid-argument`；401 ⇒ `credential-rejected`；\
+                 413 ⇒ `too-large`；其余非 2xx 或回执读不懂 ⇒ 提交结果未确认（不猜、不重发）。",
             ),
         ])
     }
@@ -2304,6 +2371,68 @@ impl ImApp {
         }
     }
 
+    /// **写一间房的简介**：`PUT /v1/backend/rooms/{room}/profile`（带幂等键）。
+    ///
+    /// 契约 `CORE_V1_ROOM_PROFILE.md` §3（两条认证面同一条业务路径；本动作只接 **Agent 面**
+    /// `BackendAuth`）。请求体**只有两格**：`base_version` 与 `description`（`deny_unknown_fields`）。
+    ///
+    /// **它是房间级的公共资料**：简介挂在房上、不挂任何 Participant；与
+    /// [`ImApp::write_presentation`]（我在房里的呈现）**不是同一条版本链、不是同一份事实**。
+    ///
+    /// **谁能写**：只有该房**当前 active owner**（Human 或 Agent 同一条判据——owner 是房内的
+    /// 治理角色，不是参与者 kind）。本层**不复制**这条判据，只把世界的答复如实分类：
+    /// - 400（正文非法 / 不是 group / 请求体不认识）⇒ `invalid-argument`；
+    /// - 401 ⇒ `credential-rejected`；
+    /// - 403 ⇒ [`ImFailure::NotRoomOwner`]——「**是 active 成员、但不是当前 owner**」。
+    ///   ⚠ 它与 `not-a-member` 是两件事，别合并：前者是**权限不够**（人还在房里），
+    ///   后者是**不在里面**。契约把「非成员」并进 404，因此 403 只可能落在 owner 这一格。
+    /// - 404 ⇒ `unknown-room`（房不存在 / 非成员 / 标识形状读不懂：契约合成同一个码）；
+    /// - 409 ⇒ `version-conflict`。⚠ 两条 409 在本层**不分解**：
+    ///   `profile_version_conflict`（新 key 的 `base_version` 过期——**主路径**，出路是先读再写）
+    ///   与 `idempotency_conflict`（同 key 配了另一个摘要——那次操作已作废）回同一个状态码，
+    ///   而状态码是这一层唯一拿得到的机械事实；猜是哪一条就是替世界说出它没说的话。
+    ///   两者对主体**下一步是同一件事**：重新读一次房间头、再用新 key 写。
+    /// - 413 ⇒ `too-large`（请求体超过 16 KiB——本层已把正文卡在 2000 字节，因此这一格只在
+    ///   世界的界与我们不一致时出现；如实报，不重发）。
+    /// - 其余非 2xx / 传输断 / 2xx 读不懂 ⇒ `unknown`（**不猜、不重发**；要确认就 `im_read_history`）。
+    ///
+    /// **本地先判**：房间标识、`base_version` 与正文三项任一非法 ⇒ `invalid-argument`，
+    /// **一次请求都不发**（契约：机械校验先于任何往返）。
+    fn write_room_profile(&self, operation: &OperationId, params: &ActionParams) -> ActionOutcome {
+        let Some(room) = valid_room(params) else {
+            return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());
+        };
+        let Some(base_version) = valid_base_version(params) else {
+            return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());
+        };
+        // 正文**原样**上线：`trim` 只用来判空（契约 §3.1「原样保存：不 trim、不做归一化」）。
+        let Some(description) = valid_room_profile_description(params) else {
+            return ActionOutcome::failure(ImFailure::InvalidArgument.as_str());
+        };
+        let payload = serde_json::json!({
+            PARAM_BASE_VERSION: base_version,
+            PARAM_DESCRIPTION: description,
+        })
+        .to_string();
+        let path = ROOM_PROFILE_PATH.replace("{}", room);
+        let key = idempotency_key(operation);
+        match self.exchange("PUT", &path, Some(payload), Some(&key)) {
+            Reply::Answered(value) => ActionOutcome::success(vec![ContentBlock::new(
+                CAPABILITY_WRITE_ROOM_PROFILE,
+                render_room_profile_written(room, &value),
+            )]),
+            Reply::Refused(400) => ActionOutcome::failure(ImFailure::InvalidArgument.as_str()),
+            Reply::Refused(401) => ActionOutcome::failure(ImFailure::CredentialRejected.as_str()),
+            // 403 = 是这间房的 active 成员、但不是当前 owner（明确 ACL：身份已由认证证明）。
+            Reply::Refused(403) => ActionOutcome::failure(ImFailure::NotRoomOwner.as_str()),
+            // 404 = 房不存在 / 我不是它的 active 成员（契约不泄露存在性，本层不分解）。
+            Reply::Refused(404) => ActionOutcome::failure(ImFailure::UnknownRoom.as_str()),
+            Reply::Refused(409) => ActionOutcome::failure(ImFailure::VersionConflict.as_str()),
+            Reply::Refused(413) => ActionOutcome::failure(ImFailure::TooLarge.as_str()),
+            Reply::Refused(_) | Reply::Broken | Reply::Unreadable => ActionOutcome::unknown(),
+        }
+    }
+
     /// 看房间的 live 快照：`GET /v1/backend/rooms/{room}/live`（读取面对齐 V9）。
     ///
     /// **进行态，不是身体态**：它说的是"这间房里谁在、谁正在写"，**不**包含宿主读数
@@ -2612,7 +2741,8 @@ impl ActionPort for ImApp {
             | CAPABILITY_WRITE_PRESENTATION
             | CAPABILITY_ROOM_LIVE
             | CAPABILITY_TYPING
-            | CAPABILITY_ATTENTION => ActionAdmission::Admitted,
+            | CAPABILITY_ATTENTION
+            | CAPABILITY_WRITE_ROOM_PROFILE => ActionAdmission::Admitted,
             _ => ActionAdmission::refused(crate::core::UNKNOWN_CAPABILITY),
         }
     }
@@ -2661,6 +2791,9 @@ impl ActionPort for ImApp {
             // 提醒档（2026-10-23）：**不带键**——状态写，同值重写天然幂等（契约不要求键）。
             // 身份只来自 BackendAuth ⇒ 它只能写**我自己**那一行。
             CAPABILITY_ATTENTION => self.set_attention(action.params()),
+            // 房间简介（2026-10-26）：**带幂等键**（契约必带；同 key 同摘要重放不追加版本）。
+            // 复核面是翻记录的房间头——见 `declared_effects`，因此不新增读动词。
+            CAPABILITY_WRITE_ROOM_PROFILE => self.write_room_profile(operation, action.params()),
             _ => ActionOutcome::failure(ImFailure::InvalidArgument.as_str()),
         }
     }
@@ -2680,7 +2813,8 @@ impl crate::app_contract::AppPort for ImApp {
         self.own_capabilities()
     }
 
-    /// 本包的写动词各配一项只读复核（前两项参数完全相同，第三项以通讯录那一栏为复核面）。
+    /// 本包的写动词各配一项只读复核（前两项参数完全相同，第三项以通讯录那一栏为复核面，
+    /// 房间简介以**翻记录的房间头**为复核面）。
     ///
     /// - `im_say`：**可重复写**——同参数第二次是一条**新**消息（身份不是参数决定的，不是抢唯一
     ///   名字），因此必须有复核。
@@ -2797,6 +2931,15 @@ impl crate::app_contract::AppPort for ImApp {
                 EffectClass::RepeatableWrite,
                 Some(ActionId::new(CAPABILITY_ROOMS)),
             ),
+            // 房间简介（2026-10-26）：每间房一条独立版本链；同 key 同摘要重放不追加版本
+            // （同参第二次是成功 no-op）⇒ 与其余版本化写同档 `repeatable-write`。
+            // **复核 = 翻记录的房间头**（`room_profile (v<版本>)`）——世界把新版本随单房历史
+            // 送来，因此不需要、也不新增"读简介"的只读动词。
+            EffectDeclaration::new(
+                ActionId::new(CAPABILITY_WRITE_ROOM_PROFILE),
+                EffectClass::RepeatableWrite,
+                Some(ActionId::new(CAPABILITY_READ_HISTORY)),
+            ),
         ]
     }
 
@@ -2826,7 +2969,8 @@ impl crate::app_contract::AppPort for ImApp {
                     | CAPABILITY_INVITE
                     | CAPABILITY_WRITE_PRESENTATION
                     | CAPABILITY_TYPING
-                    | CAPABILITY_ATTENTION => SourceClass::System,
+                    | CAPABILITY_ATTENTION
+                    | CAPABILITY_WRITE_ROOM_PROFILE => SourceClass::System,
                     _ => SourceClass::WorldSigned,
                 };
                 SourceDeclaration::new(capability.id().clone(), class)
@@ -2942,6 +3086,49 @@ fn render_presentation_written(body: &serde_json::Value) -> String {
         field("room_role_description"),
         if replayed { "yes" } else { "no" },
     )
+}
+
+/// 写房间简介的回执：房的标识 ＋ 世界记下的新版本 ＋ 正文的字节数 ＋ 是不是重放。
+///
+/// **只搬机械读数**（契约 §3.3 的 `profile.version` / `description_bytes`），**不重述正文**：
+/// 简介是房间的公共资料，写完要确认"它是什么"就读房间头（`im_read_history`）——回执里再抄
+/// 一遍就等于同一份事实两个家。**没有消息行**：简介不是消息（契约 I1）。
+///
+/// 读不懂的格写 `-`（数字）与 `?`（重放标记）：**不编一个版本号、也不把"读不出来"说成 `no`**。
+fn render_room_profile_written(room: &str, body: &serde_json::Value) -> String {
+    let profile = body.get("profile");
+    let version = profile
+        .and_then(|p| p.get("version"))
+        .and_then(|value| value.as_u64())
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    // 字节数取**世界回执里那份正文**的长度（UTF-8 字节）：它回答的是"世界收下了多大的正文"，
+    // 因此不能拿这一侧的入参顶替——重放时入参可能压根不是那一份。
+    let description_bytes = profile
+        .and_then(|p| p.get("description"))
+        .and_then(|value| value.as_str())
+        .map(|description| description.len().to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let replayed = body
+        .get("idempotency_replayed")
+        .and_then(|flag| flag.as_bool())
+        .map(|flag| if flag { "yes" } else { "no" })
+        .unwrap_or("?");
+    format!(
+        "room = {room}\nprofile_version = {version}\ndescription_bytes = {description_bytes}\nreplayed = {replayed}"
+    )
+}
+
+/// 房间简介正文的本地判据：**必填、非空、`trim` 后非空、≤ [`MAX_ROOM_PROFILE_BYTES`] 字节、不含 NUL**。
+///
+/// 返回的是**原文**——契约要求原样保存（含首尾空白、多行、Emoji）；`trim` 只用来回答
+/// "是不是一片空白"，**绝不**拿裁过的文本上线。
+fn valid_room_profile_description(params: &ActionParams) -> Option<&str> {
+    params.get(PARAM_DESCRIPTION).filter(|description| {
+        !description.trim().is_empty()
+            && description.len() <= MAX_ROOM_PROFILE_BYTES
+            && !description.contains('\0')
+    })
 }
 
 /// `im_create_group` 的群名：非空、单行（不含控制字符）、在上限之内。

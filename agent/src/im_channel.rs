@@ -95,6 +95,16 @@ pub enum ImFailure {
     UnknownRoom,
     /// 房间存在但**我不是成员**（契约把这一态与上一态分开，正是为了让"存在但不在其中"可判）。
     NotAMember,
+    /// **我是这间房的 active 成员，但不是它当前的 owner**（契约：403 `not_room_owner`）。
+    ///
+    /// ⚠️ 它与 [`ImFailure::NotAMember`] **不是同义词**，不要合并：这一格说"**人在房里、
+    /// 权限不够**"（写简介这类 owner-only 治理动作），那一格说"**不在里面**"。两者的出路
+    /// 也不同：前者要么让当前 owner 来写、要么先拿到 owner（`im_transfer_owner`）；后者是
+    /// 先加入。合成一个词就等于把"你能不能争取"和"你在不在"说成同一件事。
+    ///
+    /// ⚠️ 今天只有**房间简介**这一条端点真的产它：契约 §3.2 的裁决顺序把"非成员"并进
+    /// 404，因此 403 只可能落在 owner 这一格（身份已由认证证明，群主资格是可观察的公共事实）。
+    NotRoomOwner,
     /// 服务端明确报错（5xx 或本层不认识的其它状态）。
     ServerError,
     /// 同一个幂等键配的是**另一个请求摘要**（契约：409，零新事实、不改首次事实）。
@@ -190,6 +200,7 @@ impl ImFailure {
             ImFailure::InvalidArgument => crate::core::INVALID_ARGUMENT,
             ImFailure::UnknownRoom => "unknown-room",
             ImFailure::NotAMember => "not-a-member",
+            ImFailure::NotRoomOwner => "not-room-owner",
             ImFailure::ServerError => "server-error",
             ImFailure::IdempotencyConflict => "idempotency-conflict",
             ImFailure::NotFound => "not-found",
@@ -226,6 +237,7 @@ impl ImFailure {
             crate::core::INVALID_ARGUMENT => ImFailure::InvalidArgument,
             "unknown-room" => ImFailure::UnknownRoom,
             "not-a-member" => ImFailure::NotAMember,
+            "not-room-owner" => ImFailure::NotRoomOwner,
             "server-error" => ImFailure::ServerError,
             "idempotency-conflict" => ImFailure::IdempotencyConflict,
             "not-found" => ImFailure::NotFound,

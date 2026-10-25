@@ -38,13 +38,14 @@ use celira_agent::im_app::{
     CAPABILITY_READ_HISTORY, CAPABILITY_RECALL, CAPABILITY_REMOVE_MEMBER, CAPABILITY_ROOM_LIVE,
     CAPABILITY_ROOM_MEMBERS, CAPABILITY_ROOMS, CAPABILITY_SAY, CAPABILITY_TRANSFER_OWNER,
     CAPABILITY_TYPING, CAPABILITY_VERIFY_RECALLED, CAPABILITY_VERIFY_SAID,
-    CAPABILITY_WRITE_PRESENTATION, IM_APP_ID, ImApp, MAX_HISTORY_LIMIT, MAX_MENTION_TARGETS,
-    MAX_SAY_FILE_BYTES, MAX_VERIFY_PAGES, PARAM_ATTACHMENT, PARAM_ATTACHMENT_OFFSET, PARAM_BEFORE,
-    PARAM_BODY, PARAM_FILE_NAME, PARAM_LEVEL, PARAM_LIMIT, PARAM_MENTIONS, PARAM_MESSAGE,
-    PARAM_NAME, PARAM_REPLY_TO, PARAM_ROOM, PARAM_SINCE,
+    CAPABILITY_WRITE_PRESENTATION, CAPABILITY_WRITE_ROOM_PROFILE, IM_APP_ID, ImApp,
+    MAX_HISTORY_LIMIT, MAX_MENTION_TARGETS, MAX_SAY_FILE_BYTES, MAX_VERIFY_PAGES, PARAM_ATTACHMENT,
+    PARAM_ATTACHMENT_OFFSET, PARAM_BEFORE, PARAM_BODY, PARAM_DESCRIPTION, PARAM_FILE_NAME,
+    PARAM_LEVEL, PARAM_LIMIT, PARAM_MENTIONS, PARAM_MESSAGE, PARAM_NAME, PARAM_REPLY_TO,
+    PARAM_ROOM, PARAM_SINCE,
 };
 use celira_agent::im_channel::{
-    ImAccess, MAX_FILE_PARAM_BYTES, MAX_ID_BYTES, PARAM_BASE_VERSION, PARAM_FILE,
+    ImAccess, ImFailure, MAX_FILE_PARAM_BYTES, MAX_ID_BYTES, PARAM_BASE_VERSION, PARAM_FILE,
 };
 use celira_agent::im_profile_app::{
     CAPABILITY_MY_PROFILE, CAPABILITY_WRITE_AVATAR, CAPABILITY_WRITE_PROFILE, IM_PROFILE_APP_ID,
@@ -756,7 +757,7 @@ fn strings(values: &[&str]) -> Vec<String> {
 /// **每个包的能力清单**（顺序 = 目录顺序）。2026-10-02 拆包：动词本身一条不改，只是换了拥有者。
 /// ⚠️ **2026-10-06**：通信面末尾多了一条 `im_typing`——它**不是拆包带来的**，是那一刀把
 /// "早就实现、早就写进文档、却没进能力面"的进行态动词接上（见 [`ADDED_AFTER_THE_SPLIT`]）。
-const IM_PACK: [&str; 18] = [
+const IM_PACK: [&str; 19] = [
     CAPABILITY_ROOMS,
     CAPABILITY_READ_HISTORY,
     CAPABILITY_READ_ATTACHMENT,
@@ -781,6 +782,9 @@ const IM_PACK: [&str; 18] = [
     // 2026-10-23：提醒档（契约 §9.1 的 `PUT /v1/backend/rooms/{room}/attention`，服务端
     // 2026-10-19 起就有；缺的一直是这一侧的动作）。
     CAPABILITY_ATTENTION,
+    // 2026-10-26：房间简介（契约 `CORE_V1_ROOM_PROFILE.md` §3 的 backend 写面；Core 已放开
+    // 到"当前 active owner 不限 kind"，缺的一直是这一侧的动作）。
+    CAPABILITY_WRITE_ROOM_PROFILE,
 ];
 const SOCIAL_PACK: [&str; 7] = [
     CAPABILITY_CONTACTS,
@@ -832,7 +836,7 @@ const DIRECTORY_BEFORE_THE_SPLIT: [&str; 20] = [
 /// ⇒ 将来谁再加一条，必须在这里写出来（而不是让"并集等于 20 条"那条断言静默失效）。
 // ⚠ **2026-10-13 起这一格不只一条**：`im_typing`（那一刀把"早就实现却没进能力面"的进行态接上）
 // 与房治理那两条（开群房 / 邀请）。名字保留原样——它说的是"拆包之后点名的那些"。
-const ADDED_AFTER_THE_SPLIT: [&str; 8] = [
+const ADDED_AFTER_THE_SPLIT: [&str; 9] = [
     CAPABILITY_TYPING,
     CAPABILITY_CREATE_GROUP,
     CAPABILITY_INVITE,
@@ -841,6 +845,7 @@ const ADDED_AFTER_THE_SPLIT: [&str; 8] = [
     CAPABILITY_REMOVE_MEMBER,
     CAPABILITY_TRANSFER_OWNER,
     CAPABILITY_ATTENTION,
+    CAPABILITY_WRITE_ROOM_PROFILE,
 ];
 
 /// **拆包前那 11 条写效应声明**（逐条同序）。
@@ -2017,7 +2022,7 @@ fn the_app_declares_its_verbs_with_their_verifications() {
 
     // **2026-10-02 拆包**：动词一条不少，只是换了拥有者——每个包各自声明自己那一组，
     // 三个包的并集**逐条等于**拆包前那份目录（顺序也一样）。
-    assert_eq!(declared_ids(&app), strings(&IM_PACK), "通信面 18 条");
+    assert_eq!(declared_ids(&app), strings(&IM_PACK), "通信面 19 条");
     assert_eq!(declared_ids(&social), strings(&SOCIAL_PACK), "关系面 6 条");
     assert_eq!(
         declared_ids(&profile),
@@ -2138,6 +2143,13 @@ fn the_app_declares_its_verbs_with_their_verifications() {
                 "repeatable-write",
                 Some(CAPABILITY_ROOMS),
             ),
+            // 房间简介（2026-10-26）：每间房一条版本链，同 key 同摘要重放不追加版本
+            // ⇒ `repeatable-write`；复核 = **翻记录的房间头**（不新增读简介的动词）。
+            (
+                CAPABILITY_WRITE_ROOM_PROFILE,
+                "repeatable-write",
+                Some(CAPABILITY_READ_HISTORY),
+            ),
         ],
     );
     // 关系面四个写动词同属"同参数第二次成功、零新事实"那一档（发起申请回到既有段 /
@@ -2209,6 +2221,7 @@ fn the_app_declares_its_verbs_with_their_verifications() {
     // 拆包之后加的那些：房治理四条（2026-10-13）与「正在写」；最后一条是**翻记录的隐式写**
     // （2026-10-20 补声明——它从前被"未声明即只读"误读成读，而它读完之后会推进读位置）。
     // 2026-10-23 末尾再添**提醒档**（状态写：同值重写天然幂等，复核 = 通讯录那一栏）。
+    // 2026-10-26 再添**房间简介**（版本链只增不改，复核 = 翻记录的房间头）。
     assert_eq!(
         im_effects[5..],
         [
@@ -2219,8 +2232,9 @@ fn the_app_declares_its_verbs_with_their_verifications() {
             CAPABILITY_TYPING.to_string(),
             CAPABILITY_READ_HISTORY.to_string(),
             CAPABILITY_ATTENTION.to_string(),
+            CAPABILITY_WRITE_ROOM_PROFILE.to_string(),
         ],
-        "拆包之后多了七条声明：房治理四条（2026-10-13）、「正在写」、翻记录的隐式写与提醒档"
+        "拆包之后多了八条声明：房治理四条（2026-10-13）、「正在写」、翻记录的隐式写、提醒档与房间简介"
     );
 
     // 准入：每个包只放行**自己**那几条；别人的动词与契约里有、本层**故意没做**的那件事
@@ -3982,6 +3996,446 @@ fn the_attention_declaration_names_its_two_word_closed_set() {
 }
 
 // ---------------------------------------------------------------------------
+// 6.5 房间简介（写）：房间级公共资料、owner-only、复核 = 翻记录的房间头
+// ---------------------------------------------------------------------------
+
+/// 写一间房的简介（参数只是形状，**语义判据在世界那一侧**）。
+fn write_room_profile(params: ActionParams) -> Action {
+    Action::with_params(ActionId::new(CAPABILITY_WRITE_ROOM_PROFILE), params)
+}
+
+/// 一次写简介的回执体（契约 §3.3：`profile` / `idempotency_replayed` / `request_id`）。
+///
+/// 它**不是**消息回执：没有 `message`、没有 `messages`、没有投递读数——简介不是消息（契约 I1）。
+fn room_profile_body(description: &str, version: u64, replayed: bool) -> String {
+    serde_json::json!({
+        "profile": {
+            "description": description,
+            "version": version,
+            "updated_at": "2026-10-26T10:00:00.000+00:00"
+        },
+        "idempotency_replayed": replayed,
+        "request_id": "req-room-profile"
+    })
+    .to_string()
+}
+
+/// 简介正文（多行 + 首尾空白：契约允许，且要求**原样**保存）。
+const PROFILE_TEXT: &str = "  这个群在做什么：公开资料。\n第二行\t有 Tab。 ";
+
+/// **写的形状**：`PUT /v1/backend/rooms/{room}/profile`、必带幂等键、体里只有两格。
+#[test]
+fn writing_a_room_profile_is_a_two_field_put_with_an_idempotency_key() {
+    let fake = FakeIm::spawn(vec![(200, room_profile_body(PROFILE_TEXT, 1, false))]);
+    let mut app = fake.app();
+    let outcome = call(
+        &mut app,
+        write_room_profile(
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "0")
+                .with(PARAM_DESCRIPTION, PROFILE_TEXT),
+        ),
+    );
+    assert_eq!(outcome.state(), ResultState::Success, "{outcome:?}");
+
+    let request = fake.next_request();
+    assert!(
+        request.starts_with(&format!("PUT /v1/backend/rooms/{HISTORY_ROOM}/profile ")),
+        "路径必须是 backend 那条房间简介端点: {request}"
+    );
+    assert!(
+        request.contains("\"base_version\":0"),
+        "基准版本在体里: {request}"
+    );
+    // **原样上线**：首尾空白与换行都还在这份 JSON 里（trim 只用于判空，不裁剪 payload）。
+    assert!(
+        request.contains("这个群在做什么：公开资料。\\n第二行\\t有 Tab。"),
+        "正文原样进体（换行与 Tab 都是转义后的同一段字）: {request}"
+    );
+    assert!(
+        !request.contains("participant") && !request.contains("\"room_id\""),
+        "体里只有 base_version 与 description（没有主语、没有房号）: {request}"
+    );
+    assert_eq!(
+        fake.connections(),
+        1,
+        "一次写恰好一次请求（不重试、不重发）"
+    );
+    let key = idempotency_key_of(&request);
+    assert!(!key.is_empty(), "写简介必须带幂等键");
+    assert_eq!(
+        key,
+        idempotency_key_of(&request),
+        "键由操作身份合成，同一次操作只有一个"
+    );
+
+    // 回执：房 + 新版本 + 字节数 + 重放标记；**没有消息行**（简介不是消息）。
+    assert_eq!(
+        text_of(&outcome),
+        format!(
+            "room = {HISTORY_ROOM}\nprofile_version = 1\ndescription_bytes = {}\nreplayed = no",
+            PROFILE_TEXT.len()
+        ),
+        "回执形状与其它写动词一致（读数行，不是消息行）"
+    );
+    assert!(
+        !text_of(&outcome).contains("body =") && !text_of(&outcome).contains('\t'),
+        "简介回执不许伪造消息行: {}",
+        text_of(&outcome)
+    );
+
+    // 同 key 重放：世界如实说 `yes`，版本**不追加**（照抄世界给的那一版）。
+    let fake = FakeIm::spawn(vec![(200, room_profile_body(PROFILE_TEXT, 1, true))]);
+    let mut app = fake.app();
+    let replayed = call(
+        &mut app,
+        write_room_profile(
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "0")
+                .with(PARAM_DESCRIPTION, PROFILE_TEXT),
+        ),
+    );
+    assert_eq!(
+        text_of(&replayed),
+        format!(
+            "room = {HISTORY_ROOM}\nprofile_version = 1\ndescription_bytes = {}\nreplayed = yes",
+            PROFILE_TEXT.len()
+        ),
+        "重放标记是读数，不许猜成 no"
+    );
+}
+
+/// 能力面：动词在场、三个参数**都必给**，说明里写清它是房间级公共资料（不是我在房里的呈现）。
+#[test]
+fn the_room_profile_write_declares_three_required_params_and_its_scope() {
+    let fake = FakeIm::spawn(vec![]);
+    let app = fake.app();
+    let declared = app.declared_capabilities();
+    let capability = declared
+        .items()
+        .iter()
+        .find(|capability| capability.id().as_str() == CAPABILITY_WRITE_ROOM_PROFILE)
+        .expect("im_write_room_profile 必须在能力面里");
+
+    let names: Vec<&str> = capability.params().iter().map(|spec| spec.name()).collect();
+    assert_eq!(
+        names,
+        vec![PARAM_ROOM, PARAM_BASE_VERSION, PARAM_DESCRIPTION],
+        "参数就是这三格（房 / 基准版本 / 正文）"
+    );
+    assert!(
+        capability.params().iter().all(|spec| spec.is_required()),
+        "三项都必给：缺一样就不是一次可判定的写"
+    );
+
+    let details = capability.details();
+    for needle in [
+        "公共资料",
+        "不是「我在这间房里是谁」",
+        "im_write_presentation",
+        "owner",
+        "not-room-owner",
+        "unknown-room",
+        "version-conflict",
+        "base_version",
+        "im_read_history",
+    ] {
+        assert!(
+            details.contains(needle),
+            "详情卡要把这件事说清（缺 {needle}）: {details}"
+        );
+    }
+    assert!(
+        capability
+            .params()
+            .iter()
+            .find(|spec| spec.name() == PARAM_BASE_VERSION)
+            .expect("有基准版本")
+            .description()
+            .contains('0'),
+        "没有简介时写 0 这件事要在参数说明里"
+    );
+    assert!(!capability.skeleton().contains('{'));
+    assert!(!capability.details().contains('{'));
+}
+
+/// **写完之后用读历史复核**：房间头出现世界记下的新版本（不新增读简介的动词）。
+#[test]
+fn a_written_room_profile_shows_up_in_the_room_head() {
+    let fake = FakeIm::spawn(vec![
+        (200, room_profile_body(PROFILE_TEXT, 1, false)),
+        (
+            200,
+            history_body_with_room(
+                &[("m-9", "2026-10-26T10:00:00+00:00", false)],
+                None,
+                Some("研发组"),
+                Some((PROFILE_TEXT, 1)),
+            ),
+        ),
+        (200, cursor_advanced_body()),
+    ]);
+    let mut app = fake.app();
+
+    let written = call(
+        &mut app,
+        write_room_profile(
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "0")
+                .with(PARAM_DESCRIPTION, PROFILE_TEXT),
+        ),
+    );
+    assert_eq!(written.state(), ResultState::Success, "{written:?}");
+    assert!(text_of(&written).contains("profile_version = 1"));
+
+    let read = call(
+        &mut app,
+        history(ActionParams::none().with(PARAM_ROOM, HISTORY_ROOM)),
+    );
+    let text = text_of(&read);
+    assert!(
+        text.contains("room_name = 研发组"),
+        "房间头要给房名: {text}"
+    );
+    assert!(
+        text.contains("room_profile (v1) = "),
+        "写后的复核面就是房间头（新版本 v1）: {text}"
+    );
+    assert!(
+        text.contains("第二行\\t有 Tab。"),
+        "简介全文照房间头给（换行 / Tab 已转义成一行）: {text}"
+    );
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.starts_with("room_profile"))
+            .count(),
+        1,
+        "同一页只给一行房间头: {text}"
+    );
+}
+
+/// 失败面：契约的 403 / 404 / 409 / 400 / 401 / 413 各归各格；其余非 2xx 是 `unknown`。
+#[test]
+fn the_room_profile_failure_table_matches_the_contract_codes() {
+    // `not-room-owner` 是新加的那一格：它与 `not-a-member` **不是同义词**，词表两端都认。
+    assert_eq!(ImFailure::NotRoomOwner.as_str(), "not-room-owner");
+    assert_eq!(
+        ImFailure::from_str("not-room-owner"),
+        Some(ImFailure::NotRoomOwner)
+    );
+    assert_ne!(
+        ImFailure::NotRoomOwner.as_str(),
+        ImFailure::NotAMember.as_str(),
+        "「人在房里、权限不够」不许塌成「不在里面」"
+    );
+
+    for (status, expected) in [
+        (400u16, "invalid-argument"),
+        (401, "credential-rejected"),
+        // 403 = 是 active 成员、但不是当前 owner（明确 ACL，不是"不存在"）。
+        (403, "not-room-owner"),
+        // 404 = 房不存在 / 我不是成员（契约不泄露存在性，本层也不分解）。
+        (404, "unknown-room"),
+        // 409 = base_version 过期（主路径）或同键异摘要：同一个状态码，本层不猜是哪一条。
+        (409, "version-conflict"),
+        (413, "too-large"),
+    ] {
+        let fake = FakeIm::spawn(vec![(status, "{\"error\":\"synthetic\"}".to_string())]);
+        let mut app = fake.app();
+        let outcome = call(
+            &mut app,
+            write_room_profile(
+                ActionParams::none()
+                    .with(PARAM_ROOM, HISTORY_ROOM)
+                    .with(PARAM_BASE_VERSION, "3")
+                    .with(PARAM_DESCRIPTION, "改一版简介"),
+            ),
+        );
+        assert_eq!(outcome.state(), ResultState::Failure, "HTTP {status}");
+        assert_eq!(outcome.failure_class(), Some(expected), "HTTP {status}");
+        assert!(
+            text_of(&outcome).is_empty(),
+            "失败不带正文块（状态码与响应体不外泄）: {}",
+            text_of(&outcome)
+        );
+        assert_eq!(fake.connections(), 1, "HTTP {status}：恰好一次请求");
+    }
+
+    // 契约没列出的码、以及 2xx 却不是 JSON ⇒ 提交结果未确认（不猜、不重发）。
+    for (status, body) in [
+        (500u16, "{\"error\":\"synthetic\"}".to_string()),
+        (200, "this is not json".to_string()),
+    ] {
+        let fake = FakeIm::spawn(vec![(status, body.clone())]);
+        let mut app = fake.app();
+        let outcome = call(
+            &mut app,
+            write_room_profile(
+                ActionParams::none()
+                    .with(PARAM_ROOM, HISTORY_ROOM)
+                    .with(PARAM_BASE_VERSION, "3")
+                    .with(PARAM_DESCRIPTION, "改一版简介"),
+            ),
+        );
+        assert_eq!(
+            outcome.state(),
+            ResultState::Unknown,
+            "HTTP {status} / {body}"
+        );
+        assert_eq!(outcome.failure_class(), None, "未确认不给分类");
+        assert_eq!(fake.connections(), 1, "不重发");
+    }
+
+    // 2xx 是 JSON、但**读不出那几格**：世界说"收下了"，只是回执形状没读懂——
+    // 与其它写动词一致：成功 ＋ 读数写 `-` / `?`，**不编版本号、也不把读不出来说成 no**。
+    let fake = FakeIm::spawn(vec![(
+        200,
+        "{\"profile\":{\"version\":\"三\"}}".to_string(),
+    )]);
+    let mut app = fake.app();
+    let outcome = call(
+        &mut app,
+        write_room_profile(
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "3")
+                .with(PARAM_DESCRIPTION, "改一版简介"),
+        ),
+    );
+    assert_eq!(outcome.state(), ResultState::Success, "{outcome:?}");
+    assert_eq!(
+        text_of(&outcome),
+        format!("room = {HISTORY_ROOM}\nprofile_version = -\ndescription_bytes = -\nreplayed = ?"),
+        "读不出来的格如实留白，不猜"
+    );
+}
+
+/// 本地参数网关：空 / 纯空白 / 超 2000 字节 / 含 NUL / 缺参 ⇒ `invalid-argument`，**零出网**。
+#[test]
+fn an_invalid_room_profile_is_refused_before_any_request() {
+    let fake = FakeIm::spawn(vec![]);
+    let mut app = fake.app();
+
+    let too_long = "a".repeat(2001);
+    let full = |description: &str| {
+        ActionParams::none()
+            .with(PARAM_ROOM, HISTORY_ROOM)
+            .with(PARAM_BASE_VERSION, "0")
+            .with(PARAM_DESCRIPTION, description)
+    };
+    let cases: Vec<(&str, ActionParams)> = vec![
+        ("空正文", full("")),
+        ("全空白", full(" \n\t  ")),
+        ("超 2000 字节", full(too_long.as_str())),
+        ("含 NUL", full("简介\u{0}带 NUL")),
+        // 缺任意一格都不是一次可判定的写。
+        ("缺房号", {
+            ActionParams::none()
+                .with(PARAM_BASE_VERSION, "0")
+                .with(PARAM_DESCRIPTION, "简介")
+        }),
+        ("缺基准版本", {
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_DESCRIPTION, "简介")
+        }),
+        ("缺正文", {
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "0")
+        }),
+        ("基准版本不是非负整数", {
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "-1")
+                .with(PARAM_DESCRIPTION, "简介")
+        }),
+    ];
+    for (label, params) in cases {
+        let outcome = call(&mut app, write_room_profile(params));
+        assert_eq!(
+            outcome.failure_class(),
+            Some("invalid-argument"),
+            "{label}: {outcome:?}"
+        );
+        assert_eq!(fake.connections(), 0, "{label}：参数非法一次都不出网");
+    }
+
+    // 正对照：正好 2000 字节是合法的，而且**原样上线**（不因为判空那一步被裁掉）。
+    let at_limit = "a".repeat(2000);
+    let fake = FakeIm::spawn(vec![(200, room_profile_body(at_limit.as_str(), 4, false))]);
+    let mut app = fake.app();
+    let outcome = call(
+        &mut app,
+        write_room_profile(
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "3")
+                .with(PARAM_DESCRIPTION, at_limit.as_str()),
+        ),
+    );
+    assert_eq!(outcome.state(), ResultState::Success, "{outcome:?}");
+    assert_eq!(fake.connections(), 1, "边界值必须真的出网一次");
+    assert_eq!(
+        text_of(&outcome),
+        format!(
+            "room = {HISTORY_ROOM}\nprofile_version = 4\ndescription_bytes = 2000\nreplayed = no"
+        )
+    );
+}
+
+/// **非 owner 不产生任何本地状态**：403 之后既没有"假成功"，也没有把版本记成"这一段看过"
+/// ——下一次读历史的房间头仍然**摊全文**（账本只由真的读面写，不由失败的写写）。
+#[test]
+fn a_refused_profile_write_leaves_no_local_state_behind() {
+    let fake = FakeIm::spawn(vec![
+        (403, "{\"error\":{\"code\":\"not_room_owner\"}}".to_string()),
+        (
+            200,
+            history_body_with_room(
+                &[("m-1", "2026-10-26T09:00:00+00:00", false)],
+                None,
+                Some("研发组"),
+                Some(("别人写的简介", 7)),
+            ),
+        ),
+        (200, cursor_advanced_body()),
+    ]);
+    let mut app = fake.app();
+
+    let refused = call(
+        &mut app,
+        write_room_profile(
+            ActionParams::none()
+                .with(PARAM_ROOM, HISTORY_ROOM)
+                .with(PARAM_BASE_VERSION, "7")
+                .with(PARAM_DESCRIPTION, "我想改的简介"),
+        ),
+    );
+    assert_eq!(refused.state(), ResultState::Failure);
+    assert_eq!(refused.failure_class(), Some("not-room-owner"));
+    assert!(text_of(&refused).is_empty(), "拒绝不带正文块");
+
+    // 读历史：世界仍然是 v7 的原文，而且**全文照给**（不是 already shown）——
+    // 说明那次失败的写一个字节都没有写进本地账本。
+    let text = text_of(&call(
+        &mut app,
+        history(ActionParams::none().with(PARAM_ROOM, HISTORY_ROOM)),
+    ));
+    assert!(
+        text.contains("room_profile (v7) = 别人写的简介"),
+        "失败之后世界那一版没变: {text}"
+    );
+    assert!(
+        !text.contains("already shown"),
+        "这次 Run 里没有任何一版被「展示过」——失败的写不许记账: {text}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 7. 只读投影（宿主那一侧用的入口——**不是主体的动词**）
 // ---------------------------------------------------------------------------
 
@@ -5404,8 +5858,10 @@ fn only_the_writes_declare_effects() {
             CAPABILITY_READ_HISTORY.to_string(),
             // 2026-10-23：提醒档是**状态写**（同值重写天然幂等，复核 = 通讯录那一栏）。
             CAPABILITY_ATTENTION.to_string(),
+            // 2026-10-26：房间简介（版本链只增不改；复核 = 翻记录的房间头）。
+            CAPABILITY_WRITE_ROOM_PROFILE.to_string(),
         ],
-        "拆包之后多了七条声明：房治理四条（2026-10-13）、「正在写」、翻记录的隐式写与提醒档"
+        "拆包之后多了八条声明：房治理四条（2026-10-13）、「正在写」、翻记录的隐式写、提醒档与房间简介"
     );
     assert!(!declared.contains(&CAPABILITY_READ_ATTACHMENT.to_string()));
     // 三个只读动词**不**声明写效应（关系账 / 拉黑名单 / 我自己的资料）。

@@ -3804,7 +3804,10 @@ fn the_production_assembly_has_a_verb_budget() {
 
     // **今天的实测值**（2026-10-23：apps=8 / verbs=60 / doors=4）。+1 是契约 §9.1 的
     // `im_attention`（主人 2026-10-23 批准的两个入口之一）；本刀没有删动词，预算随批准的能力面 +1。
-    const VERB_BUDGET: usize = 60;
+    // **2026-10-26 +1**：`im_write_room_profile`（契约 `CORE_V1_ROOM_PROFILE.md` §3 的写面——
+    // Core 已放开到"当前 active owner 不限 kind"，Runtime 补上那只手）。同样没有删动词，
+    // 预算随批准的能力面 +1；两笔都写在这里，别让它变成"悄悄涨上去的数字"。
+    const VERB_BUDGET: usize = 61;
 
     let root = std::env::temp_dir().join(format!("celira-roster-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);

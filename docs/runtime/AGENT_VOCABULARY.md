@@ -170,6 +170,7 @@ Agent 与人的差别数得完，每条都有对应的机制。**物理不能改
 | `hold`（歇着） | **主体结束这一段的第二种方式**：**不收场为「干完了」、不烧轮**；有事（门铃／闹钟）**下一段**接着办。它与收场**机械上同一件事**（都结束这一段、都封存），**区别只在词**——那个词进账，下一段的开场纸条据此说「上一段是你搁下的，不是断了」。⚠ 它**不是**「一段吊着不关」：那种形状要么握着排他写资格（挡住操作者），要么与「模型配置下一次活动生效」那条承诺冲突 | `RUNTIME_TERMINAL_DECISIONS.md` §6（2026-10-10 第二次收口；**已落地**：她的动词面上有 `hold_run`） |
 | 账 | **世界**那一本账：im 服务端存储。⚠ **「账」是一个模式名**——只追加、可据以恢复的事实记录（判据取自 `../constitution/AGENT_CONTINUITY_CONSTITUTION.md:65` 的「账／版面」之分：**可不可重写**）；**必须带归属限定**（世界账／地基账／宿主账／经历账）。⚠ **「运行账本」不是账**（那是机器侧运行产物），见 §9.1③之补 | `im/server` 的存储（本表所列其余名字的权威都在执行端，这一格在**世界**） |
 | `Effect`（效果） | 动作的后果，**按能不能核实分档**（`ReadOnly` / `ExclusiveCreate` / `RepeatableWrite` / `UnverifiableWrite`）。⚠ **本表此前对它零覆盖**——它是三原语之一，权威在别处 | `AGENTS.md`「描述 Agent 的语言只有三个原语」／`agent/src/app_contract.rs` 的 `EffectDeclaration`（`agent/README.md` §3.11） |
+| **房间简介 / `room_profile`** | **房间级的公共资料**：这间房是做什么的（版本化、只增不改、只有该房当前 active owner 写得动）。⚠ **不是「我在房里的呈现」**——后者是 `presentation`：每（房 × 我）一条**独立**版本链、成员自己也能写。判据一句话：简介挂在 Room 上，呈现挂在（Room × Participant）上 | 契约 `../contracts/core-v1/CORE_V1_ROOM_PROFILE.md`；写 `agent/src/im_app.rs` 的 `im_write_room_profile`；读 `im_read_history` 的房间头（`agent/README.md` §3.108 / §3.109） |
 | `材料` / `Materials` | **两义，别混**：① **可读的材料**——显式授权给主体的**只读资料根**（与环境根是两件事，重叠在装配期被拒）② **认知材料**——主体在一次清醒期里产生的**模型输出** | ① `agent/README.md` §2（`--materials`）＋ `../agent/06_AGENT_RUNTIME_END_STATE.md` 的 `Materials` 行 ② `../constitution/AGENT_PHILOSOPHY.md`（「认知材料」） |
 
 ### 9.1 误读风险清单（按"读者第一眼会读成什么"排，不按通用性）

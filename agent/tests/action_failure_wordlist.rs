@@ -204,8 +204,8 @@ fn wordlists_round_trip_every_mark() {
         total += encoder.len();
     }
     assert_eq!(
-        total, 85,
-        "九份词表的标记总数变了（{total}）——加取值就要改这一行（2026-10-20 直连抓取退役：web 少了 wrong-kind / redirect-loop / private-address-refused 三格）"
+        total, 86,
+        "九份词表的标记总数变了（{total}）——加取值就要改这一行（2026-10-20 直连抓取退役：web 少了 wrong-kind / redirect-loop / private-address-refused 三格；2026-10-26 房间简介补 `not-room-owner`）"
     );
 }
 
