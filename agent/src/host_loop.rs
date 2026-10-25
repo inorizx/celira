@@ -930,7 +930,23 @@ impl<'a> Host<'a> {
             }
         };
         // 这一段收场：细胞散掉（下一段是新的一格）。**先问一句"还有没有没摆到眼前的动静"**。
-        let unshown = watch_guard.end();
+        let unshown_by_watch = watch_guard.end();
+        // **收尾窗口的唤醒不能把锚推过去**（2026-10-25 真机验收换来的）：
+        // 消息可能在最后一张事件卡片之后、`watch_guard.end()` 之前/之后到达，落进
+        // "这一段已经看过"与"下一段从收场时刻起算"之间的缝——铃是易失的，宿主只凭
+        // `unshown` 会把锚推到 `settled_at`，下一条消息因此不在任何事件卡片里。
+        //
+        // 收场时**再取一眼**唤醒通道：只要还有待取的唤醒，就按“可能有没摆到眼前的动静”
+        // 处理，不把锚推过这一段。取走它并把 `accept` 的终局判断留在这里，避免下一条
+        // 唤醒被无声吞掉。
+        let pending = wake.next_within(std::time::Duration::ZERO);
+        let unshown = match pending {
+            Some(woken) => {
+                accept(woken)?;
+                true
+            }
+            None => unshown_by_watch,
+        };
         // **锚在这里推进**（2026-10-10 改）：推到场**收场**的时刻，不是场开头那一刻——
         // 见上面那段。三条纪律：
         //

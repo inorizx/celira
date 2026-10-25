@@ -2133,6 +2133,60 @@ fn the_snapshot_lands_at_the_opening_and_never_repeats_per_turn() {
 }
 
 // ---------------------------------------------------------------------------
+// 收尾窗口：唤醒在锚推进之前不能被吞掉
+// ---------------------------------------------------------------------------
+
+/// 只有一格待取信号的唤醒源；`next_within(0)` 取走它，模拟“Run 收场时通道里已经有下一声铃”。
+struct PendingWake {
+    pending: Mutex<Option<Woken>>,
+}
+
+impl PendingWake {
+    fn of(woken: Woken) -> Self {
+        Self {
+            pending: Mutex::new(Some(woken)),
+        }
+    }
+}
+
+impl WakePort for PendingWake {
+    fn next(&self) -> Woken {
+        self.next_within(Duration::ZERO)
+            .unwrap_or(Woken::Refused(DoorbellFailure::ChannelLost))
+    }
+
+    fn next_within(&self, _window: Duration) -> Option<Woken> {
+        self.pending.lock().expect("短临界区").take()
+    }
+}
+
+/// **收尾时通道里还有唤醒 ⇒ 不能把锚推过这一段。**
+///
+/// 这是 2026-10-25 默认助手真机验收抓到的缝：消息在最后一张事件卡片之后、`watch_guard.end()`
+/// 之前/之后到达；`unshown` 只看“到达过几次 vs 渲染过几次”，看不到已经落在唤醒通道里的那一声。
+/// 宿主若把锚推到 `settled_at`，下一条消息就落在两个窗口之间——下一段既没有卡片，也没有
+/// 通知栏增量，看起来像“没醒”。
+#[test]
+fn a_pending_wake_at_run_end_keeps_the_anchor_from_skipping_the_next_message() {
+    let fixture = Fixture::new("pending-wake-anchor");
+    fixture.im_face.reply(200, &rooms_body());
+    let access = fixture.access();
+    let mut host = fixture.host(&access);
+    let mut model = ScriptedModel::new(vec![ModelOutput::finish(SubjectEnding::Silent)]);
+    let wake = PendingWake::of(Woken::Changed);
+
+    let reading = host
+        .run_woken(Woken::Changed, &wake, &mut model)
+        .expect("一段在场");
+
+    assert!(
+        reading.unshown,
+        "收尾时通道里还有唤醒 ⇒ 必须按「可能没摆到眼前」处理，锚不许推过这一段"
+    );
+    assert_eq!(model.calls(), 1, "这一轮只该驱动一次");
+}
+
+// ---------------------------------------------------------------------------
 // TASK_75：本地钟源——到点响铃 / 离线补响 / 投影那一行 / 起源如实
 // ---------------------------------------------------------------------------
 
