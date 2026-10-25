@@ -23,6 +23,7 @@ const {
   parseArguments,
   makeReceiptMark,
   skillText,
+  releaseNoteSkillText,
   writeSkills,
   DECOY_NAMES,
   SKILL_NAME,
@@ -139,6 +140,17 @@ check('★ 不点名模式：任务不说技能名/目录名/格式码；技能�
   assert.ok(!text.includes(`description: ${MARK}`), '码不许进索引')
 })
 
+check('★ 不点名技能正文：它是一份发布说明规矩，码是格式里的编号（不是第二个任务）', () => {
+  const text = releaseNoteSkillText(UNPROMPTED_SKILL_NAME, MARK, UNPROMPTED_HINT)
+  assert.ok(text.startsWith('---\n'))
+  assert.ok(text.includes(`name: ${UNPROMPTED_SKILL_NAME}`))
+  assert.ok(text.includes(`description: ${UNPROMPTED_HINT}`))
+  assert.ok(text.includes('发布说明'))
+  assert.ok(text.includes('编号：' + MARK), '码要在格式里自然出现')
+  assert.ok(!text.includes('原样报回去'), '第一版两份指令打架：任务要发布说明，技能却要单独报码')
+  assert.ok(!text.includes('你应该') && !text.includes('你必须'), '技能是事实与规矩，不是命令')
+})
+
 check('回执码：形状固定、**注入随机源可判错**、两次调用不同（不可猜是判据的前提）', () => {
   const injected = makeReceiptMark(() => Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]))
   assert.equal(injected, MARK, '注入固定字节 ⇒ 逐字可判')
@@ -214,6 +226,7 @@ check('★ 不点名铺 N 份：目标带 description，干扰项不带；目标
     assert.ok(target, '目标那一份要在')
     assert.ok(fs.readFileSync(target, 'utf8').includes(MARK))
     assert.ok(fs.readFileSync(target, 'utf8').includes(UNPROMPTED_HINT), '目标要有业务触发说明')
+    assert.ok(fs.readFileSync(target, 'utf8').includes('编号：'), '目标正文要是发布说明规矩')
     // `release-notes` 是近邻干扰项，必须真的存在，这样“挑对”才有意义。
     assert.ok(fs.existsSync(path.join(root, 'skills', 'release-notes', 'SKILL.md')))
     // 其余干扰项：一个都不许含目标码，也不许带目标 description。

@@ -237,6 +237,33 @@ function skillText(name, code, hint = null) {
 }
 
 /**
+ * **不点名模式的技能正文**：它必须是一份**真的发布说明规矩**，而不是“报一个码”的独立任务。
+ *
+ * 2026-10-25 真跑换来的：第一版把 `skillText()` 原样拿来用，正文写“把这一行原样报回去，别的不加”，
+ * 而任务要求“把这次改动写成发布说明” ⇒ 两份指令互相打架。5 次里 4 次她**读了技能、按任务写了
+ * 发布说明，但没把码放进去**；探针把这判成“翻到了没读懂”，其实是我把**任务**和**技能**写成了
+ * 两个目标。现在的正文只描述**发布说明的格式**，码是格式里的“编号”那一行——读到了就会自然写出来。
+ */
+function releaseNoteSkillText(name, code, hint) {
+  return [
+    '---',
+    `name: ${name}`,
+    `description: ${hint}`,
+    '---',
+    '',
+    '# ' + name,
+    '',
+    '把一次改动写成发布说明时：',
+    '',
+    '- 标题写 `发布说明 · <日期>`；',
+    '- 正文按「新增 / 修复 / 注意」分组；',
+    '- 文末单独写一行 `编号：' + code + '`；',
+    '- 别的格式不要求。',
+    '',
+  ].join('\n')
+}
+
+/**
  * 干扰项自己的码：**与目标码逐字不同**。
  *
  * ⚠ 为什么要有这个函数（2026-10-06 用例抓出来的）：生产上两边都用 `crypto.randomBytes`，
@@ -279,7 +306,11 @@ function writeSkills(
     fs.mkdirSync(dir, { recursive: true })
     const code = name === target ? mark : decoyCode(mark, random)
     const file = path.join(dir, SKILL_FILE)
-    fs.writeFileSync(file, skillText(name, code, name === target ? hint : null), 'utf8')
+    const text =
+      name === target && hint
+        ? releaseNoteSkillText(name, code, hint)
+        : skillText(name, code, name === target ? hint : null)
+    fs.writeFileSync(file, text, 'utf8')
     written.push(file)
   }
   return written
@@ -733,6 +764,7 @@ module.exports = {
   parseArguments,
   makeReceiptMark,
   skillText,
+  releaseNoteSkillText,
   writeSkills,
   DECOY_NAMES,
   SKILL_NAME,
