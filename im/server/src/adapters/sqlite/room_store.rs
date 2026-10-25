@@ -1623,8 +1623,9 @@ impl crate::ports::room::RoomStore for SqliteRoomStore {
             // 2. 调用者必须是该 group 的 active owner。
             require_active_group_owner(&mut tx, owner_id.as_str(), room_id.as_str()).await?;
 
-            // 3. 目标不能是自己，也不能是 Agent（Group owner 只能是
-            //    Human）。
+            // 3. 目标不能是自己。目标可以是 Human 或 Agent：owner 是房内的
+            //    治理角色（`role`），不是参与者种类（`kind`）——2026-09-27 起
+            //    「owner = 创建者」，转让判据与创建者同形。
             if target_id.as_str() == owner_id.as_str() {
                 return Err(RoomStoreError::InvalidTransferTarget);
             }
