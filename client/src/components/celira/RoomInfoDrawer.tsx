@@ -339,16 +339,34 @@ export function RoomInfoDrawer({ room, open, onOpenChange, onPreviewImage }: Roo
                             ) : null}
                             {m.role === 'owner' ? <OwnerBadge /> : null}
                             {isGroup && isOwner && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="gap-1 px-2 text-caption"
-                                onClick={() => setEditingAgent(m.id)}
-                                aria-label={`编辑 ${m.displayName} 的群介绍`}
-                              >
-                                <PenLine className="size-3.5" />
-                                编辑
-                              </Button>
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="size-7 p-0"
+                                  onClick={() => setEditingAgent(m.id)}
+                                  aria-label={`编辑 ${m.displayName} 的群介绍`}
+                                  title={`编辑 ${m.displayName} 的群介绍`}
+                                >
+                                  <PenLine className="size-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="size-7 p-0"
+                                  onClick={() =>
+                                    void runAction(async () => {
+                                      // 群主转让的判据是 role，不看 kind：人类群主
+                                      // 可以把群交给房里的 Agent（与人类成员同一条路）。
+                                      await transferOwnership(room.id, m.id, undefined)
+                                    })
+                                  }
+                                  aria-label={`转让群主给 ${m.displayName}`}
+                                  title={`转让群主给 ${m.displayName}`}
+                                >
+                                  <Crown className="size-3.5" />
+                                </Button>
+                              </>
                             )}
                             {m.official ? <OfficialBadge /> : <AgentBadge />}
                           </div>
