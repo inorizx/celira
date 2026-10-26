@@ -12,16 +12,18 @@ license = "MIT"
 
 # 这些依赖分两类：
 # - reqwest / serde / serde_json：Provider Adapter 的 wire 与传输，以及 MCP App 的外部协议搬运；
-# - rmcp / tokio：MCP 边缘的协议客户端与异步宿主（Core / Foundation 不得引用它们）。
+# - rmcp / tokio：MCP 边缘的协议客户端与异步宿主（Core / Foundation 不得引用它们）；
+# - axum / getrandom：外部输入入口那一件（HTTP 入站与它自己的随机 id / secret）。
 # 边界由 tests/minimal_agent.rs 的依赖与分层守卫机械检查。
 [dependencies]
+axum = "0.8"
+getrandom = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rmcp = { version = "3.7.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
-axum = "0.8"
 rmcp = { version = "3.7.0", default-features = false, features = ["server", "transport-streamable-http-server"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }

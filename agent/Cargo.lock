@@ -156,6 +156,7 @@ name = "celira-agent"
 version = "0.1.3"
 dependencies = [
  "axum",
+ "getrandom 0.4.3",
  "reqwest",
  "rmcp",
  "serde",

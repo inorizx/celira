@@ -61,6 +61,7 @@
 
 pub mod activity_origin;
 pub mod app_contract;
+pub mod channels;
 pub mod clock;
 pub mod commit;
 pub mod composition;

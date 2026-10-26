@@ -1135,7 +1135,7 @@ const BIN_ENTRY_PREFIX: &str = "bin";
 ///
 /// 进这张表只有一个后果，但它是实打实的：**它们进"唯一循环"那条判据的射程**
 /// （见 `only_the_one_loop_writes_the_trace`）——入口不许自己往轨迹里写。
-const PRODUCT_ENTRIES: [(&str, &str); 5] = [
+const PRODUCT_ENTRIES: [(&str, &str); 6] = [
     (
         "agent_host.rs",
         "常驻宿主入口：产品的运行形态就是它（家侧 `up` 起的就是这个）",
@@ -1151,6 +1151,10 @@ const PRODUCT_ENTRIES: [(&str, &str); 5] = [
     (
         "agent_host_acknowledge.rs",
         "宿主行政动作入口：显式确认并清除上一次保存失败留下的暂停标记",
+    ),
+    (
+        "agent_channel.rs",
+        "外部输入入口的操作者命令：加/列/删路由，或对着正在跑的入口发一条真请求",
     ),
     (
         "environment_diagnose.rs",
@@ -1855,6 +1859,15 @@ const ADAPTER_SOURCES: [&str; 3] = [
     "model_choice.rs",
 ];
 
+/// **入口语言豁免**：`channels.rs` 是**服务器那一侧**的入站入口，它必须说 `http` / `json` /
+/// `token` 这些词（路由、Bearer、事件文件），而它既不是 Core，也不是供应商适配层。
+///
+/// 与 [`ADAPTER_SOURCES`] 同一条纪律：这是一份**封闭**名单，只跳过列在这里的文件；下面同样会
+/// 断言它们**真的在 `src/` 下**、且**真的含 wire 词**（否则"排除"就成了掩盖）。它**不是**
+/// "入口可以随便写"——除了 `lib.rs` 的模块声明，`channels` 照样受 `BOUNDARY_MODULES`
+/// （Core / Foundation 不许认识它）与 `FILE_SYSTEM_SOURCES` / `NETWORK_SOURCES` 约束。
+const INGRESS_SOURCES: [&str; 1] = ["channels.rs"];
+
 /// 允许直接说**网络/序列化**语言（`reqwest` / `serde_json`）的源文件：**封闭名单**。
 ///
 /// 这份名单原来只有供应商适配层一个文件。TASK_21 起多了 `im_app.rs`：它是第一条**跨系统
@@ -1871,7 +1884,7 @@ const ADAPTER_SOURCES: [&str; 3] = [
 /// 自己读响应，理由与 `im_app.rs` 同类（"某个 App 要读外部世界"），只是对面不是我们的服务端，
 /// 而是**任何一个站点**与一家搜索厂商。它搬回来的东西**一律是外部内容**（不是我们的任何事实），
 /// 而且五堵机械墙全部钉在它自己这一层。
-const NETWORK_SOURCES: [&str; 7] = [
+const NETWORK_SOURCES: [&str; 8] = [
     "provider_adapter.rs",
     // TASK_44：第二条 wire（Responses）同样自己发请求、自己读响应——它自己的九类失败与
     // 四种机械墙（`store: false` / 相邻配对 / 状态非 completed 即拒 / 平铺 usage）钉在它自己那层。
@@ -1888,6 +1901,10 @@ const NETWORK_SOURCES: [&str; 7] = [
     // 因此"换一条通道"没有变成"核心也能发请求"。地址墙在解析期（`mcp::parse_declaration`），
     // 运行期的三道（不跟随重定向 / 响应有界 / 每次请求一个窗口）钉在这个文件里。
     "mcp/remote.rs",
+    // **外部输入入口**那一刀：`channels.rs` 是**服务器那一侧**（axum 监听回环/内网地址、
+    // 读请求、写答复），不是"某个 App 要读外部世界"。它说 `serde::` 与 `serde_json`，
+    // 因此照样进这条封闭名单——"谁能自己收发"必须被人看见。
+    "channels.rs",
 ];
 
 /// Core 自己实现的两个文件：它们不得引用 Adapter / App / OS，也不得引用它们的依赖。
@@ -1955,7 +1972,7 @@ const CORE_SOURCES: [&str; 2] = ["core.rs", "foundation.rs"];
 /// [`every_module_is_accounted_for_in_the_layering_ledger`] 机械检查——新模块会自动要一个说法，
 /// 账本里留着一个不存在的模块也会红。**代价的来历**：这份名单手抄了两次都漏项
 /// （2026-10-10 一次补 11 项；2026-10-11 落的两件又漏了），缺的从来不是记性。
-const BOUNDARY_MODULES: [&str; 51] = [
+const BOUNDARY_MODULES: [&str; 52] = [
     "provider_adapter",
     "file_app",
     "file_view",
@@ -2052,6 +2069,10 @@ const BOUNDARY_MODULES: [&str; 51] = [
     // ⇒ 补进去是绿的，它们本来只是没人回头补。
     "resident_lifetime",
     "terminal_held",
+    // **外部输入入口**那一刀：`channels` 是**宿主入口**（HTTP 入站、Bearer、限流、幂等、收件箱），
+    // Core / Foundation 一样不许认识它——"外面谁发来了一条"是私有输入，不是执行语义；
+    // 它连"这一次活动怎么被发起的"都不说（那是起源事实，在 `activity_origin`）。
+    "channels",
 ];
 
 /// 进不了 [`BOUNDARY_MODULES`] 的模块：**照单补进去会在 `core.rs` 上当场红**，而红的原因不是
@@ -2097,13 +2118,25 @@ fn references_module(code: &str, module: &str) -> bool {
 const FACADE_SOURCE: &str = "lib.rs";
 const FACADE_MODULE_NAME: &str = "provider_adapter";
 
-/// 只允许 Adapter 拥有的依赖。**这是一个封闭名单**：新增依赖必须先改这里，
+/// 只允许 Adapter / 入口拥有的依赖。**这是一个封闭名单**：新增依赖必须先改这里，
 /// 否则守卫会失败——这正是我们想要的（依赖变化必须被人看见）。
 ///
 /// 阶段八没有新增任何**依赖**：身份环境与只追加存储用 `std::fs`，序列化复用已有的
 /// `serde_json`。“复用已有依赖”因此不改变这份名单；`serde_json` 的使用范围另由
 /// `SERDE_JSON_SOURCES` 单独约束（见下）。
-const ADAPTER_DEPENDENCIES: [&str; 6] = ["axum", "reqwest", "rmcp", "serde", "serde_json", "tokio"];
+///
+/// **外部输入入口**那一刀多了一项 `getrandom`（入口用它生成事件 id 与 secret）；`axum` 从
+/// dev-dependencies 迁到 dependencies（同一个版本，服务端那一侧真的要用它），`tokio` 加
+/// `net`（监听套接字）。三项都在这张表里，因此依赖的变化仍然必须被人看见。
+const ADAPTER_DEPENDENCIES: [&str; 7] = [
+    "axum",
+    "getrandom",
+    "reqwest",
+    "rmcp",
+    "serde",
+    "serde_json",
+    "tokio",
+];
 
 /// 允许使用 `serde_json` 的源文件。
 ///
@@ -2114,7 +2147,7 @@ const ADAPTER_DEPENDENCIES: [&str; 6] = ["axum", "reqwest", "rmcp", "serde", "se
 /// 阶段八把 `serde_json` 的使用从“只有 Adapter”扩到“Adapter + 身份环境存储”：
 /// 存储把经历与事实写成 NDJSON，**不引入新依赖**。这是一次必须被人看见的变化，
 /// 所以它是一条显式、封闭的名单，而不是让 `serde_json` 变成随处可用。
-const SERDE_JSON_SOURCES: [&str; 24] = [
+const SERDE_JSON_SOURCES: [&str; 25] = [
     "provider_adapter.rs",
     "store.rs",
     // 2026-10-08（同上那一刀）：NDJSON 的编解码跟着**分卷**走，因此新文件也显式列入。
@@ -2171,6 +2204,10 @@ const SERDE_JSON_SOURCES: [&str; 24] = [
     // **逐轮读数账**那一刀：它把一行行读数写成 NDJSON（与两份追加存储同一门格式，
     // **不引入新依赖**）。这是一次必须被人看见的变化，因此照样显式列入。
     "model_readings.rs",
+    // **外部输入入口**那一刀：`channels.rs` 读 `routes.json`、把每条事件写成一份 JSON 文件
+    // （我们自己的本机格式，不是任何外部协议）。与上面几条同款显式列入——
+    // 这不是"让 serde_json 随处可用"。
+    "channels.rs",
 ];
 
 /// 允许碰文件系统的源文件：只读文件 App、把资料与派生经历目录合成一个视图的只读视图、
@@ -2180,7 +2217,7 @@ const SERDE_JSON_SOURCES: [&str; 24] = [
 /// **唯一**允许碰文件系统的模块"——那句话从第二个 App 起就不成立了（拥有自己存储的 App
 /// 自己碰文件系统），而它和这张表只隔一行，正是"描述句与事实打架"的典型形状。
 /// 表里每一行各自带理由，判据只认这张表。
-const FILE_SYSTEM_SOURCES: [&str; 22] = [
+const FILE_SYSTEM_SOURCES: [&str; 23] = [
     "file_app.rs",
     "file_view.rs",
     "composition.rs",
@@ -2257,6 +2294,11 @@ const FILE_SYSTEM_SOURCES: [&str; 22] = [
     // ⚠ 它**不自己取锁**：单写者由**环境那把写锁**派生——写只发生在真的调用模型时，而调用
     // 需要过准入，准入要那把锁。因此两个进程不会同时往这一份账上写。
     "model_readings.rs",
+    // **外部输入入口**那一刀：它读 `<环境根>/channels/routes.json`、剪
+    // `<环境根>/channels/inbox/`、把每条事件写成一份文件，并在 Unix 上把凭据文件设成 0600。
+    // 读写的都是**宿主入口自己的地盘**（不是主体自持物、不是存储格式），但"谁碰文件系统"
+    // 仍是边界事实，因此照样进这条封闭名单。
+    "channels.rs",
 ];
 
 /// 文件系统 API 记号：只允许出现在上面那两个文件里。
@@ -3294,6 +3336,12 @@ fn minimal_language_stays_free_of_legacy_and_vendor_words() {
             "跳过名单里的 {adapter} 不在 src/ 下：名单过期了"
         );
     }
+    for ingress in INGRESS_SOURCES {
+        assert!(
+            names.iter().any(|name| name == ingress),
+            "入口豁免名单里的 {ingress} 不在 src/ 下：名单过期了"
+        );
+    }
 
     let mut scanned = 0usize;
     for (name, source) in &sources {
@@ -3302,6 +3350,15 @@ fn minimal_language_stays_free_of_legacy_and_vendor_words() {
             assert!(
                 !forbidden_substring_hits(source, &FORBIDDEN_SUBSTRINGS).is_empty(),
                 "{name} 被当作 Adapter 排除，却没有出现任何供应商语言"
+            );
+            continue;
+        }
+
+        if INGRESS_SOURCES.contains(&name.as_str()) {
+            // 入口必须真的在说 wire 语言（HTTP / JSON / token），否则"跳过"就是掩盖。
+            assert!(
+                !forbidden_word_hits(source, &FORBIDDEN_WORDS).is_empty(),
+                "{name} 被当作入口排除，却没有出现任何 wire 词"
             );
             continue;
         }
@@ -3343,8 +3400,8 @@ fn minimal_language_stays_free_of_legacy_and_vendor_words() {
 
     assert_eq!(
         scanned,
-        sources.len() - ADAPTER_SOURCES.len(),
-        "每个源文件要么被扫描，要么明确列在 Adapter 名单里"
+        sources.len() - ADAPTER_SOURCES.len() - INGRESS_SOURCES.len(),
+        "每个源文件要么被扫描，要么明确列在 Adapter / 入口名单里"
     );
 
     // **豁免是债务**：每条今天都必须仍然成立（照名单补进去真的会红）。原因修掉之后豁免就成了
@@ -4445,11 +4502,11 @@ fn the_skeleton_declares_only_the_adapter_dependencies() {
 fn the_lockfile_guard_reads_package_names_with_optional_versions() {
     let expected = ADAPTER_DEPENDENCIES.map(String::from).to_vec();
 
-    let bare = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"axum\",\n \"reqwest\",\n \"rmcp\",\n \"serde\",\n \"serde_json\",\n \"tokio\",\n]\n";
+    let bare = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"axum\",\n \"getrandom\",\n \"reqwest\",\n \"rmcp\",\n \"serde\",\n \"serde_json\",\n \"tokio\",\n]\n";
     assert_eq!(locked_direct_dependencies(bare), expected);
 
     // 同一 crate 有多版本时，锁文件会写成 `name version`。
-    let versioned = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"axum 0.8.9\",\n \"reqwest\",\n \"rmcp 3.7.0\",\n \"serde 1.0.229\",\n \"serde_json 1.0.151\",\n \"tokio 1.53.1\",\n]\n";
+    let versioned = "[[package]]\nname = \"celira-agent\"\nversion = \"0.1.0\"\ndependencies = [\n \"axum 0.8.9\",\n \"getrandom 0.4.3\",\n \"reqwest\",\n \"rmcp 3.7.0\",\n \"serde 1.0.229\",\n \"serde_json 1.0.151\",\n \"tokio 1.53.1\",\n]\n";
     assert_eq!(
         locked_direct_dependencies(versioned),
         expected,
