@@ -109,6 +109,57 @@ pub fn resolve_within(root: &Path, names: &[String]) -> Result<PathBuf, SandboxE
     Ok(current)
 }
 
+/// 在**一个写面目录**（家档的授权目录，或主体自己的作品目录）里解析**一个准备新建的路径**：
+/// 父目录逐段落实（存在、是目录、链上无链接），**末段只做形状、原样交回**。
+///
+/// 与 [`resolve_within`] 的差别只有一处、也是唯一该有的一处：**末段不要求存在**。新建要的是
+/// "父目录在、这个名字还不在盘上"，而"在不在"由调用方的独占创建（`create_new` / `create_dir`）
+/// 去判——这里先判一遍就会把"新建"读成"改已有文件"。
+///
+/// 为什么父目录要逐段落实：本版**不递归建父目录**。父目录不在 ⇒ `NotFound`（不是"顺手补齐"），
+/// 链上某一段是链接 ⇒ `Link`，某一段不是目录 ⇒ `WrongKind`。
+///
+/// 形状判据与 [`relative_names`] 同源（空路径、绝对路径、盘符、`.`、`..`、UNC 一律 `InvalidPath`），
+/// 外加**控制字符**：它会破坏任何按行渲染这份路径的地方，中间段也一并拒——一条地址不因为控制字符
+/// 落在哪一段而变成合法。
+pub fn resolve_in_base_parent(
+    base: &Path,
+    relative: &str,
+) -> Result<(PathBuf, String), SandboxError> {
+    let names = relative_names(relative)?;
+    let Some((name, parents)) = names.split_last() else {
+        return Err(SandboxError::InvalidPath);
+    };
+    if names.iter().any(|each| each.chars().any(char::is_control)) {
+        return Err(SandboxError::InvalidPath);
+    }
+
+    let metadata = fs::symlink_metadata(base).map_err(|error| io_error_class(&error))?;
+    if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+        return Err(SandboxError::Link);
+    }
+    if !metadata.is_dir() {
+        return Err(SandboxError::WrongKind);
+    }
+
+    let mut current = base.to_path_buf();
+    for each in parents {
+        current.push(each);
+        let metadata = fs::symlink_metadata(&current).map_err(|error| io_error_class(&error))?;
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+            return Err(SandboxError::Link);
+        }
+        if !metadata.is_dir() {
+            return Err(SandboxError::WrongKind);
+        }
+    }
+    // 组件里没有 `.` / `..`（形状判据已拒），因此这一条是竞态下的兜底，不是唯一一道。
+    if !current.starts_with(base) {
+        return Err(SandboxError::InvalidPath);
+    }
+    Ok((current, name.clone()))
+}
+
 /// 在一个沙盒根下读**一个普通文件**的字节（上限 `max` 字节；超限响亮拒绝，**不截断**）。
 ///
 /// 它给的是**字节**而不是文本：调用方（im app 递文件）要的是原样递出去；判"这是不是文本类"

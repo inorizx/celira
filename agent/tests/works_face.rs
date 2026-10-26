@@ -10,7 +10,8 @@
 //!    `projects_list` 列得出——**写完立刻核实**这条路是通的；
 //! 3. **两个面互不串**：资料面的 `files_*` 看不见她的作品，作品面的 `projects_*` 看不见资料；
 //!    同名文件各在各的目录里，谁也不动谁；
-//! 4. **出不去**：`..`、盘符、绝对路径、带分隔符的名字一律 `invalid-path`（与资料面同一套墙）；
+//! 4. **出不去**：`..`、盘符、绝对路径一律 `invalid-path`；`sub/a.md` 这样的相对路径是合法形状，
+//!    但父目录必须**已经存在**（本版不递归建父目录）——墙与资料面是同一个解析器；
 //!    ⚠ 分隔符是**平台形状**：`\` 在 Linux 上是普通字节 ⇒ `..\agent.conf` 是她目录内的一个名字
 //!    （缺了 `not-found`，写了读得回），与 `file_app::a_backslash_name_is_a_name_and_not_an_escape` 同判据；
 //! 5. **三态不许压成两态**：那个名字底下打不开（是文件 / 链接）⇒ **在场但打不开**（如实报分类），
@@ -468,6 +469,8 @@ fn paths_cannot_escape_her_own_directory() {
             "环境根那份配置一个字节都不许动"
         );
     }
+    // 作品面与资料面共用**同一个解析器**：相对路径是合法形状，但父目录必须**已经存在**
+    // （本版不递归建父目录，作品面也没有建目录这件能力）。
     let outcome = scope.execute(
         &agent,
         &operation("run-a"),
@@ -480,8 +483,38 @@ fn paths_cannot_escape_her_own_directory() {
     );
     assert_eq!(
         failure_of(&outcome),
-        "invalid-path",
-        "创建只收**单层**文件名"
+        "not-found",
+        "父目录不在 ⇒ not-found（不是路径拒绝，也不是顺手补齐）"
+    );
+    assert!(!fixture.works().join("sub").exists());
+    assert!(!fixture.works().join("boom.txt").exists());
+
+    // 父目录在了（她自己的目录里已经有 `sub/`）：文件真的落在它里面，读得回来。
+    fs::create_dir(fixture.works().join("sub")).expect("在作品目录里建子目录");
+    let outcome = scope.execute(
+        &agent,
+        &operation("run-a"),
+        &action(
+            CREATE,
+            ActionParams::none()
+                .with("name", "sub/boom.txt")
+                .with("text", "nested"),
+        ),
+    );
+    assert_eq!(
+        outcome.state(),
+        ResultState::Success,
+        "{}",
+        text_of(&outcome)
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.works().join("sub/boom.txt")).expect("盘上那一份"),
+        "nested",
+        "落的是她自己目录里的真文件"
+    );
+    assert!(
+        !fixture.materials().join("sub/boom.txt").exists(),
+        "它**不在资料面**里"
     );
 
     // 两个面互不串：资料面的文件在作品面里读不到，反之亦然。

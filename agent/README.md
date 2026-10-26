@@ -25,7 +25,7 @@
 | `src/app_contract.rs` | App 面向 OS 的窄接入契约（标识、说明、行动归属、执行入口）与装配冲突分类；**效果声明** `declared_effects()` → `EffectDeclaration`（`EffectClass` = `ReadOnly` / `ExclusiveCreate` / `RepeatableWrite` / **`UnverifiableWrite`**（TASK_36：确实是写，但**没有同参只读复核可配**——比如执行一条命令）+ 可选复核能力），装配期三条机械拒绝（声明落在自己能力里、**要复核的那两类写**必须配复核（`UnverifiableWrite` 按定义豁免）、复核也要在自己能力里）；不导入 OS 骨干、具体 App 或存储 |
 | `src/os.rs` | `MinimalOs` 显式装配多个 App 并按**唯一归属**索引路由（装配期拒绝重复标识 / 冲突行动标识，也拒绝**预装了一个没装配的 App**），另持装配期收集的**来源声明表** `SourceTable`（只读，装配期不授予任何东西；**有生产读者**：详情卡那一行 `receipt-source`，见 §3.45）；今天只剩各 App 自己的 `declared_effects()` ＋ 装配期 `check_declarations` 自洽检查（见 §3.11）；**预装常开**（`assemble_preinstalled`）：装配期可以声明若干 App 从第一轮起就在场（`is_open` 是「在场」的**唯一判据**，能力目录 / 展开答复 / 准入 / 分派四处共用）。首轮那张「门」清单是 `composition.rs` 的**装配投影**，由 **`AppDoor::preinstalled`**（装配期事实：首轮那一刻「开着的」**恰好**就是常开的那几个）决定，那条前提有守卫钉着；`RunScope` 按 Agent+Run 借用**调用方自有**的 `RunExpansion`（无 `unsafe`）；起源事实**不在本件**（在 `src/activity_origin.rs`，见下一行）；**OS 自有动作六个**（一份来源 `OS_OWNED_ACTIONS`：`open_app` / `inspect_action` / `pin_action` / `unpin_action` / `write_self_concept` / `write_handoff`——不归任何 App、常驻在场；六件各自在构造时标了「**免查**」（`Capability::exempt_from_inspection()`；装配期由 `composition.rs` 读 `is_exempt_from_inspection()`，**免查必须同时免学** ⇒ 参数名随动作目录给出））；**桌面一层**（`MinimalOs::desktop()` → `Desktop`：门之外那一组 ＋ 每一扇门；**装配期事实**，调用它不读盘、不看展开状态）。见 §3.11 / §3.44 |
 | `src/activity_origin.rs` | **起源事实**（起源那一刀从 `os.rs` 搬出，原名 ~~`ManualEnvironment`~~——名不副实，它照样承载门铃与钟源的起源）：五个起源文案（手动 / 通道接上 / 通道报变化 / **旧账** / 钟源——通道那一档 2026-10-13 拆成两态，见 §3.74）＋ 那个最小的处境来源 `ActivityOrigin`——`new()` = 宿主手动发起（既有默认值），`with_origin(…)` = 调用方声明，因此「谁把主体叫醒的」不会被记成同一句话（见 §3.18）。它**不在循环层里**：存储的词表值与显示区那句话**互不认识**，由装配层把两边接起来（`store → os` 那条反向边因此归零，见 §4） |
-| `src/file_app.rs` | 显式授权目录内只读 `files_list` / `files_read` / `files_grep`：列目录（≤100 项，可选 `after` 续列）、读文本（≤64 KiB，可选 `offset` / `limit` 续读）、按子串查找（≤100 条候选、最多扫 500 个文件）；有创建授权时另加两件写：`files_create`（**只创建、不覆盖**）与 `files_edit`（把 `old_text` **唯一的一处**换成 `new_text`，不改名/不删除/不追加），两件都是类别 `exclusive-create`，各配一件**现在时、只读**的复核（`files_verify_text` / `files_verify_edit`）；向视图层提供同一条目录读取、路径形状校验与列表分页渲染 |
+| `src/file_app.rs` | 显式授权目录内只读 `files_list` / `files_read` / `files_grep`：列目录（≤100 项，可选 `after` 续列）、读文本（≤64 KiB，可选 `offset` / `limit` 续读）、按子串查找（≤100 条候选、最多扫 500 个文件）；有创建授权时另加四件写：`files_create`（**只创建、不覆盖**；`name` 是授权目录内的相对路径，父目录必须已经存在）、`files_edit`（把 `old_text` **唯一的一处**换成 `new_text`，不改名/不删除/不追加）、`files_mkdir`（在授权目录里建**最后一段**子目录，父目录必须已经存在、不递归）、`files_rename`（旧名可以是子目录里的相对路径，新名是**同一目录内的单层**名字，不改内容、不覆盖、不跨目录）；四件都是类别 `exclusive-create`，各配一件**现在时、只读**的复核（`files_verify_text` / `files_verify_edit` / `files_verify_mkdir` / `files_verify_rename`，与写动词同参、同路径规则）；向视图层提供同一条目录读取、路径形状校验与列表分页渲染 |
 | `src/file_view.rs` | 只读文件视图 App（`files`）：授权资料目录 + **两个保留逻辑地址**（`history/` 派生经历分段；`manual.md` 派生单文件——环境根里那份手册，TASK_79 刀五），三处共用通用 `files_list` / `files_read`；查找（`files_grep`）只在资料面；装配期拒绝覆盖环境根的资料根与**现存**保留地址的同名真实条目 |
 | `src/sandbox.rs` | **路径形状与根内解析的中立件**：`file_app` / `im_app` / `im_profile_app` 共用同一份实现（**App 之间不得有实现依赖**——结构性守卫 `boundary_apis_stay_in_their_own_layer` 真的拦下过第一版写法）；`file_app` 那两个同名函数只是把 `SandboxError` 翻成它自己的词表（转发），`im` 直接取用 |
 | `src/provider_adapter.rs` | DeepSeek 适配：**能力来自当前 View 的原生 `tools` 声明**，回程按原生 `tool_calls` 翻译成中立响应；唯一解释协议续接载荷的地方；另读**一次**厂商报告：**占用**写进上下文读数格（TASK_19，`with_reading` 注入写柄，唯一写者），**用量**写进代价读数格（`with_usage`；三个字段一个都没报就**不写**，不留空壳）；**思考强度**那一格只搬运（`with_reasoning_effort`；`None` ⇒ 请求体里**没有**那个键，逐字节与从前相同；读回那一格的入口是 `reasoning_effort()`——装配从"将要发请求的那个对象"取它，见 §3.50）；公开标称窗口 `nominal_context_window()` 带出处；非通用 Provider/遥测平台 |
@@ -189,7 +189,7 @@
   `open_environment`、`ManualRun`、`ManualEnding`、`render`
 - **未收尾不拦下一次运行、暂停是事实不是闸** → [`composition.rs`](src/composition.rs) 的
   `RunSession::open_declared` 与 `CompositionError::SaveFailed`
-- **授权目录里的写**（新建 / 唯一替换；不改名、不删文件、不追加、不覆盖）→ §3.6
+- **授权目录里的写**（新建 / 唯一替换 / 建一层目录 / 同一目录内改名；不删文件、不追加、不覆盖）→ §3.6
 - **证明** → [`tests/manual_entry.rs`](tests/manual_entry.rs)（真实子进程 ＋ 离线夹具走**同一段**启动代码）
   与 [`bin/manual_entry_fixture.rs`](src/bin/manual_entry_fixture.rs)
 
@@ -197,24 +197,26 @@
 保存故障经生产路径复现、不是任意 I/O 注入）**只在 `manual_entry.rs` 的 `//!`**——本节不复述，也不假装
 它们是链接期证明。
 
-### 3.6 受限文本写：默认只读，授权后只多两件事
+### 3.6 受限文本写：默认只读，授权后只多四件事
 
-Agent 不再只能读：宿主显式授权之后，它可以在**一个已存在的授权子目录**里做两件事——**新建**自己的 UTF-8 文本（只创建、不覆盖），以及把该目录里一份已有文本中 `old_text` 的**唯一一处**出现换成 `new_text`（不改名、不删除文件、不追加）。下一次 Run 再用通用 `files_list` / `files_read` 主动读回来。笔记、交接、索引只是主体对文本的用途——系统没有记忆生成器、没有交接机制。
+Agent 不再只能读：宿主显式授权之后，它可以在**一个已存在的授权子目录**里做四件事——**新建**自己的 UTF-8 文本（只创建、不覆盖；地址是授权目录内的**相对路径**，父目录必须已经存在）、把该目录里一份已有文本中 `old_text` 的**唯一一处**出现换成 `new_text`（只换那一处，不改文件名）、在它里面建**一层**子目录（只建最后一段，父目录必须已经存在、不递归）、把该目录里（含子目录）的一个普通文件**改名**成**同一个目录内**的另一个单层名字（不移动、不覆盖、不改内容）。下一次 Run 再用通用 `files_list` / `files_read` 主动读回来。笔记、交接、索引只是主体对文本的用途——系统没有记忆生成器、没有交接机制。
 
 ```text
 agent_run run ... --create-dir <资料根内的单个目录名>
 ```
 
-- **默认只读**：不给 `--create-dir` 就与从前完全一样；没授权时创建与改文本能力**连声明都不出现**（不是"存在但会被拒绝"），伪造同名动作在归属索引里就没有主人。授权由**宿主**给出，绑定 AgentId、RunId 与目录，只对**这一次活动**有效——上一次 Run 的授权不能沿用，模型给的正文既不能创建也不能扩大授权。
-- **只创建，不覆盖/追加/改名/删除**：`create_new` 的真实独占语义；同名已存在 → 明确失败（`already-exists`），原名下的内容一个字节都不动。单层普通文件名（不含分隔符与控制字符），正文上限 **64 KiB**（与单次读取上限一致），超限整体拒绝、不截断，**空文本合法**。
+- **默认只读**：不给 `--create-dir` 就与从前完全一样；没授权时创建、改文本、建目录与改名能力**连声明都不出现**（不是"存在但会被拒绝"），伪造同名动作在归属索引里就没有主人。授权由**宿主**给出，绑定 AgentId、RunId 与目录，只对**这一次活动**有效——上一次 Run 的授权不能沿用，模型给的正文既不能创建也不能扩大授权。
+- **创建这一件只创建**：不覆盖、不追加、不改名、不删除。`create_new` 的真实独占语义；同名已存在 → 明确失败（`already-exists`），原名下的内容一个字节都不动。`name` 是授权目录内的**相对路径**（如 `reports/q3.md`，不含控制字符），最后一段是新文件名；父目录必须**已经存在**（不在 ⇒ `not-found`，本版不递归建父目录）。正文上限 **64 KiB**（与单次读取上限一致），超限整体拒绝、不截断，**空文本合法**。
 - **改文本只换一处**：`files_edit` 的参数是 `path`（授权目录内相对路径，可在授权目录之下任意深度）+ `old_text` + `new_text`。`old_text` 必须**非空**且在这份文件里**恰好出现一次**——0 次（没找到，`not-found`）或多次（歧义，`invalid-argument`）都明确失败且一个字节不动；`new_text` 空串合法（换成空 = 删掉那一段）。替换后全文上限同样 **64 KiB**，超限整体拒绝。路径基准是**被授权的那一个目录**（不是资料根）：越出它、绝对路径、盘符、`..` 一律拒绝。
+- **建目录只建最后一段**：`files_mkdir` 的参数是 `name`（授权目录内的相对路径，如 `reports/2026`；不含控制字符）。只调用 `create_dir`（不是 `create_dir_all`）⇒ 不递归、不顺手补齐父目录；父目录不在 → 明确失败（`not-found`），授权目录不在了同样 → `not-found`。同名已存在（目录或文件）→ 明确失败（`already-exists`）；名字上是链接 / reparse point → `link`。两者都**不覆盖**，也不把已存在的那个说成本次建的。这个动词只改目录项：不写任何字节。
+- **改名只在同一个目录里**：`files_rename` 的参数是 `path`（旧名）＋ `name`（新名）——`path` 是授权目录内的相对路径（旧文件可以在**子目录**里），`name` 是**同一目录内的单层新名** ⇒ `..`、绝对路径、带分隔符的新名都落成 `invalid-path`（跨目录在新名的形状这一层就不成立）。只允许**普通文件**：目录 → `wrong-kind`，链接 / reparse point → `link`。目标已存在 → 明确失败（`already-exists`，落点是链接时 `link`），原文件一个字节都不动：`rename` 在 Unix 上会静默覆盖，所以"不覆盖"由执行前那一次判定承担。正文逐字节不变——它只改名字，不移动、不复制、不重写。
 - **创建成功 ≠ 已经可靠保存**：写入或同步失败一律报**无法确认**（文件留在盘上，不删除、不补写、不重试）；文件被创建而"结果事实"没被确认时，盘上的事实是"发出过、没有结果"，诊断会把它读成 `dispatched-without-result=1`。
 - **准入在 Prepared 之前**：请求先经 Core 的中立准入接缝（`ActionPort::admit` → OS 归属/展开 → App 的局部条件）。**被拒绝的请求不是结果**：不产生操作身份，也不写 `prepared`/`dispatched`/`result` 任何一条事实，只在追加经历里留一条**中立拒绝经历**（`TraceEntry::Refused`）。
 - **拒绝经历怎么落盘**：沿用既有 `kind=injection` 字段形状，阶段值是 `admission-refused`，块是 `action` 与 `admission` 两个**结构化字段**（不拼歧义文本）。这是**新增的持久语义值**：旧解码器能读这一行（`stage` 是不透明字符串），但**不理解**它的含义——"可解析"不等于"语义兼容"，本包**不**声称旧构建的语义兼容（也没有固定旧版消费者来证明它）。
 - **拒绝的边界是身份/能力/授权**；参数形状、路径形状、内容上限、同名冲突仍然是**已派发之后的真实失败**（有事实、有结果）。两类不混用：`not-expanded` / `unknown-action` / `identity-mismatch` / `creation-not-granted` / `creation-grant-mismatch` 是拒绝；`invalid-path` / `too-large` / `already-exists` 是失败。
-- **不做**：覆盖、追加、改名、删除、递归建目录、授权撤销、通用授权平台、审计、后台调度、专用业务动作（没有 `save_memory` / `handoff` / `continue_task`）。`--materials` 与所有旧入口**没有**因此获得任何写权限。
+- **不做**：覆盖、追加、删除、移动（含跨目录改名）、**目录改名**、递归建目录、授权撤销、通用授权平台、审计、后台调度、专用业务动作（没有 `save_memory` / `handoff` / `continue_task`）。`--materials` 与所有旧入口**没有**因此获得任何写权限。
 - **本版不可达/未注入**：`creation-target-outside-materials` 只能在竞态下触达（`.`/`..`/分隔符在构造期就被拒，链接在更早一步被拒），保留它是为了竞态下不越界；**"创建成功但写入中途失败 / 同步失败"没有故障注入接缝**，因此那两格按 `Unknown` 设计但**未注入验证**——本包不为测试在生产路径上开一个注入点。授权目录是**受信目录**前提，不构成 OS 级沙盒。
-- **声明与复核**：`files_create` 声明自己的类别 `exclusive-create` 并配一件**参数完全相同**的只读复核 `files_verify_text`（复核只在有授权时存在）；`files_edit` 同样声明 `exclusive-create` 并配 `files_verify_edit`（理由是同参重放：第一次把 `old_text` 消耗掉，第二次同参数必然明确失败且无害）。改文本的复核三分是**现在时**：`old_text` 已不在且 `new_text` 在 = 成功；`old_text` 还在 = 明确失败（`not-found`）；**读不出来**（不存在 / 非普通文件 / 链接 / 读失败 / 非 UTF-8）或"两份都不在" = 无法确认。上一段说的那两格（写/同步失败 ⇒ `Unknown`）留下的**未决效果**怎么继续、怎么解除，见 §3.11。
+- **声明与复核**：`files_create` / `files_edit` / `files_mkdir` / `files_rename` 都声明 `exclusive-create`，各配一件**参数完全相同**的只读复核（`files_verify_text` / `files_verify_edit` / `files_verify_mkdir` / `files_verify_rename`，复核只在有授权时存在）。理由是同参重放：第一次消耗掉前置（名字被占、`old_text` 被换掉、目录建出来了、旧名字不见了），第二次同参数必然明确失败且无害。两件目录级写的复核三分是**现在时**：建目录 = 那个名字现在是一个目录 → 成功；确认那里什么都没有 → 明确失败（`not-found`）；被别的东西占着（普通文件 / 链接）或读不出形状 → 无法确认。改名 = 旧名已不在且新名是普通文件 → 成功；旧名**还占着** → 明确失败（`not-found`，"那次改名没有留在盘上"）；两个都不在、新名不是普通文件、或读不出来 → 无法确认。上一段说的那两格（写/同步失败 ⇒ `Unknown`）留下的**未决效果**怎么继续、怎么解除，见 §3.11。
 
 ### 3.7 第二个 App：Notes，用来证明"独立性"不是一句接口声明
 
@@ -292,9 +294,9 @@ agent_run run ... --notes-create
 
 ⚠ **2026-09-26 主人裁决**：**门是指令**（"不许发新的写"），而世界只该给**信息**。未决的写由"**开场那块纸条 ＋ 账本 ＋ 它自己去核**"接住——该不该去看一眼，是主体自己的决定。这道门**唯一的装门路径**就是"跨进程恢复里的带约束继续"，那条路已退役 ⇒ 门**结构上再也关不上**，因此 `PendingEffects`（集合）、`PENDING_EFFECT_UNVERIFIED`（分类）、`RunScope` 的 `pending` 借用、`admit` 里那道判据与 `execute` 里的 `resolve` **一起删除**。**留下的**是"声明"那一半——它有独立的生产消费者。
 
-- **效果类别由能力自己声明**：`app_contract::AppPort::declared_effects()` 给出 `EffectDeclaration`（`EffectClass` = `ReadOnly` / `ExclusiveCreate` / `RepeatableWrite` / `UnverifiableWrite` + 可选的复核能力标识）。**不声明 = 只读**（默认值通向更少的能力）；装配期三条机械拒绝——声明必须落在自己的能力里、写类别**必须**配复核、复核也必须在自己能力里（`unknown-declared-effect` / `write-without-verification` / `verification-not-declared`）。声明与**实例能力同源派生**：这次没有创建授权时，`files_create` / `files_verify_text` / `files_edit` / `files_verify_edit` 连声明都不存在。
+- **效果类别由能力自己声明**：`app_contract::AppPort::declared_effects()` 给出 `EffectDeclaration`（`EffectClass` = `ReadOnly` / `ExclusiveCreate` / `RepeatableWrite` / `UnverifiableWrite` + 可选的复核能力标识）。**不声明 = 只读**（默认值通向更少的能力）；装配期三条机械拒绝——声明必须落在自己的能力里、写类别**必须**配复核、复核也必须在自己能力里（`unknown-declared-effect` / `write-without-verification` / `verification-not-declared`）。声明与**实例能力同源派生**：这次没有创建授权时，`files_create` / `files_verify_text` / `files_edit` / `files_verify_edit` / `files_mkdir` / `files_verify_mkdir` / `files_rename` / `files_verify_rename` 连声明都不存在。
 - **效果声明只留在各 App 自己那一句话上**：`AppPort::declared_effects()` 由 `os.rs` 的 `check_declarations` 在装配期与展开期各判一次自洽性（声明必须落在自己能力里 / **要复核的那两类写**必须配复核 / 复核也要在自己能力里），**没有中央效果表**——`os.effects()` 与 `pending_effects.rs` 已随未决效果门一起删除。今天 `MinimalOs` 持的是**来源**声明表 `SourceTable`，那是**另一条轴**（内容从哪个口子进来，不是它改不改世界）；**它今天有生产读者**——详情卡那一行（见 §3.45）。
-- **两件写用同一个类别，而且可判错**：`files_create` 用 `create_new` 抢的是**文件名**、`files_edit` 抢的是**那一段文本的前置**（第一次换掉它，第二次同参数就找不到 ⇒ 明确失败）——两者都 ⇒ `exclusive-create`（同参数第二次必失败）；`notes_create` 抢的是**编号** ⇒ `repeatable-write`（同参数第二次必成功）。因此后者的复核只能断言"现在至少存在一条符合参数的"，**无法归因**到那一次操作——这是类别本身带来的边界，由用例钉住而不是靠措辞掩盖。
+- **文件 App 的四件写用同一个类别，而且可判错**：`files_create` 用 `create_new` 抢的是**文件名**、`files_edit` 抢的是**那一段文本的前置**（第一次换掉它，第二次同参数就找不到）、`files_mkdir` 抢的是**目录名**、`files_rename` 消耗的是**旧名字**——四者都 ⇒ `exclusive-create`（同参数第二次必失败）；`notes_create` 抢的是**编号** ⇒ `repeatable-write`（同参数第二次必成功）。因此后者的复核只能断言"现在至少存在一条符合参数的"，**无法归因**到那一次操作——这是类别本身带来的边界，由用例钉住而不是靠措辞掩盖。
 - **复核是现在时，只回答"现在的真实状态"**：成功 = 现在确实符合那份参数；确定不存在 = **明确失败**；存在但字节不符 / 读不出来 = **无法确认**（不报成功，也不报失败）。复核**只读**（执行前后环境目录逐字节不变），而且**只在有授权时存在**。参数与它所复核的那次写**完全相同**——复核问的是"**这一次这一条**发生了没有"，参数不同就不是同一个问题。
 - **旧事实不被改写**：那次"已派发无结果"的写在事实侧**永远**停在那个形状；复核是同一活动里的一次**新行动结果**，不是对旧结论的追认。门退役之后，"那次写到底发生了没有"由主体自己去看、自己决定——它手里有账本（`trace.ndjson`）与整机全权的那条路。
 - **明确缺什么**：**"只读能力谎报写效应"不可机械封闭**（"不声明 = 只读"这条默认值留下口子，只能靠源码守卫与真跑缓解）；**没有**事务性多写、重试/退避、通用 Replay / 补偿 / 回滚；诊断里已有 `unconfirmed=` 读数，但**没有**把未决效果单列成一条命令，也没有任何自动复核。另有一处**旧词汇仍留在 Foundation**：`Recovered::may_dispatch_again()` / `Recovered::has_unconfirmed_effects()` 说的是"还有没有无法确认的**尝试**"，没有读 / 写这个维度（TASK_09 时全部工具都还是只读的），今天**没有任何生产代码消费它们**（只有测试在断言它们）；要合并口径必须动 Foundation，本刀不做，如实记在这里。
@@ -2655,7 +2657,8 @@ last-record-at=2026-10-13T17:46:13Z    ← 账上最后一条经历的时刻
 **权威位置（本节不再重复它们的内容）**：
 
 - **两种写面的归属、以及"写入语义一字未改"**（独占新建 / 唯一替换 / 不改名不删不追加 / 同一份上限与
-  同一套墙）→ [`file_app.rs`](src/file_app.rs) 的 `//!` 与 `WritableFace` / `with_own_works`
+  同一套墙；路径规则与资料面同源——授权目录内的相对路径，父目录须已经存在）→ [`file_app.rs`](src/file_app.rs)
+  的 `//!` 与 `WritableFace` / `with_own_works`
 - **读两件 ＋ 写两件 ＋ 两件同参复核、`Ready` / `Absent` / `Unusable` 三态**（"打不开 ≠ 不在"）、
   **装配期缺席才建**、卡片上那两句 → [`file_view.rs`](src/file_view.rs) 的 `//!` 与 `works_capabilities`
 - **缺省"不给"**（要那只手得**显式**声明 `full`，`none` 与"没写"都不给；授权面的写动词**没授权就一个都

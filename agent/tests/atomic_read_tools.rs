@@ -886,13 +886,15 @@ fn the_three_read_verbs_declare_no_write_effect_and_everything_is_admitted() {
             "{id} 是只读：它不声明写效应"
         );
     }
-    // 声明里是**两对**写能力（2026-10-14 起）：资料面那一对（授权来的：独占创建 ＋ 改文本）
-    // 与**作品面**那一对（她自己那个 `projects/`：同样两件），各自配了复核；
-    // 三个只读动词一条声明都没有。
-    assert_eq!(declared.len(), 4, "两对写：资料面 ＋ 作品面");
+    // 声明里是**三对**写能力（2026-10-26 起）：资料面那一对（授权来的：独占创建 ＋ 改文本）
+    // 与目录级那一对（同样挂在授权上：建目录 ＋ 改名），各自配了复核；
+    // 再加上**作品面**那一对（她自己那个 `projects/`：同样两件）——三个只读动词一条声明都没有。
+    assert_eq!(declared.len(), 6, "三对写：资料面 ＋ 目录级 ＋ 作品面");
     for (action, verification) in [
         (CREATE_TEXT, "files_verify_text"),
         ("files_edit", "files_verify_edit"),
+        ("files_mkdir", "files_verify_mkdir"),
+        ("files_rename", "files_verify_rename"),
     ] {
         let one = declared
             .iter()

@@ -11,6 +11,7 @@ use celira_agent::core::{
     Action, ActionId, ActionOutcome, ActionParams, ActionPort, Limits, ModelError, ModelOutput,
     ModelPort, View,
 };
+use celira_agent::creation_grant::CreationGrant;
 use celira_agent::file_app::{FailureClass, FileApp, MAX_ENTRIES, MAX_TEXT_BYTES};
 
 mod common;
@@ -798,4 +799,887 @@ fn reading_by_line_shares_the_coordinate_system_with_grep() {
         call(&mut app, &beyond).failure_class(),
         Some(FailureClass::InvalidArgument.as_str())
     );
+}
+
+// ---------------------------------------------------------------------------
+// 授权目录里的两件目录级写：`files_mkdir` / `files_rename` ＋ 各自的同参复核
+// ---------------------------------------------------------------------------
+
+/// 授权目录的名字（与 [`granted_app`] 成对出现）。
+const GRANT_DIR: &str = "work";
+
+/// 造一台**带创建授权**的文件 App：授权目录是沙盒里的 `work/`。
+///
+/// 身份与活动必须与 [`call`] 用的那一对逐字相同——授权绑的是"这个 Agent 的这一次活动"。
+fn granted_app(sandbox: &Sandbox) -> FileApp {
+    fs::create_dir_all(sandbox.path().join(GRANT_DIR)).expect("可以建授权目录");
+    let grant = CreationGrant::new(
+        AgentId::new("agent-direct"),
+        RunId::new("direct"),
+        GRANT_DIR,
+    )
+    .expect("授权形状合法");
+    FileApp::with_creation(sandbox.path().to_path_buf(), &grant).expect("授权目录可以打开")
+}
+
+/// 带单层目录名的 `files_mkdir`。
+fn mkdir(name: &str) -> Action {
+    Action::with_params(
+        ActionId::new("files_mkdir"),
+        ActionParams::none().with("name", name),
+    )
+}
+
+/// 与 [`mkdir`] 同参的复核。
+fn verify_mkdir(name: &str) -> Action {
+    Action::with_params(
+        ActionId::new("files_verify_mkdir"),
+        ActionParams::none().with("name", name),
+    )
+}
+
+/// `files_rename`：旧名（授权目录内的单层名）＋ 新名。
+fn rename(path: &str, name: &str) -> Action {
+    Action::with_params(
+        ActionId::new("files_rename"),
+        ActionParams::none().with("path", path).with("name", name),
+    )
+}
+
+/// 与 [`rename`] 同参的复核。
+fn verify_rename(path: &str, name: &str) -> Action {
+    Action::with_params(
+        ActionId::new("files_verify_rename"),
+        ActionParams::none().with("path", path).with("name", name),
+    )
+}
+
+/// 一棵树的**逐字节**快照：每个条目的相对路径、种类，以及普通文件的字节。
+///
+/// 判"拒绝路径零文件效果"用它：比较的是内容而不是"看起来还在"。
+fn snapshot(root: &Path) -> Vec<(String, &'static str, Vec<u8>)> {
+    fn walk(root: &Path, directory: &Path, into: &mut Vec<(String, &'static str, Vec<u8>)>) {
+        let mut entries: Vec<PathBuf> = fs::read_dir(directory)
+            .expect("列得出目录")
+            .flatten()
+            .map(|entry| entry.path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            let relative = path
+                .strip_prefix(root)
+                .expect("在根之下")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let metadata = fs::symlink_metadata(&path).expect("读得到形状");
+            if metadata.file_type().is_symlink() {
+                into.push((relative, "link", Vec::new()));
+            } else if metadata.is_dir() {
+                into.push((relative.clone(), "dir", Vec::new()));
+                walk(root, &path, into);
+            } else {
+                let bytes = fs::read(&path).expect("读得到字节");
+                into.push((relative, "file", bytes));
+            }
+        }
+    }
+    let mut into = Vec::new();
+    walk(root, root, &mut into);
+    into
+}
+
+/// A. 建目录：成功只建**一层**；同名已存在 ⇒ `already-exists`，不覆盖、也不静默成功。
+#[test]
+fn mkdir_creates_one_directory_and_refuses_an_occupied_name() {
+    let sandbox = Sandbox::new("mkdir");
+    let mut app = granted_app(&sandbox);
+
+    let created = call(&mut app, &mkdir("drafts"));
+    assert_eq!(created.state(), ResultState::Success);
+    assert!(
+        sandbox.path().join(GRANT_DIR).join("drafts").is_dir(),
+        "目录真的在盘上"
+    );
+    assert!(
+        created.content()[0].text().contains("drafts/"),
+        "回执说的是这次建出来的那个名字"
+    );
+
+    // 再建一次：名字被占着 ⇒ 明确失败。
+    let again = call(&mut app, &mkdir("drafts"));
+    assert_eq!(again.state(), ResultState::Failure);
+    assert_eq!(
+        again.failure_class(),
+        Some(FailureClass::AlreadyExists.as_str())
+    );
+
+    // **一份文件**同样占着这个名字：不覆盖、不挪走它。
+    fs::write(sandbox.path().join(GRANT_DIR).join("notes.txt"), "正文").expect("写一份占位文件");
+    let occupied = call(&mut app, &mkdir("notes.txt"));
+    assert_eq!(
+        occupied.failure_class(),
+        Some(FailureClass::AlreadyExists.as_str())
+    );
+    assert_eq!(
+        fs::read_to_string(sandbox.path().join(GRANT_DIR).join("notes.txt")).expect("文件还在"),
+        "正文",
+        "被占着的那个文件一个字节都没被动过"
+    );
+}
+
+/// B. 建目录的形状判据：`name` 是授权目录内的相对路径——空名、`..`、绝对路径、盘符、冒号都不收；
+///    形状合法而**父目录不在** ⇒ `not-found`（不递归，也不把最后一段静默落到根下）。
+#[test]
+fn mkdir_refuses_escapes_and_missing_parents() {
+    let sandbox = Sandbox::new("mkdir-shapes");
+    let mut app = granted_app(&sandbox);
+    let before = snapshot(sandbox.path());
+
+    let bad: Vec<&str> = {
+        #[cfg(windows)]
+        let extra = vec!["sub\\dir"];
+        #[cfg(not(windows))]
+        let extra: Vec<&str> = Vec::new();
+        let mut all = vec!["", ".", "..", "/abs", "../outside", "C:\\abs", "a:b"];
+        // 反斜杠在 Linux 上不是分隔符（模块文档那条平台判据）：那一格只在 Windows 上成立。
+        all.extend(extra);
+        all
+    };
+
+    for name in bad {
+        let refused = call(&mut app, &mkdir(name));
+        assert_eq!(refused.state(), ResultState::Failure, "name={name:?}");
+        assert_eq!(
+            refused.failure_class(),
+            Some(FailureClass::InvalidPath.as_str()),
+            "name={name:?}"
+        );
+    }
+
+    // 合法形状、但父目录不在：`not-found`，而且**不递归补齐**、也不悄悄建到根下。
+    let missing = call(&mut app, &mkdir("absent/inner"));
+    assert_eq!(missing.state(), ResultState::Failure);
+    assert_eq!(
+        missing.failure_class(),
+        Some(FailureClass::NotFound.as_str()),
+        "父目录不在 ⇒ not-found（不是 invalid-path，也不是已存在）"
+    );
+    assert!(!sandbox.path().join(GRANT_DIR).join("absent").exists());
+    assert!(!sandbox.path().join(GRANT_DIR).join("inner").exists());
+
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// C. 授权目录不在了 ⇒ `not-found`，而且**不顺手把父目录建出来**（不递归、不自愈）。
+#[test]
+fn mkdir_reports_not_found_when_the_granted_directory_is_gone() {
+    let sandbox = Sandbox::new("mkdir-gone");
+    let mut app = granted_app(&sandbox);
+    fs::remove_dir(sandbox.path().join(GRANT_DIR)).expect("移走授权目录");
+    let before = snapshot(sandbox.path());
+
+    let refused = call(&mut app, &mkdir("drafts"));
+    assert_eq!(refused.state(), ResultState::Failure);
+    assert_eq!(
+        refused.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// D. 落点上已经是一个链接 ⇒ `link`（与读侧同一条），不是一句含糊的"已存在"。
+#[test]
+fn mkdir_reports_a_link_at_the_name_instead_of_calling_it_occupied() {
+    let sandbox = Sandbox::new("mkdir-link");
+    sandbox.write("real.txt", "real");
+    let link = sandbox.path().join(GRANT_DIR).join("alias");
+    fs::create_dir_all(sandbox.path().join(GRANT_DIR)).expect("可以建授权目录");
+    #[cfg(windows)]
+    let created =
+        std::os::windows::fs::symlink_file(sandbox.path().join("real.txt"), &link).is_ok();
+    #[cfg(not(windows))]
+    let created = std::os::unix::fs::symlink(sandbox.path().join("real.txt"), &link).is_ok();
+    if !created {
+        eprintln!("未覆盖：本环境建不了符号链接（Windows 通常需要开发者模式或管理员权限）");
+        return;
+    }
+
+    let mut app = granted_app(&sandbox);
+    let before = snapshot(sandbox.path());
+    let refused = call(&mut app, &mkdir("alias"));
+    assert_eq!(refused.state(), ResultState::Failure);
+    assert_eq!(refused.failure_class(), Some(FailureClass::Link.as_str()));
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// E. 没有创建授权 ⇒ 这四件连**能力**都不在；直接派发也拿不到写路。
+///
+/// 作品面与机器档同样没有这两件：它们没有"宿主点名的那一个目录"。
+#[test]
+fn directory_writes_do_not_exist_without_a_creation_grant() {
+    let sandbox = Sandbox::new("dir-no-grant");
+    let agent = AgentId::new("agent-direct");
+    let run = RunId::new("direct");
+    let verbs = [
+        "files_mkdir",
+        "files_verify_mkdir",
+        "files_rename",
+        "files_verify_rename",
+    ];
+
+    let mut readonly = sandbox.open();
+    let ids: Vec<String> = ActionPort::capabilities(&readonly, &agent, &run)
+        .items()
+        .iter()
+        .map(|capability| capability.id().as_str().to_string())
+        .collect();
+    for verb in verbs {
+        assert!(
+            !ids.contains(&verb.to_string()),
+            "没有授权时 {verb} 连能力都不该在场: {ids:?}"
+        );
+    }
+    let refused = call(&mut readonly, &mkdir("drafts"));
+    assert_eq!(refused.state(), ResultState::Failure);
+    assert_eq!(
+        refused.failure_class(),
+        Some("creation-not-granted"),
+        "直接派发也只得到同一句拒绝"
+    );
+
+    // 机器档（可写）也没有这两件：那不是"授权目录"。
+    let machine = FileApp::machine_with_writes();
+    let machine_ids: Vec<String> = ActionPort::capabilities(&machine, &agent, &run)
+        .items()
+        .iter()
+        .map(|capability| capability.id().as_str().to_string())
+        .collect();
+    for verb in verbs {
+        assert!(
+            !machine_ids.contains(&verb.to_string()),
+            "机器档没有这两件（{verb}）: {machine_ids:?}"
+        );
+    }
+
+    // 正对照：同一批动词在有授权时**确实**在场。
+    let granted = granted_app(&sandbox);
+    let granted_ids: Vec<String> = ActionPort::capabilities(&granted, &agent, &run)
+        .items()
+        .iter()
+        .map(|capability| capability.id().as_str().to_string())
+        .collect();
+    for verb in verbs {
+        assert!(
+            granted_ids.contains(&verb.to_string()),
+            "有授权时 {verb} 必须在场: {granted_ids:?}"
+        );
+    }
+}
+
+/// F. 改名：名字换了，**正文逐字节不变**；旧名字不在了。
+#[test]
+fn rename_swaps_the_name_and_keeps_every_byte() {
+    let sandbox = Sandbox::new("rename");
+    let mut app = granted_app(&sandbox);
+    // 故意选不是合法 UTF-8 的字节：这个动词不该解码、也不该重写正文。
+    let bytes: Vec<u8> = vec![0xE4, 0xB8, 0x80, b'\n', 0x00, 0x7F, b'a'];
+    fs::write(sandbox.path().join(GRANT_DIR).join("old.txt"), &bytes).expect("写合成字节");
+
+    let renamed = call(&mut app, &rename("old.txt", "new.txt"));
+    assert_eq!(
+        renamed.state(),
+        ResultState::Success,
+        "{:?}",
+        renamed.failure_class()
+    );
+    assert!(
+        !sandbox.path().join(GRANT_DIR).join("old.txt").exists(),
+        "旧名字不在了"
+    );
+    assert_eq!(
+        fs::read(sandbox.path().join(GRANT_DIR).join("new.txt")).expect("读得回来"),
+        bytes,
+        "改名之后内容逐字节不变"
+    );
+}
+
+/// G. 目标已存在 ⇒ `already-exists`，而且**原文件与目标都一个字节没动**。
+#[test]
+fn rename_never_overwrites_an_occupied_target() {
+    let sandbox = Sandbox::new("rename-occupied");
+    let mut app = granted_app(&sandbox);
+    fs::write(sandbox.path().join(GRANT_DIR).join("a.txt"), "source-bytes").expect("写原文件");
+    fs::write(sandbox.path().join(GRANT_DIR).join("b.txt"), "target-bytes").expect("写目标文件");
+    let before = snapshot(sandbox.path());
+
+    let refused = call(&mut app, &rename("a.txt", "b.txt"));
+    assert_eq!(refused.state(), ResultState::Failure);
+    assert_eq!(
+        refused.failure_class(),
+        Some(FailureClass::AlreadyExists.as_str())
+    );
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+
+    // 复核是**现在时**：旧名还占着 ⇒ 明确失败（不声称那一次改名成功了）。
+    let verified = call(&mut app, &verify_rename("a.txt", "b.txt"));
+    assert_eq!(verified.state(), ResultState::Failure);
+    assert_eq!(
+        verified.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+}
+
+/// H. 只改普通文件：源不存在 ⇒ `not-found`；把目录当文件 ⇒ `wrong-kind`，目录照旧在。
+#[test]
+fn rename_refuses_a_missing_source_and_a_directory() {
+    let sandbox = Sandbox::new("rename-kinds");
+    let mut app = granted_app(&sandbox);
+    fs::create_dir_all(sandbox.path().join(GRANT_DIR).join("sub")).expect("建一个目录");
+    let before = snapshot(sandbox.path());
+
+    let missing = call(&mut app, &rename("gone.txt", "x.txt"));
+    assert_eq!(missing.state(), ResultState::Failure);
+    assert_eq!(
+        missing.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+
+    let directory = call(&mut app, &rename("sub", "sub2"));
+    assert_eq!(directory.state(), ResultState::Failure);
+    assert_eq!(
+        directory.failure_class(),
+        Some(FailureClass::WrongKind.as_str())
+    );
+
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// I. 改名不跨目录：旧名可以是子目录里的相对路径，但**新名**必须是单层名字——
+///    `path` 越界 / `name` 带上一层或分隔符 / 绝对路径 / 空名都 ⇒ `invalid-path`。
+#[test]
+fn rename_stays_inside_the_granted_directory() {
+    let sandbox = Sandbox::new("rename-shapes");
+    sandbox.write("work/sub/a.txt", "a");
+    sandbox.write("work/b.txt", "b");
+    let mut app = granted_app(&sandbox);
+    let before = snapshot(sandbox.path());
+
+    let cases: Vec<(&str, &str)> = {
+        #[cfg(windows)]
+        let extra = vec![("sub\\a.txt", "d.txt"), ("b.txt", "sub\\c.txt")];
+        #[cfg(not(windows))]
+        let extra: Vec<(&str, &str)> = Vec::new();
+        let mut all = vec![
+            ("../a.txt", "c.txt"),
+            ("/a.txt", "c.txt"),
+            ("C:\\a.txt", "c.txt"),
+            ("sub/../../a.txt", "c.txt"),
+            ("", "c.txt"),
+            ("b.txt", ""), // 空的新名字
+            ("b.txt", "sub/c.txt"),
+            ("b.txt", "../c.txt"),
+        ];
+        // 反斜杠在 Linux 上不是分隔符 ⇒ 那两格只在 Windows 上是「跨目录」证据。
+        all.extend(extra);
+        all
+    };
+
+    for (path, name) in cases {
+        let refused = call(&mut app, &rename(path, name));
+        assert_eq!(refused.state(), ResultState::Failure, "path={path:?}");
+        assert_eq!(
+            refused.failure_class(),
+            Some(FailureClass::InvalidPath.as_str()),
+            "path={path:?} name={name:?}"
+        );
+    }
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// J. 链接不改名：源是链接 ⇒ `link`；落点是链接 ⇒ `link`（不覆盖链接指向的东西）。
+#[test]
+fn rename_refuses_links_on_both_ends() {
+    let sandbox = Sandbox::new("rename-links");
+    fs::create_dir_all(sandbox.path().join(GRANT_DIR)).expect("可以建授权目录");
+    sandbox.write("work/real.txt", "real-bytes");
+    let link = sandbox.path().join(GRANT_DIR).join("link.txt");
+    #[cfg(windows)]
+    let created =
+        std::os::windows::fs::symlink_file(sandbox.path().join("work/real.txt"), &link).is_ok();
+    #[cfg(not(windows))]
+    let created = std::os::unix::fs::symlink(sandbox.path().join("work/real.txt"), &link).is_ok();
+    if !created {
+        eprintln!("未覆盖：本环境建不了符号链接（Windows 通常需要开发者模式或管理员权限）");
+        return;
+    }
+
+    let mut app = granted_app(&sandbox);
+    let before = snapshot(sandbox.path());
+
+    // 源是链接：不改名（移动一个链接是另一件事，不在这个动词里）。
+    let source = call(&mut app, &rename("link.txt", "moved.txt"));
+    assert_eq!(source.state(), ResultState::Failure);
+    assert_eq!(source.failure_class(), Some(FailureClass::Link.as_str()));
+
+    // 落点是链接：不覆盖，也不跟随。
+    let target = call(&mut app, &rename("real.txt", "link.txt"));
+    assert_eq!(target.state(), ResultState::Failure);
+    assert_eq!(target.failure_class(), Some(FailureClass::Link.as_str()));
+
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// K. 建目录的复核：没发生 ⇒ 明确失败；发生了 ⇒ 成功；名字被别的东西占着 ⇒ 无法确认。
+#[test]
+fn verify_mkdir_reports_the_real_state_and_never_invents_success() {
+    let sandbox = Sandbox::new("verify-mkdir");
+    let mut app = granted_app(&sandbox);
+
+    let before = call(&mut app, &verify_mkdir("drafts"));
+    assert_eq!(before.state(), ResultState::Failure);
+    assert_eq!(
+        before.failure_class(),
+        Some(FailureClass::NotFound.as_str()),
+        "还没建 ⇒ 如实说那里什么都没有"
+    );
+
+    assert_eq!(
+        call(&mut app, &mkdir("drafts")).state(),
+        ResultState::Success
+    );
+    let before_verify = snapshot(sandbox.path());
+    let after = call(&mut app, &verify_mkdir("drafts"));
+    assert_eq!(after.state(), ResultState::Success);
+    assert!(after.content()[0].text().contains("drafts/"));
+    assert_eq!(
+        snapshot(sandbox.path()),
+        before_verify,
+        "复核只读：一个字节都不动"
+    );
+
+    // 名字被一份**普通文件**占着：既不是"目录建好了"，也不是"那里什么都没有"。
+    fs::write(sandbox.path().join(GRANT_DIR).join("occupied"), "x").expect("写占位文件");
+    let unknown = call(&mut app, &verify_mkdir("occupied"));
+    assert_eq!(unknown.state(), ResultState::Unknown);
+    assert!(unknown.failure_class().is_none(), "无法确认不是失败分类");
+}
+
+/// L. 改名的复核：旧名还在 ⇒ 明确失败；改成了 ⇒ 成功；说不清 ⇒ 无法确认。
+#[test]
+fn verify_rename_reports_the_real_state_and_never_invents_success() {
+    let sandbox = Sandbox::new("verify-rename");
+    let mut app = granted_app(&sandbox);
+    sandbox.write("work/old.txt", "bytes");
+
+    let before = call(&mut app, &verify_rename("old.txt", "new.txt"));
+    assert_eq!(before.state(), ResultState::Failure);
+    assert_eq!(
+        before.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+
+    assert_eq!(
+        call(&mut app, &rename("old.txt", "new.txt")).state(),
+        ResultState::Success
+    );
+    let before_verify = snapshot(sandbox.path());
+    let after = call(&mut app, &verify_rename("old.txt", "new.txt"));
+    assert_eq!(after.state(), ResultState::Success);
+    assert_eq!(
+        snapshot(sandbox.path()),
+        before_verify,
+        "复核只读：一个字节都不动"
+    );
+
+    // 新名字被一个**目录**占着（旧名确实不在了）：说不清是不是那次改名留下的。
+    fs::remove_file(sandbox.path().join(GRANT_DIR).join("new.txt")).expect("挪走新文件");
+    fs::create_dir(sandbox.path().join(GRANT_DIR).join("new.txt")).expect("建一个同名目录");
+    let occupied = call(&mut app, &verify_rename("old.txt", "new.txt"));
+    assert_eq!(occupied.state(), ResultState::Unknown);
+
+    // 两个都不在：同样说不清（不是"成功"，也不是"失败"）。
+    fs::remove_dir(sandbox.path().join(GRANT_DIR).join("new.txt")).expect("挪走同名目录");
+    let neither = call(&mut app, &verify_rename("old.txt", "new.txt"));
+    assert_eq!(neither.state(), ResultState::Unknown);
+    assert!(neither.failure_class().is_none());
+}
+
+// ---------------------------------------------------------------------------
+// 四件写共用**同一套**「授权目录内的相对路径」规则：
+// 创建与建目录吃相对路径（父目录必须已经在、只作用最后一段），改名吃深路径而新名仍是单层，
+// 三个复核与对应的写动词同参、同路径规则。
+// ---------------------------------------------------------------------------
+
+/// 带相对路径的 `files_create`。
+fn create(name: &str, text: &str) -> Action {
+    Action::with_params(
+        ActionId::new("files_create"),
+        ActionParams::none().with("name", name).with("text", text),
+    )
+}
+
+/// 与 [`create`] 同参的复核。
+fn verify_create(name: &str, text: &str) -> Action {
+    Action::with_params(
+        ActionId::new("files_verify_text"),
+        ActionParams::none().with("name", name).with("text", text),
+    )
+}
+
+/// M. 创建吃**相对路径**：先建子目录，再往里放文件，读回逐字节一致；父目录不在 ⇒ `not-found`；
+///    越界 / 绝对路径 / 盘符 / `..` / 控制字符 ⇒ `invalid-path`；同名 ⇒ `already-exists` 且原字节不变。
+#[test]
+fn create_writes_into_a_subdirectory_and_refuses_everything_else() {
+    let sandbox = Sandbox::new("create-subdir");
+    let mut app = granted_app(&sandbox);
+    let work = sandbox.path().join(GRANT_DIR);
+
+    // 父目录必须先存在：建目录这件事本身还是 `files_mkdir` 的。
+    assert_eq!(
+        call(&mut app, &mkdir("sub")).state(),
+        ResultState::Success,
+        "先建出父目录"
+    );
+
+    let text = "第一行：相对路径\n第二行：逐字节\n";
+    let created = call(&mut app, &create("sub/a.md", text));
+    assert_eq!(
+        created.state(),
+        ResultState::Success,
+        "{:?}",
+        created
+            .content()
+            .iter()
+            .map(|block| block.text())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        fs::read(work.join("sub/a.md")).expect("盘上那一份"),
+        text.as_bytes(),
+        "读回逐字节一致"
+    );
+    assert!(
+        created.content()[0].text().contains("sub/a.md"),
+        "回执说的是授权目录内的相对路径（不含沙盒根）: {}",
+        created.content()[0].text()
+    );
+    assert!(!work.join("a.md").exists(), "没有悄悄把它落到授权目录根下");
+
+    // 同名再来一次：明确失败，而且原文件一个字节都没动。
+    let before = snapshot(sandbox.path());
+    let again = call(&mut app, &create("sub/a.md", "别的正文"));
+    assert_eq!(again.state(), ResultState::Failure);
+    assert_eq!(
+        again.failure_class(),
+        Some(FailureClass::AlreadyExists.as_str())
+    );
+    assert_eq!(snapshot(sandbox.path()), before, "同名失败零文件效果");
+
+    // 父目录不在 ⇒ `not-found`（不递归建父目录，也不悄悄落到别处）。
+    let missing = call(&mut app, &create("absent/x.md", "x"));
+    assert_eq!(missing.state(), ResultState::Failure);
+    assert_eq!(
+        missing.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+    assert!(!work.join("absent").exists());
+    assert!(!work.join("x.md").exists());
+
+    // 中间段是一份**文件**（不是目录）⇒ `wrong-kind`，不落到那个文件名底下。
+    fs::write(work.join("notes.txt"), "占位").expect("写一份占位文件");
+    let wrong_kind = call(&mut app, &create("notes.txt/x.md", "x"));
+    assert_eq!(
+        wrong_kind.failure_class(),
+        Some(FailureClass::WrongKind.as_str())
+    );
+    assert_eq!(
+        fs::read_to_string(work.join("notes.txt")).expect("占位文件还在"),
+        "占位"
+    );
+
+    // 形状拒绝：越界、绝对路径、盘符、`..`、控制字符、空路径。
+    let before = snapshot(sandbox.path());
+    for name in [
+        "../escape.md",
+        "sub/../../escape.md",
+        "/abs.md",
+        "C:\\abs.md",
+        "sub/a\nb.md",
+        "",
+    ] {
+        let refused = call(&mut app, &create(name, "x"));
+        assert_eq!(
+            refused.failure_class(),
+            Some(FailureClass::InvalidPath.as_str()),
+            "name={name:?}"
+        );
+    }
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// N. 创建：链路上有链接 ⇒ `link`（不跟进去写，也不在链接指向的地方落文件）。
+#[test]
+fn create_refuses_a_link_on_the_way_in() {
+    let sandbox = Sandbox::new("create-link");
+    let mut app = granted_app(&sandbox);
+    let work = sandbox.path().join(GRANT_DIR);
+    assert_eq!(call(&mut app, &mkdir("sub")).state(), ResultState::Success);
+    // 授权目录之外的另一个目录：链接指向它。
+    let elsewhere = sandbox.path().join("elsewhere");
+    fs::create_dir_all(&elsewhere).expect("建链接目标");
+
+    let link = work.join("sub").join("alias");
+    #[cfg(windows)]
+    let created = std::os::windows::fs::symlink_dir(&elsewhere, &link).is_ok();
+    #[cfg(not(windows))]
+    let created = std::os::unix::fs::symlink(&elsewhere, &link).is_ok();
+    if !created {
+        eprintln!("未覆盖：本环境建不了符号链接（Windows 通常需要开发者模式或管理员权限）");
+        return;
+    }
+
+    let before = snapshot(sandbox.path());
+    for name in ["sub/alias/x.md", "sub/alias/deeper.md"] {
+        let refused = call(&mut app, &create(name, "x"));
+        assert_eq!(refused.state(), ResultState::Failure, "name={name:?}");
+        assert_eq!(
+            refused.failure_class(),
+            Some(FailureClass::Link.as_str()),
+            "name={name:?}"
+        );
+    }
+    assert!(
+        !elsewhere.join("x.md").exists() && !elsewhere.join("deeper.md").exists(),
+        "链接指向的地方一个文件都没多出来"
+    );
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// O. 建目录吃**相对路径**，但只建**最后一段**：`sub` 在 ⇒ `sub/inner` 建得出来；
+///    父目录不在 ⇒ `not-found`（不递归）；已存在 ⇒ `already-exists`。
+#[test]
+fn mkdir_builds_one_level_below_an_existing_subdirectory() {
+    let sandbox = Sandbox::new("mkdir-subdir");
+    let mut app = granted_app(&sandbox);
+    let work = sandbox.path().join(GRANT_DIR);
+
+    assert_eq!(call(&mut app, &mkdir("sub")).state(), ResultState::Success);
+    let created = call(&mut app, &mkdir("sub/inner"));
+    assert_eq!(created.state(), ResultState::Success);
+    assert!(work.join("sub/inner").is_dir(), "目录真的在盘上");
+    assert!(
+        created.content()[0].text().contains("sub/inner/"),
+        "回执说清是哪一个相对路径: {}",
+        created.content()[0].text()
+    );
+
+    // 已存在 ⇒ 明确失败（不覆盖、也不说成本次建的）。
+    let again = call(&mut app, &mkdir("sub/inner"));
+    assert_eq!(again.state(), ResultState::Failure);
+    assert_eq!(
+        again.failure_class(),
+        Some(FailureClass::AlreadyExists.as_str())
+    );
+
+    // **不递归**：`a/b` 不在 ⇒ `a/b/c` 失败，而且 `a` 不会被顺手建出来。
+    let before = snapshot(sandbox.path());
+    let deep = call(&mut app, &mkdir("a/b/c"));
+    assert_eq!(deep.state(), ResultState::Failure);
+    assert_eq!(deep.failure_class(), Some(FailureClass::NotFound.as_str()));
+    assert!(!work.join("a").exists(), "不递归建父目录");
+    assert!(!work.join("c").exists(), "也不把最后一段落到根下");
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// P. 建目录：链路上的链接 ⇒ `link`（末段是链接、中间段是链接都算）。
+#[test]
+fn mkdir_refuses_a_link_in_the_path() {
+    let sandbox = Sandbox::new("mkdir-deep-link");
+    let mut app = granted_app(&sandbox);
+    let work = sandbox.path().join(GRANT_DIR);
+    fs::create_dir_all(work.join("sub")).expect("建子目录");
+    let elsewhere = sandbox.path().join("elsewhere");
+    fs::create_dir_all(&elsewhere).expect("建链接目标");
+
+    let link = work.join("sub").join("alias");
+    #[cfg(windows)]
+    let created = std::os::windows::fs::symlink_dir(&elsewhere, &link).is_ok();
+    #[cfg(not(windows))]
+    let created = std::os::unix::fs::symlink(&elsewhere, &link).is_ok();
+    if !created {
+        eprintln!("未覆盖：本环境建不了符号链接（Windows 通常需要开发者模式或管理员权限）");
+        return;
+    }
+
+    let before = snapshot(sandbox.path());
+    // 末段就是那个链接：报 `link`，不是含糊的“已存在”。
+    let at_name = call(&mut app, &mkdir("sub/alias"));
+    assert_eq!(at_name.failure_class(), Some(FailureClass::Link.as_str()));
+    // 中间段是链接：不跟进去建。
+    let through = call(&mut app, &mkdir("sub/alias/inner"));
+    assert_eq!(through.failure_class(), Some(FailureClass::Link.as_str()));
+    assert!(!elsewhere.join("inner").exists());
+    assert_eq!(snapshot(sandbox.path()), before, "拒绝路径零文件效果");
+}
+
+/// Q. 改名吃**深路径**（旧文件在子目录里），新名仍是**同一目录内的单层名字**：
+///    `sub/old.md` → `sub/new.md` 成功；新名带分隔符 / `..` / 绝对路径 ⇒ `invalid-path`；
+///    目标已存在 ⇒ `already-exists` 且两个文件字节都不动。
+#[test]
+fn rename_works_inside_a_subdirectory_and_never_crosses() {
+    let sandbox = Sandbox::new("rename-subdir");
+    sandbox.write("work/sub/old.md", "bytes-unchanged");
+    sandbox.write("work/sub/taken.md", "taken");
+    let mut app = granted_app(&sandbox);
+    let sub = sandbox.path().join(GRANT_DIR).join("sub");
+
+    // 改名前复核：旧名还占着 ⇒ 明确失败（那次改名没有留在盘上）。
+    let before_rename = call(&mut app, &verify_rename("sub/old.md", "new.md"));
+    assert_eq!(before_rename.state(), ResultState::Failure);
+    assert_eq!(
+        before_rename.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+
+    let renamed = call(&mut app, &rename("sub/old.md", "new.md"));
+    assert_eq!(renamed.state(), ResultState::Success);
+    assert!(
+        renamed.content()[0].text().contains("sub/old.md -> new.md"),
+        "回执说清旧路径与新名: {}",
+        renamed.content()[0].text()
+    );
+    assert_eq!(
+        fs::read(sub.join("new.md")).expect("新名字下那一份"),
+        b"bytes-unchanged",
+        "正文逐字节不变"
+    );
+    assert!(!sub.join("old.md").exists(), "旧名字已经不在");
+    assert!(
+        !sandbox.path().join(GRANT_DIR).join("new.md").exists(),
+        "新名只落在**旧文件所在的那个目录**里，不跨目录"
+    );
+
+    // 改名后复核：旧名已不在、新名是普通文件 ⇒ 成功；它只读。
+    let settled = snapshot(sandbox.path());
+    let after = call(&mut app, &verify_rename("sub/old.md", "new.md"));
+    assert_eq!(after.state(), ResultState::Success);
+    assert_eq!(
+        snapshot(sandbox.path()),
+        settled,
+        "复核只读：一个字节都不动"
+    );
+
+    // 新名是形状层的事：带分隔符 / `..` / 绝对路径 / 空名都不收。
+    let before_refusals = snapshot(sandbox.path());
+    for name in ["sub/x.md", "../x.md", "/x.md", "C:\\x.md", ""] {
+        let refused = call(&mut app, &rename("sub/new.md", name));
+        assert_eq!(
+            refused.failure_class(),
+            Some(FailureClass::InvalidPath.as_str()),
+            "name={name:?}"
+        );
+    }
+    // 旧名越界同样是形状拒绝。
+    for path in ["../new.md", "/new.md", "sub/../../new.md", ""] {
+        let refused = call(&mut app, &rename(path, "x.md"));
+        assert_eq!(
+            refused.failure_class(),
+            Some(FailureClass::InvalidPath.as_str()),
+            "path={path:?}"
+        );
+    }
+    assert_eq!(
+        snapshot(sandbox.path()),
+        before_refusals,
+        "拒绝路径零文件效果"
+    );
+
+    // 目标已存在 ⇒ `already-exists`，两个文件都一个字节没动。
+    let occupied = call(&mut app, &rename("sub/new.md", "taken.md"));
+    assert_eq!(occupied.state(), ResultState::Failure);
+    assert_eq!(
+        occupied.failure_class(),
+        Some(FailureClass::AlreadyExists.as_str())
+    );
+    assert_eq!(
+        fs::read(sub.join("new.md")).expect("原文件还在"),
+        b"bytes-unchanged"
+    );
+    assert_eq!(
+        fs::read(sub.join("taken.md")).expect("目标文件还在"),
+        b"taken"
+    );
+}
+
+/// R. 三个复核在**深路径**下与写动词同参、同规则、三态正确（且只读）。
+#[test]
+fn deep_paths_keep_the_same_three_way_verify() {
+    let sandbox = Sandbox::new("verify-deep");
+    let mut app = granted_app(&sandbox);
+    let work = sandbox.path().join(GRANT_DIR);
+    assert_eq!(call(&mut app, &mkdir("sub")).state(), ResultState::Success);
+
+    // 创建复核：还没有 ⇒ `not-found`；建好 ⇒ 成功；字节不一致 ⇒ 无法确认。
+    let absent = call(&mut app, &verify_create("sub/a.md", "v1"));
+    assert_eq!(absent.state(), ResultState::Failure);
+    assert_eq!(
+        absent.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+    // 父目录不在同样是"确认不存在"。
+    let missing_parent = call(&mut app, &verify_create("absent/a.md", "v1"));
+    assert_eq!(
+        missing_parent.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+
+    assert_eq!(
+        call(&mut app, &create("sub/a.md", "v1")).state(),
+        ResultState::Success
+    );
+    let settled = snapshot(sandbox.path());
+    assert_eq!(
+        call(&mut app, &verify_create("sub/a.md", "v1")).state(),
+        ResultState::Success
+    );
+    assert_eq!(snapshot(sandbox.path()), settled, "复核只读");
+    let different = call(&mut app, &verify_create("sub/a.md", "v2"));
+    assert_eq!(different.state(), ResultState::Unknown);
+    assert!(different.failure_class().is_none(), "无法确认不是失败分类");
+
+    // 建目录复核：父目录不在 ⇒ `not-found`；建好 ⇒ 成功；名字被文件占着 ⇒ 无法确认。
+    let absent = call(&mut app, &verify_mkdir("missing/inner"));
+    assert_eq!(
+        absent.failure_class(),
+        Some(FailureClass::NotFound.as_str())
+    );
+    assert_eq!(
+        call(&mut app, &mkdir("sub/inner")).state(),
+        ResultState::Success
+    );
+    let settled = snapshot(sandbox.path());
+    assert_eq!(
+        call(&mut app, &verify_mkdir("sub/inner")).state(),
+        ResultState::Success
+    );
+    assert_eq!(snapshot(sandbox.path()), settled, "复核只读");
+    fs::write(work.join("sub/occupied"), "x").expect("写占位文件");
+    let occupied = call(&mut app, &verify_mkdir("sub/occupied"));
+    assert_eq!(occupied.state(), ResultState::Unknown);
+
+    // 形状判据与写动词同一份：三个复核的越界写法都 ⇒ `invalid-path`。
+    for refused in [
+        call(&mut app, &verify_create("../x.md", "x")),
+        call(&mut app, &verify_create("/abs.md", "x")),
+        call(&mut app, &verify_mkdir("../x")),
+        call(&mut app, &verify_mkdir("/x")),
+        call(&mut app, &verify_rename("../x.md", "y.md")),
+        call(&mut app, &verify_rename("sub/a.md", "../y.md")),
+    ] {
+        assert_eq!(
+            refused.failure_class(),
+            Some(FailureClass::InvalidPath.as_str()),
+            "复核与写动词同一套路径规则"
+        );
+    }
 }

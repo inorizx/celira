@@ -1,18 +1,22 @@
 //! 文件 App：在**调用者显式授权**的一个沙盒根目录里做有界的事。
 //!
 //! **动词名 = App 名 `_` 动词**（`files_list` / `files_read` / `files_grep` / `files_create` /
-//! `files_edit` / `files_verify_*`）：工具名是全局平铺词表，归属必须由名字自答。App 名承担归属
-//! （装配期已保证唯一），动词只吃通用词（`read` / `list` / `grep` / `create` / `edit` / `verify`），
-//! 同一个 App 里两个 `verify` 靠宾语消歧（`files_verify_text` / `files_verify_edit`）⇒ 派生两条
-//! 装配期事实：**不同 App 的动词必然不同名**；同一个 App 内撞名由装配期拒绝
+//! `files_edit` / `files_mkdir` / `files_rename` / `files_verify_*`）：工具名是全局平铺词表，归属
+//! 必须由名字自答。App 名承担归属（装配期已保证唯一），动词只吃通用词（`read` / `list` /
+//! `grep` / `create` / `edit` / `mkdir` / `rename` / `verify`），同一个 App 里四个 `verify` 靠宾语
+//! 消歧（`files_verify_text` / `files_verify_edit` / `files_verify_mkdir` / `files_verify_rename`）
+//! ⇒ 派生两条装配期事实：**不同 App 的动词必然不同名**；同一个 App 内撞名由装配期拒绝
 //! （`ConflictingActionId`，无新机制）。
 //!
 //! **默认只读**：不给创建授权时，这里只有三件事——列目录（可续列）、读文本（可续读）、
 //! 按**子串**查找。这三个动词**都不声明写效应**（默认只读），因此装配期不为它们要求复核能力
 //! ——它们没有任何写效应。
-//! 只有宿主显式给出 [`CreationGrant`]（见 `creation_grant`）之后，才会多出**两件**写能力：
-//! 在一个已经存在的授权子目录里**新建**一个 UTF-8 文本文件，以及把一份已存在文件里的
-//! `old_text` 唯一一处换成 `new_text`。没有授权时这两件能力连声明都不出现。
+//! 只有宿主显式给出 [`CreationGrant`]（见 `creation_grant`）之后，才会多出**四件**写能力：
+//! 在一个已经存在的授权子目录里**新建**一个 UTF-8 文本文件、把一份已存在文件里的 `old_text`
+//! 唯一一处换成 `new_text`、在它里面建**一层**子目录、把该目录里的一个普通文件**改名**成
+//! **同一个目录内**的另一个单层名字。前两件与建目录都吃**授权目录内的相对路径**（如
+//! `reports/q3.md`；父目录必须已经在，本版不递归建父目录），改名的**新名**仍是单层名字。
+//! 没有授权时这四件能力连声明都不出现。
 //!
 //! **写面有两种来源**（[`WritableFace`]）：宿主授权的一个已存在子目录，与**主体自己的作品目录**
 //! （[`FileApp::with_own_works`]：根就是写面）。两种面的**写入语义一字不差**，差别只在**归属**
@@ -44,8 +48,10 @@
 //! - 模型只能给沙盒**相对**路径；绝对路径、盘符、UNC、设备路径、`..`、`:` 一律拒绝；
 //! - 访问链上的每一段都检查符号链接 / junction / 其他 reparse point；
 //! - 读侧三项能力（列目录 ≤100 项、读文本 ≤64 KiB、按子串查找 ≤100 条候选且最多扫 500 个文件）；
-//!   写侧两项 **不改名、不删除任何文件**：创建是独占新建（`create_new`），改是只替换一处
-//!   出现的文本（64 KiB，超限拒绝不截断）；
+//!   写侧四件 **不删除、不移动、不覆盖、不改正文里的第二处**：创建是独占新建（`create_new`），
+//!   改是只替换一处出现的文本（64 KiB，超限拒绝不截断），建目录只建**最后一段**（`create_dir`），
+//!   改名只在**同一个父目录**里换名字（不改内容、不跨目录）。创建与建目录都吃授权目录内的
+//!   **相对路径**，父目录必须**已经存在**——不递归、也不顺手补齐；
 //! - 文件内容对 Agent 来说是**数据**，不是指令；真正的边界是目录与能力限制，不是措辞。
 //!
 //! **明确不做**：排序与评分、摘要、按语义相似度挑、向量检索、索引与缓存（会引入第二份持久
@@ -64,7 +70,10 @@
 //! 5. `files_list` 必须**枚举整个目录**才能给出 `after` 依赖的那个稳定全序：返回有界（一页 ≤
 //!    [`MAX_ENTRIES`] 条），**读取不再有界**；
 //! 6. `files_grep` 的**目录遍历本身**没有单独的条数上限（计数器管的是**文件**）：条目数与文件
-//!    数有界，走的目录数没有。
+//!    数有界，走的目录数没有；
+//! 7. **建目录与改名不做 `fsync`**：它们只改目录项、不写正文，因此没有"写了一半"的字节可以
+//!    同步；反过来说，掉电之后这两个效果**不承诺已经在盘上**（与"可承诺的只有已确认前缀"
+//!    同一条口径）。
 //!
 //! ⚠️ 竞态与安全等级：本版把沙盒限定为**受信目录**（测试自建、不允许不可信进程并发改写）。
 //! 检查与打开之间存在理论上的替换窗口，本版**不构成 OS 级安全沙盒**，也不承诺抵御恶意并发
@@ -133,6 +142,18 @@ pub(crate) const CAPABILITY_VERIFY_TEXT: &str = "files_verify_text";
 pub(crate) const CAPABILITY_EDIT: &str = "files_edit";
 /// 改文本的复核能力标识。参数与 [`CAPABILITY_EDIT`] 完全相同。
 pub(crate) const CAPABILITY_VERIFY_EDIT: &str = "files_verify_edit";
+/// 建目录能力的标识（在授权目录里建**相对路径最后一段**的那一个子目录）。
+///
+/// 与创建/改文本**同挂**创建授权：它只在宿主给过那个目录时出现。
+pub(crate) const CAPABILITY_MKDIR: &str = "files_mkdir";
+/// 建目录的复核能力标识。参数与 [`CAPABILITY_MKDIR`] 完全相同。
+pub(crate) const CAPABILITY_VERIFY_MKDIR: &str = "files_verify_mkdir";
+/// 改名能力的标识（旧名是授权目录内的相对路径，新名是**同一目录内的单层**名字）。
+///
+/// 它**不移动**文件（新名只落在旧文件所在的那个目录里）、**不覆盖**、**不改内容**。
+pub(crate) const CAPABILITY_RENAME: &str = "files_rename";
+/// 改名的复核能力标识。参数与 [`CAPABILITY_RENAME`] 完全相同。
+pub(crate) const CAPABILITY_VERIFY_RENAME: &str = "files_verify_rename";
 /// 唯一被读侧接受的参数名（含义归本 App）。
 pub(crate) const PARAM_PATH: &str = "path";
 /// 续列参数：一个**名字**，只返回严格大于它的下一批。
@@ -143,7 +164,8 @@ pub(crate) const PARAM_OFFSET: &str = "offset";
 pub(crate) const PARAM_LIMIT: &str = "limit";
 /// 查找参数：要匹配的**子串**（区分大小写）。
 pub(crate) const PARAM_PATTERN: &str = "pattern";
-/// 创建动作的文件名参数：授权目录内的**单层**普通文件名。
+/// 创建动作的名字参数：家档是授权目录内的**相对文件路径**（最后一段是新文件名），机器档是
+/// 绝对路径。建目录与改名各自在自己的说明里写清形状（见 [`PathMode`] 与那几个能力说明）。
 pub(crate) const PARAM_NAME: &str = "name";
 /// 创建动作的正文参数：UTF-8 文本，允许为空串。
 pub(crate) const PARAM_TEXT: &str = "text";
@@ -184,7 +206,8 @@ pub enum FailureClass {
     InvalidPath,
     /// 目标不存在。
     NotFound,
-    /// 目标已经存在：本次**独占创建**没有发生，而且原名下的内容一个字节都没被动过。
+    /// 目标已经存在：本次**独占创建**没有发生，而且原名下的内容一个字节都没被动过
+    /// （建目录与改名的“名字已被占用”也是这一格：不覆盖、不静默成功）。
     AlreadyExists,
     /// 目标类型不对：把目录当文件读、把文件当目录列，或不是普通文件。
     WrongKind,
@@ -459,6 +482,32 @@ impl FileApp {
         self.writable.is_some()
     }
 
+    /// 这个实例有没有**宿主授权的那个目录**。
+    ///
+    /// 它是目录级那两件写（`files_mkdir` / `files_rename`）的**在场判据**：那两件说的是
+    /// “授权目录里的名字”，而作品面与机器档没有这样一个被点名的目录——它们**不获得**这两件
+    /// 能力（能力面里没有，准入与执行也照同一条判据拒绝，不是靠“反正没人会调”）。
+    pub(crate) fn has_creation_grant(&self) -> bool {
+        matches!(self.writable, Some(WritableFace::Granted(_)))
+    }
+
+    /// 目录级写的落点：**只**在宿主授权的那个目录里（`files_mkdir` / `files_rename` 及其复核）。
+    ///
+    /// 两条拒绝分类与 [`FileApp::write_anchor`] 逐字相同（`creation-not-granted` /
+    /// `creation-grant-mismatch`）——这里不新造词；差别只在它**不收**另外两档写面：那两档
+    /// 没有这两件能力（见 [`FileApp::has_creation_grant`]）。
+    fn granted_directory(&self, agent: &AgentId, run: &RunId) -> Result<PathBuf, &'static str> {
+        match &self.writable {
+            Some(WritableFace::Granted(grant)) if grant.agent == *agent && grant.run == *run => {
+                Ok(grant.root.clone())
+            }
+            Some(WritableFace::Granted(_)) => Err(REFUSAL_CREATION_GRANT_MISMATCH),
+            None | Some(WritableFace::Own) | Some(WritableFace::Machine) => {
+                Err(REFUSAL_CREATION_NOT_GRANTED)
+            }
+        }
+    }
+
     /// 这次写落在哪儿：家档 ⇒ 一个基准目录（相对路径从它算起）；机器档 ⇒ 由路径自己点名。
     ///
     /// 三种面的**门**在这里分开：授权面绑身份与活动（那是别人的东西，谁、哪一次都要对得上）；
@@ -480,20 +529,23 @@ impl FileApp {
         }
     }
 
-    /// **新建**的落点（`files_create` 与它的复核共用）：家档 ⇒ 基准目录里的**单层名字**；
-    /// 机器档 ⇒ 绝对路径，父目录必须已经在，末段由独占创建去判在不在。
+    /// **新建**的落点（`files_create` 与它的复核共用）：家档 ⇒ 基准目录内的**相对路径**
+    /// （父目录必须已经在）；机器档 ⇒ 绝对路径，父目录必须已经在，末段由独占创建去判在不在。
     ///
     /// 「末段不在」这件事**不能**在这里判：判了就等于把"新建"读成"改已有文件"。
-    fn create_target(anchor: WriteAnchor, name: &str) -> Result<(PathBuf, String), FailureClass> {
+    ///
+    /// 返回 `(父目录, 末段名字, 回执里的相对路径)`。家档的解析只有一处实现
+    /// （[`resolve_in_base_parent`]），本函数不自己拼路径。
+    fn create_target(
+        anchor: &WriteAnchor,
+        name: &str,
+    ) -> Result<(PathBuf, String, String), FailureClass> {
         match anchor {
+            // 授权目录内的相对路径（如 `reports/q3.md`）：父目录逐段落实，末段只做形状。
             WriteAnchor::Dir(base) => {
-                let names = relative_names(name)?;
-                // 单层普通文件名：没有第二段，也就没有中间路径可以被替换；控制字符也不收——
-                // 它会破坏任何按行渲染这份名字的地方。
-                if names.len() != 1 || names[0].chars().any(char::is_control) {
-                    return Err(FailureClass::InvalidPath);
-                }
-                Ok((base, names[0].clone()))
+                let (parent, file_name) = resolve_in_base_parent(base, name)?;
+                let shown = display_relative(base, &parent.join(&file_name));
+                Ok((parent, file_name, shown))
             }
             WriteAnchor::Machine => {
                 let target = machine_path(name)?;
@@ -502,7 +554,7 @@ impl FileApp {
                 if last.chars().any(char::is_control) {
                     return Err(FailureClass::InvalidPath);
                 }
-                Ok((dir, last))
+                Ok((dir, last.clone(), last))
             }
         }
     }
@@ -572,7 +624,9 @@ impl PathMode {
     /// `files_create` / 复核的 `name`。
     fn create_name(self) -> &'static str {
         match self {
-            PathMode::Home => "授权目录内的单层普通文件名",
+            PathMode::Home => {
+                "授权目录内的相对文件路径（如 `reports/q3.md`）；父目录必须已经存在；最后一段是新文件名"
+            }
             PathMode::Machine => {
                 "这台机器上的绝对文件路径（如 `D:\\work\\new.txt`）；父目录必须已经存在"
             }
@@ -611,8 +665,9 @@ impl FileApp {
         )
         .with_details(
             [
-                "边界：只创建——不覆盖、不追加、不改名、不删除；`name` 是单层文件名\
-                 （不含路径分隔符与控制字符）。上限：正文最多 64 KiB，超限整体拒绝（不留半份）。\
+                "边界：只创建——不覆盖、不追加、不改名、不删除；`name` 是授权目录内的相对文件路径\
+                 （如 `reports/q3.md`，不含控制字符），最后一段是新文件名，父目录必须已经存在\
+                 （本版不递归建父目录）。上限：正文最多 64 KiB，超限整体拒绝（不留半份）。\
                  失败形状：同名已存在 ⇒ 明确失败（那次创建没有发生，也没有覆盖任何东西）；\
                  创建之后写入或同步失败 ⇒ 无法确认（不是「失败」，也不是「成功」）。",
                 mode.write_scope_note(),
@@ -635,7 +690,7 @@ impl FileApp {
             ],
         )
         .with_details(
-            "三分：文件存在且字节与参数完全一致 = 成功；确认不存在（含父目录不存在、名字形状\
+            "三分：文件存在且字节与参数完全一致 = 成功；确认不存在（含父目录不存在、路径形状\
              非法）= 明确失败；存在但字节不一致、不是普通文件或读不出来 = 无法确认。\
              现在时：它回答「现在是什么样」，不声称「那一次创建成功了」——参数与创建完全相同，\
              配对靠参数本身，不靠任何操作句柄。",
@@ -645,8 +700,8 @@ impl FileApp {
     /// 改文本能力的说明（只在有授权时才被声明）。
     ///
     /// 与创建**同挂**创建授权：它同样是写，同样落在宿主显式给过的那**一个目录**里。区别只在
-    /// 形状——创建只给**单层**文件名，改给的是授权目录内的**相对路径**（可以在授权目录之下
-    /// 任意深度，因为要改的材料常常不在最外层）。
+    /// 末段——创建要的是**一个新名字**（末段不许存在），改要的是一份**已存在的文件**
+    /// （可以在这一个目录之下任意深度，因为要改的材料常常不在最外层）。
     pub(crate) fn edit_capability(mode: PathMode) -> Capability {
         Capability::new(
             ActionId::new(CAPABILITY_EDIT),
@@ -696,7 +751,101 @@ impl FileApp {
         )
     }
 
-    /// 这个实例当前可用的能力：读侧三项，加上**有写面时**的那两项写能力与它们各自的复核能力。
+    /// 建目录能力的说明（只在有创建授权时才被声明）。
+    ///
+    /// ⚠ 它不谈"相对路径还是绝对路径"：这一件**只**在授权面存在（见
+    /// [`FileApp::has_creation_grant`]），因此 `name` 永远是"授权目录内的相对路径"。
+    pub(crate) fn mkdir_capability() -> Capability {
+        Capability::new(
+            ActionId::new(CAPABILITY_MKDIR),
+            "在授权目录里新建一个子目录（同名的已经在了就明确失败）",
+            vec![ParamSpec::new(
+                PARAM_NAME,
+                true,
+                "授权目录内的相对目录路径（如 `reports/2026`）；父目录必须已经存在；只建最后一段",
+            )],
+        )
+        .with_details(
+            "边界：只建最后一段——不递归、不顺手补齐父目录；`name` 是授权目录内的相对路径\
+             （如 `reports/2026`，不含控制字符），父目录必须已经存在。失败形状：同名已存在 ⇒ \
+             明确失败（不覆盖，也不把已存在的那个说成本次建的）；父目录不在 ⇒ `not-found`\
+             （不是「顺手建出来」）；授权目录已不在 ⇒ 明确失败。这个动词只改目录项本身：\
+             不写任何字节，也不动任何已有内容。",
+        )
+    }
+
+    /// 建目录的复核能力说明（只在有创建授权时才被声明；参数与 [`FileApp::mkdir_capability`]
+    /// 完全相同）。它**只读**、不产生任何外部效果。
+    pub(crate) fn mkdir_verification_capability() -> Capability {
+        Capability::new(
+            ActionId::new(CAPABILITY_VERIFY_MKDIR),
+            "复核某项建目录的当前状态：那个名字现在是一个目录 = 成功（只读）",
+            vec![ParamSpec::new(
+                PARAM_NAME,
+                true,
+                "当初要建的那个相对目录路径（父目录必须已经存在）",
+            )],
+        )
+        .with_details(
+            "三分：那个名字现在是一个目录（不是链接 / reparse point）= 成功；确认那里\
+             什么都没有 = 明确失败（`not-found`，那次建目录没有留在盘上）；名字被别的东西\
+             占着（普通文件、链接）或读不出形状 = 无法确认。现在时：它回答「现在是什么样」，\
+             不声称「那一次建目录成功了」；参数与建目录完全相同，配对靠参数本身。",
+        )
+    }
+
+    /// 改名能力的说明（只在有创建授权时才被声明）。
+    ///
+    /// 与创建/改文本**同挂**创建授权：它同样落在那**一个**目录里。差别在形状——旧名是授权目录
+    /// 内的**相对路径**（可以在子目录里），新名是**同一目录内的单层名字**，因此"跨目录"在参数
+    /// 形状这一层就不成立，而不是等到执行时才去比路径。
+    pub(crate) fn rename_capability() -> Capability {
+        Capability::new(
+            ActionId::new(CAPABILITY_RENAME),
+            "把一个普通文件在它所在的目录里改名成另一个单层名字（目标已存在就明确失败）",
+            vec![
+                ParamSpec::new(
+                    PARAM_PATH,
+                    true,
+                    "授权目录内的相对文件路径：要改名的那一个（可以在子目录里）",
+                ),
+                ParamSpec::new(PARAM_NAME, true, "同一目录内的新单层文件名"),
+            ],
+        )
+        .with_details(
+            "边界：只改名——不移动、不复制、不覆盖、不改内容；`path` 是授权目录内的相对路径\
+             （如 `reports/q3.md`），`name` 是同一目录内的单层新名（不含路径分隔符与控制字符）\
+             ⇒ 名字跨目录在参数形状这一层就不成立。只允许普通文件：目录、链接 / reparse point \
+             都不改名。失败形状：原文件不存在 ⇒ 明确失败；目标已存在（含是链接）⇒ 明确失败，\
+             原文件一个字节都没动；把目录当文件 ⇒ 类型不对。正文逐字节不变——这个动词只改名字。",
+        )
+    }
+
+    /// 改名的复核能力说明（只在有创建授权时才被声明；参数与 [`FileApp::rename_capability`]
+    /// 完全相同）。它**只读**、不产生任何外部效果。
+    pub(crate) fn rename_verification_capability() -> Capability {
+        Capability::new(
+            ActionId::new(CAPABILITY_VERIFY_RENAME),
+            "复核某项改名的当前状态：旧名已不在且新名是普通文件 = 成功（只读）",
+            vec![
+                ParamSpec::new(
+                    PARAM_PATH,
+                    true,
+                    "当初要改名的那一个（授权目录内的相对文件路径）",
+                ),
+                ParamSpec::new(PARAM_NAME, true, "当初改成的新单层文件名（同一个目录内）"),
+            ],
+        )
+        .with_details(
+            "三分：旧名字还占着 = 明确失败（`not-found`，那次改名没有留在盘上）；旧名已\
+             不在、新名是一个普通文件 = 成功；两个都不在、新名不是普通文件（目录、链接 / \
+             reparse point）或读不出来 = 无法确认。现在时：它回答「现在是什么样」，不声称\
+             「那一次改名成功了」；参数与改名完全相同，配对靠参数本身。",
+        )
+    }
+
+    /// 这个实例当前可用的能力：读侧三项，加上**有写面时**的那两项写能力与它们各自的复核能力，
+    /// 再加上**有创建授权时**的目录级两件与各自复核。
     pub(crate) fn available_capabilities(&self) -> Capabilities {
         let mode = PathMode::of_machine(self.scope.is_machine());
         let mut items = Self::capabilities_in(mode).items().to_vec();
@@ -705,6 +854,12 @@ impl FileApp {
             items.push(Self::verification_capability(mode));
             items.push(Self::edit_capability(mode));
             items.push(Self::edit_verification_capability(mode));
+        }
+        if self.has_creation_grant() {
+            items.push(Self::mkdir_capability());
+            items.push(Self::mkdir_verification_capability());
+            items.push(Self::rename_capability());
+            items.push(Self::rename_verification_capability());
         }
         Capabilities::of(items)
     }
@@ -1250,13 +1405,13 @@ impl FileApp {
             return ActionOutcome::failure(FailureClass::MissingParameter.as_str());
         };
 
-        // 落点判据只有一处（`create_target`）：家档是"基准目录里的单层名字"，机器档是
-        // "绝对路径，父目录要在、末段不在"。这里**不再自己拼路径**。
+        // 落点判据只有一处（`create_target`）：家档是"基准目录里的相对路径，父目录要在、末段
+        // 不在"，机器档是"绝对路径，同样父目录要在"。这里**不再自己拼路径**。
         let anchor = match self.write_anchor(agent, operation.run()) {
             Ok(anchor) => anchor,
             Err(class) => return ActionOutcome::failure(class),
         };
-        let (dir, file_name) = match Self::create_target(anchor, name) {
+        let (dir, file_name, shown) = match Self::create_target(&anchor, name) {
             Ok(target) => target,
             Err(class) => return ActionOutcome::failure(class.as_str()),
         };
@@ -1288,17 +1443,17 @@ impl FileApp {
 
         ActionOutcome::success(vec![ContentBlock::new(
             "created",
-            format!("{} ({} bytes)", file_name, text.len()),
+            format!("{} ({} bytes)", shown, text.len()),
         )])
     }
 
     /// 复核一次创建**现在的真实状态**（不是"当时发生了什么"）。
     ///
-    /// 顺序与 [`FileApp::create_text`] 完全对应（身份/授权 → 参数形状 → 名字形状 → 上限），
+    /// 顺序与 [`FileApp::create_text`] 完全对应（身份/授权 → 参数形状 → 路径形状 → 上限），
     /// 然后**只读**地看那个名字现在的样子。三分是刻意分开的：
     ///
     /// - **成功**：文件存在、是普通文件、而且字节与参数**完全相同**；
-    /// - **明确失败**：确认不存在（`NotFound`，含父目录不存在、名字形状非法）——"这一次的效果
+    /// - **明确失败**：确认不存在（`NotFound`，含父目录不存在、路径形状非法）——"这一次的效果
     ///   确实没有留在盘上"；
     /// - **无法确认**（[`ActionOutcome::unknown`]）：存在但字节不一致、不是普通文件、是链接 /
     ///   reparse point，或根本读不出来。
@@ -1327,7 +1482,7 @@ impl FileApp {
             Ok(anchor) => anchor,
             Err(class) => return ActionOutcome::failure(class),
         };
-        let (dir, file_name) = match Self::create_target(anchor, name) {
+        let (dir, file_name, shown) = match Self::create_target(&anchor, name) {
             Ok(target) => target,
             Err(class) => return ActionOutcome::failure(class.as_str()),
         };
@@ -1358,7 +1513,7 @@ impl FileApp {
 
         ActionOutcome::success(vec![ContentBlock::new(
             "verified",
-            format!("{} ({} bytes match)", file_name, text.len()),
+            format!("{} ({} bytes match)", shown, text.len()),
         )])
     }
 
@@ -1547,6 +1702,288 @@ impl FileApp {
             ),
         )])
     }
+
+    /// 在**授权目录**里新建一个子目录：`name` 是授权目录内的**相对路径**，只建**最后一段**。
+    ///
+    /// 顺序是固定的：复核授权（身份/活动）→ 参数与路径形状 → 父目录逐段落实（存在、是目录、
+    /// 链上无链接）→ 末段那个名字是不是已经被占着 → `create_dir`。
+    ///
+    /// 只用 `create_dir`（不是 `create_dir_all`）：这个动词**不递归**，父目录必须已经在——
+    /// 不在就是 `not-found`，不顺手补齐。名字已被占着时**明确失败**，而且先看一眼占着它的是什么：
+    /// 链接 / reparse point 报 `link`（与读侧同一条），其余报 `already-exists`——两者都**不覆盖**，
+    /// 也不把已存在的那个说成本次建的。
+    ///
+    /// 它不写任何字节，因此没有"写了一半"这回事：成功就是这一次 `create_dir` 真的建出了那个
+    /// 目录；反过来，失败时盘上也没有本次留下的东西。
+    pub(crate) fn make_directory(
+        &self,
+        agent: &AgentId,
+        operation: &OperationId,
+        params: &ActionParams,
+    ) -> ActionOutcome {
+        for (name, _) in params.entries() {
+            if name != PARAM_NAME {
+                return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
+            }
+        }
+        let Some(name) = params.get(PARAM_NAME) else {
+            return ActionOutcome::failure(FailureClass::MissingParameter.as_str());
+        };
+        let base = match self.granted_directory(agent, operation.run()) {
+            Ok(base) => base,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        // 落点判据与创建/复核同源（`resolve_in_base_parent`）：父目录要在，末段只做形状。
+        let (parent, directory) = match resolve_in_base_parent(&base, name) {
+            Ok(target) => target,
+            Err(class) => return ActionOutcome::failure(class.as_str()),
+        };
+
+        let target = parent.join(&directory);
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                let class = if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+                    FailureClass::Link
+                } else {
+                    FailureClass::AlreadyExists
+                };
+                return ActionOutcome::failure(class.as_str());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return ActionOutcome::failure(io_class(&error).as_str()),
+        }
+        // 父目录不在了 ⇒ `not-found`（`create_dir` 不会顺手补齐它——那正是"不递归"）。
+        if let Err(error) = fs::create_dir(&target) {
+            return ActionOutcome::failure(create_failure(&error).as_str());
+        }
+
+        ActionOutcome::success(vec![ContentBlock::new(
+            "created",
+            format!("{}/ (directory)", display_relative(&base, &target)),
+        )])
+    }
+
+    /// 复核一次建目录**现在的真实状态**（不是"当时发生了什么"）。
+    ///
+    /// 顺序与 [`FileApp::make_directory`] 完全对应（身份/授权 → 参数与路径形状 → 父目录落实），
+    /// 然后**只读**地看那个名字现在的样子。三分与 [`FileApp::verify_text`] 同一条口径：
+    ///
+    /// - **成功**：那个名字现在是一个目录（不是链接 / reparse point）；
+    /// - **明确失败**（`not-found`）：确认那个名字是空的——"这一次的效果确实没有留在盘上"；
+    /// - **无法确认**（[`ActionOutcome::unknown`]）：名字被别的东西占着（普通文件、链接），
+    ///   或读不出形状。**"那里有一份不一样的东西"既不能断言成功、也不能断言失败**。
+    ///
+    /// 路径形状本身不合法 ⇒ `invalid-path`；父目录不在 ⇒ `not-found`——都属于明确失败：
+    /// 那份参数不可能对应任何一次真实建目录。
+    pub(crate) fn verify_directory(
+        &self,
+        agent: &AgentId,
+        operation: &OperationId,
+        params: &ActionParams,
+    ) -> ActionOutcome {
+        for (name, _) in params.entries() {
+            if name != PARAM_NAME {
+                return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
+            }
+        }
+        let Some(name) = params.get(PARAM_NAME) else {
+            return ActionOutcome::failure(FailureClass::MissingParameter.as_str());
+        };
+        let base = match self.granted_directory(agent, operation.run()) {
+            Ok(base) => base,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        // 与 `make_directory` **同一个落点判据**：两边各拼一次路径就会验错地方。
+        let (parent, directory) = match resolve_in_base_parent(&base, name) {
+            Ok(target) => target,
+            // 路径形状本身不合法 / 父目录不在：那份参数不可能对应任何一次真实建目录。
+            Err(class @ FailureClass::InvalidPath) | Err(class @ FailureClass::NotFound) => {
+                return ActionOutcome::failure(class.as_str());
+            }
+            // 链接、类型不对、权限、I/O：看不到就是看不到。
+            Err(_) => return ActionOutcome::unknown(),
+        };
+
+        let target = parent.join(&directory);
+        match fs::symlink_metadata(&target) {
+            Ok(metadata)
+                if metadata.is_dir()
+                    && !metadata.file_type().is_symlink()
+                    && !is_reparse_point(&metadata) =>
+            {
+                ActionOutcome::success(vec![ContentBlock::new(
+                    "verified",
+                    format!("{}/ (directory)", display_relative(&base, &target)),
+                )])
+            }
+            Ok(_) => ActionOutcome::unknown(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                ActionOutcome::failure(FailureClass::NotFound.as_str())
+            }
+            Err(_) => ActionOutcome::unknown(),
+        }
+    }
+
+    /// 在**授权目录**里把一个普通文件改名成**同一目录内**的另一个单层名字。
+    ///
+    /// 顺序是固定的：复核授权（身份/活动）→ 参数与路径形状 → 旧文件解析（可以在子目录里）→
+    /// 原文件是什么 → 新名字是不是已经被占着 → `rename`。
+    ///
+    /// `path` 是授权目录内的**相对路径**（如 `sub/a.txt`），`name` 是**单层**新名
+    /// （[`single_name`]）：于是"跨目录"在参数形状这一层就不成立（`sub/c.txt` 与 `../c.txt`
+    /// 作为新名都是 `invalid-path`），改名只发生在旧文件所在的那一个目录里。
+    ///
+    /// 目标已存在时**明确失败**而且原文件一个字节都没动：`rename` 在 Unix 上会**静默覆盖**，
+    /// 所以"不覆盖"必须由这一步先判出来，不能留给系统调用。判出来之后仍用 `rename`——它是
+    /// 真正的改名（不复制、不重写正文），正文因此逐字节不变。
+    ///
+    /// ⚠ 检查与改名之间理论上存在替换窗口（同 [`FileApp::resolve_existing`] 的等级声明）：
+    /// 本模块把沙盒限定为**受信目录**，不构成 OS 级安全沙盒。
+    pub(crate) fn rename_file(
+        &self,
+        agent: &AgentId,
+        operation: &OperationId,
+        params: &ActionParams,
+    ) -> ActionOutcome {
+        for (name, _) in params.entries() {
+            if name != PARAM_PATH && name != PARAM_NAME {
+                return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
+            }
+        }
+        let (Some(path), Some(name)) = (params.get(PARAM_PATH), params.get(PARAM_NAME)) else {
+            return ActionOutcome::failure(FailureClass::MissingParameter.as_str());
+        };
+        let base = match self.granted_directory(agent, operation.run()) {
+            Ok(base) => base,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        // 旧文件可以在授权目录之下的任意深度：走与 `files_edit` 同一条相对路径判据。
+        let source = match resolve_in_base(&base, path) {
+            Ok(source) => source,
+            Err(class) => return ActionOutcome::failure(class.as_str()),
+        };
+        // 新名是**单层**名字：跨目录在参数形状这一层就不成立。
+        let to = match single_name(name) {
+            Ok(to) => to,
+            Err(class) => return ActionOutcome::failure(class.as_str()),
+        };
+        // 落点是**旧文件所在的那一个目录**（不是授权目录根，也不是别处）。
+        let Some(parent) = source.parent() else {
+            return ActionOutcome::failure(FailureClass::InvalidPath.as_str());
+        };
+
+        match fs::symlink_metadata(&source) {
+            Ok(metadata) => {
+                // 链接不跟、也不改名：移动一个链接是另一件事，不在这个动词里。
+                if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+                    return ActionOutcome::failure(FailureClass::Link.as_str());
+                }
+                // 只允许普通文件：目录、设备、套接字都不是"一份文件"。
+                if !metadata.is_file() {
+                    return ActionOutcome::failure(FailureClass::WrongKind.as_str());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return ActionOutcome::failure(FailureClass::NotFound.as_str());
+            }
+            Err(error) => return ActionOutcome::failure(io_class(&error).as_str()),
+        }
+
+        let target = parent.join(&to);
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                // 名字被占着就不动：是链接 ⇒ `link`（与建目录同一条），其余 ⇒ `already-exists`。
+                let class = if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+                    FailureClass::Link
+                } else {
+                    FailureClass::AlreadyExists
+                };
+                return ActionOutcome::failure(class.as_str());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return ActionOutcome::failure(io_class(&error).as_str()),
+        }
+
+        if let Err(error) = fs::rename(&source, &target) {
+            return ActionOutcome::failure(create_failure(&error).as_str());
+        }
+
+        ActionOutcome::success(vec![ContentBlock::new(
+            "renamed",
+            format!("{} -> {to}", display_relative(&base, &source)),
+        )])
+    }
+
+    /// 复核一次改名**现在的真实状态**（不是"当时发生了什么"）。
+    ///
+    /// 顺序与 [`FileApp::rename_file`] 完全对应（身份/授权 → 参数与路径形状 → 旧文件解析），
+    /// 然后**只读**地看那两个名字现在的样子。三分与 [`FileApp::verify_edit_text`] 同一条口径：
+    ///
+    /// - **成功**：旧名字已经不在了，而且新名字是一个普通文件；
+    /// - **明确失败**（`not-found`）：旧名字**还占着**（或它所在的父目录已经不在）——那次改名
+    ///   确实没有留在盘上；
+    /// - **无法确认**（[`ActionOutcome::unknown`]）：两个都不在、新名字不是普通文件（目录、
+    ///   链接 / reparse point）、或读不出形状。**不能把"看不出发生了什么"报成任何一边。**
+    pub(crate) fn verify_rename(
+        &self,
+        agent: &AgentId,
+        operation: &OperationId,
+        params: &ActionParams,
+    ) -> ActionOutcome {
+        for (name, _) in params.entries() {
+            if name != PARAM_PATH && name != PARAM_NAME {
+                return ActionOutcome::failure(FailureClass::UnknownParameter.as_str());
+            }
+        }
+        let (Some(path), Some(name)) = (params.get(PARAM_PATH), params.get(PARAM_NAME)) else {
+            return ActionOutcome::failure(FailureClass::MissingParameter.as_str());
+        };
+        let base = match self.granted_directory(agent, operation.run()) {
+            Ok(base) => base,
+            Err(class) => return ActionOutcome::failure(class),
+        };
+        // 与 `rename_file` **同一套路径规则**（形状 → 父目录 → 末段）：旧文件可以在子目录里。
+        // 复核这里**只**落实父目录、不要求末段存在——"旧名还在不在"正是它要回答的问题。
+        let names = match relative_names(path) {
+            Ok(names) if !names.is_empty() => names,
+            Ok(_) => return ActionOutcome::failure(FailureClass::InvalidPath.as_str()),
+            Err(class) => return ActionOutcome::failure(class.as_str()),
+        };
+        let (last, parents) = names.split_last().expect("上面已判非空");
+        let parent = match resolve_within(&base, parents) {
+            Ok(parent) => parent,
+            // 父目录都不在了：两个名字都不在——既不能断言旧名还占着，也不能断言新名是普通文件。
+            Err(_) => return ActionOutcome::unknown(),
+        };
+        let to = match single_name(name) {
+            Ok(to) => to,
+            Err(class) => return ActionOutcome::failure(class.as_str()),
+        };
+        let source = parent.join(last);
+
+        match fs::symlink_metadata(&source) {
+            // 旧名字还占着：那次改名没有发生（或没有留在盘上）。
+            Ok(_) => return ActionOutcome::failure(FailureClass::NotFound.as_str()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return ActionOutcome::unknown(),
+        }
+        match fs::symlink_metadata(parent.join(&to)) {
+            Ok(metadata)
+                if metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && !is_reparse_point(&metadata) =>
+            {
+                ActionOutcome::success(vec![ContentBlock::new(
+                    "verified",
+                    format!(
+                        "{} -> {to} (regular file in place)",
+                        display_relative(&base, &source)
+                    ),
+                )])
+            }
+            _ => ActionOutcome::unknown(),
+        }
+    }
 }
 
 /// **整份读一个普通文本文件**——"整份读"这件事的**唯一实现**。
@@ -1592,9 +2029,9 @@ pub(crate) fn read_text_file(path: &Path) -> Result<String, FailureClass> {
     String::from_utf8(bytes).map_err(|_| FailureClass::NotUtf8)
 }
 
-/// 把独占创建的失败翻译成稳定分类。
+/// 独占类动作的失败翻译成稳定分类（独占创建、建目录、改名共用）。
 ///
-/// `AlreadyExists` 是**明确失败**：本次创建没有发生，而且原名下的内容一个字节都没被动过。
+/// `AlreadyExists` 是**明确失败**：本次动作没有发生，而且原名下的内容一个字节都没被动过。
 fn create_failure(error: &std::io::Error) -> FailureClass {
     if error.kind() == std::io::ErrorKind::AlreadyExists {
         FailureClass::AlreadyExists
@@ -1614,6 +2051,23 @@ pub(crate) fn relative_names(relative: &str) -> Result<Vec<String>, FailureClass
     // 规则的家在 `crate::sandbox`（`files` / `file_view` / `im` 共用同一份实现，而 **App 之间
     // 不得有实现依赖**）；这里只把它的分类翻成本 App 的词表。
     crate::sandbox::relative_names(relative).map_err(FailureClass::from)
+}
+
+/// **单层名字**的形状判据：`files_rename` 的**新名字**（`name`）用它。
+///
+/// 空名、`.`、`..`、绝对路径、盘符、冒号、分隔符都由 [`relative_names`] 先拒；这里再要求
+/// **恰好一段**（单层），并拒绝控制字符（它会破坏任何按行渲染这份名字的地方）。
+///
+/// 一个名字就是一个名字：写成路径就不是它——因此"不跨目录"这条不需要在执行时另判，它在这一层
+/// 就不成立。⚠ 创建与建目录**不**走这一条：它们的参数是授权目录内的相对路径
+/// （[`resolve_in_base_parent`]）；改名之所以仍是单层，是因为新名只落在**旧文件所在的那一个
+/// 目录**里。
+fn single_name(raw: &str) -> Result<String, FailureClass> {
+    let names = relative_names(raw)?;
+    if names.len() != 1 || names[0].chars().any(char::is_control) {
+        return Err(FailureClass::InvalidPath);
+    }
+    Ok(names[0].clone())
 }
 
 /// **第二遍**：在一个沙盒根下逐段落实一个已经通过形状校验的相对路径。
@@ -1639,6 +2093,42 @@ pub(crate) fn resolve_in_base(base: &Path, relative: &str) -> Result<PathBuf, Fa
         return Err(FailureClass::InvalidPath);
     }
     resolve_within(base, &names)
+}
+
+/// 在**写面目录**里解析一个准备**新建**的相对路径：父目录逐段落实，末段原样交回。
+///
+/// 规则的家在 [`crate::sandbox`]（`files` / `file_view` / `im` 共用同一份实现，而 App 之间
+/// 不得有实现依赖）；这里只把分类翻成本 App 的词表。
+///
+/// 它是家档 `files_create` / `files_mkdir` 与各自复核的**唯一**解析入口：父目录必须已经存在
+/// （不递归）、链上不许有链接、末段只做形状——"这个名字在不在"由独占创建自己判。
+pub(crate) fn resolve_in_base_parent(
+    base: &Path,
+    relative: &str,
+) -> Result<(PathBuf, String), FailureClass> {
+    crate::sandbox::resolve_in_base_parent(base, relative).map_err(FailureClass::from)
+}
+
+/// 回执里显示的**相对路径**：不带沙盒根，层级用 `/` 分隔（与 `files_list` 递归条目的名字同形）。
+///
+/// ⚠ 只有 Windows 才把 `\` 归一成 `/`：那里 `\` 是分隔符、不可能出现在名字里；Linux 上 `\`
+/// 是名字里的**普通字节**（见模块文档那条平台判据），替换它会把一份真名字说错。家档的根路径
+/// 不进入任何模型可见内容——回执只说"这一份在授权目录里的哪个位置"。
+fn display_relative(base: &Path, target: &Path) -> String {
+    match target.strip_prefix(base) {
+        Ok(rest) => {
+            let shown = rest.to_string_lossy().into_owned();
+            #[cfg(windows)]
+            let shown = shown.replace('\\', "/");
+            shown
+        }
+        // 结构上不会发生（两者都来自 `base.join(...)`）。真的发生了也只报名字，
+        // 不把绝对路径交出去。
+        Err(_) => target
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    }
 }
 
 /// **机器档的第二遍**：逐段落实一条绝对路径（末段也必须存在）。规则的家在 [`crate::sandbox`]。
@@ -1916,15 +2406,26 @@ impl ActionPort for FileApp {
         self.available_capabilities()
     }
 
-    /// 局部准入：读三个动作免门；两个写动作与它们各自的**复核**都要有**写面**。
+    /// 局部准入：读三个动作免门；写动作与它们各自的**复核**都要有**写面**。
     ///
     /// 写面有两种（见 [`WritableFace`]）：授权的那个要**对得上这次身份与活动**；主体自己的作品面
     /// 不绑这两样（主体自己的东西不用申请），只要这一格在这一次装配里在场就放行。
+    ///
+    /// ⚠ 目录级那两件（`files_mkdir` / `files_rename`）**只**认授权面：它们说的是"授权目录里的
+    /// 名字"，作品面与机器档没有那样一个目录 ⇒ 那两档得到的仍然是 `creation-not-granted`，
+    /// 与"没有这条授权"同一句话（不是一个新分类）。
     fn admit(&self, agent: &AgentId, run: &RunId, action: &Action) -> ActionAdmission {
         match action.id().as_str() {
             CAPABILITY_LIST | CAPABILITY_READ_TEXT | CAPABILITY_FIND_TEXT => {
                 ActionAdmission::Admitted
             }
+            CAPABILITY_MKDIR
+            | CAPABILITY_VERIFY_MKDIR
+            | CAPABILITY_RENAME
+            | CAPABILITY_VERIFY_RENAME => match self.granted_directory(agent, run) {
+                Ok(_) => ActionAdmission::Admitted,
+                Err(class) => ActionAdmission::refused(class),
+            },
             CAPABILITY_CREATE_TEXT
             | CAPABILITY_VERIFY_TEXT
             | CAPABILITY_EDIT
@@ -1964,6 +2465,10 @@ impl ActionPort for FileApp {
             CAPABILITY_VERIFY_TEXT => self.verify_text(agent, operation, action.params()),
             CAPABILITY_EDIT => self.edit_text(agent, operation, action.params()),
             CAPABILITY_VERIFY_EDIT => self.verify_edit_text(agent, operation, action.params()),
+            CAPABILITY_MKDIR => self.make_directory(agent, operation, action.params()),
+            CAPABILITY_VERIFY_MKDIR => self.verify_directory(agent, operation, action.params()),
+            CAPABILITY_RENAME => self.rename_file(agent, operation, action.params()),
+            CAPABILITY_VERIFY_RENAME => self.verify_rename(agent, operation, action.params()),
             _ => ActionOutcome::failure(FailureClass::UnknownCapability.as_str()),
         }
     }

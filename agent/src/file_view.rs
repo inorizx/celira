@@ -51,7 +51,7 @@
 //! 边界（与"不替主体判断"直接相关）：
 //!
 //! - **资料面与三个派生地址不给写入口**：派生那三个永不可写；资料面的写只来自宿主显式给出的
-//!   创建授权，那两件归 `files_*`；
+//!   创建授权，那四件（新建 / 唯一替换 / 建一层目录 / 同目录内改名）归 `files_*`；
 //! - **唯一的写面是主体自己的作品面**：一样是独占新建 / 唯一替换 / 不改名不删不追加 / 64 KiB，
 //!   差别只在**归属**（见 `file_app` 那两种写面）。它给的是写与读、**没有执行**——要跑这些文本
 //!   得有 `terminal` 档（缺省没有这一档）；那是能力事实，不是建议；
@@ -525,6 +525,14 @@ impl FileView {
             items.push(FileApp::verification_capability(mode));
             items.push(FileApp::edit_capability(mode));
             items.push(FileApp::edit_verification_capability(mode));
+            // 目录级那两件只在**宿主授权的那一个目录**上存在：作品面与机器档没有那样一个目录，
+            // 因此它们的能力面里也没有这两件（判据在 `FileApp::has_creation_grant`，只有一份）。
+            if self.materials.has_creation_grant() {
+                items.push(FileApp::mkdir_capability());
+                items.push(FileApp::mkdir_verification_capability());
+                items.push(FileApp::rename_capability());
+                items.push(FileApp::rename_verification_capability());
+            }
         }
         if self.works_present() {
             items.extend(Self::works_capabilities().items().iter().cloned());
@@ -609,13 +617,14 @@ impl FileView {
                 ActionId::new(CAPABILITY_WORKS_CREATE),
                 "在你自己的作品目录里新建一个 UTF-8 文本文件（同名的已经在了就明确失败）",
                 vec![
-                    ParamSpec::new(PARAM_NAME, true, "作品目录内的单层普通文件名"),
+                    ParamSpec::new(PARAM_NAME, true, "作品目录内的相对文件路径（如 `notes/todo.md`）；父目录必须已经存在；最后一段是新文件名"),
                     ParamSpec::new(PARAM_TEXT, true, "要写入的 UTF-8 文本，允许为空串"),
                 ],
             )
             .with_details(
-                "边界：只创建——不覆盖、不追加、不改名、不删除；`name` 是单层文件名\
-                 （不含路径分隔符与控制字符）。上限：正文最多 64 KiB，超限整体拒绝\
+                "边界：只创建——不覆盖、不追加、不改名、不删除；`name` 是相对路径\
+                 （不含控制字符），最后一段是新文件名；父目录必须已经存在（不在 ⇒ `not-found`，不递归）。\
+                 上限：正文最多 64 KiB，超限整体拒绝\
                  （不留半份），空文本合法。失败形状：同名已存在 ⇒ `already-exists`（原名下\
                  一个字节都不动）；创建之后写入或同步失败 ⇒ 无法确认（不是成功，也不是失败）。\
                  这是你自己的东西：不需要任何授权；写完用 `projects_read` 读回来核实。",
@@ -624,7 +633,7 @@ impl FileView {
                 ActionId::new(CAPABILITY_WORKS_VERIFY_TEXT),
                 "复核一次创建现在的真实状态（与 `projects_create` 同参数，只读）",
                 vec![
-                    ParamSpec::new(PARAM_NAME, true, "作品目录内的单层普通文件名"),
+                    ParamSpec::new(PARAM_NAME, true, "作品目录内的相对文件路径（如 `notes/todo.md`）；父目录必须已经存在；最后一段是新文件名"),
                     ParamSpec::new(PARAM_TEXT, true, "要核对的 UTF-8 文本"),
                 ],
             )
@@ -800,7 +809,11 @@ impl ActionPort for FileView {
             file_app::CAPABILITY_CREATE_TEXT
             | file_app::CAPABILITY_VERIFY_TEXT
             | file_app::CAPABILITY_EDIT
-            | file_app::CAPABILITY_VERIFY_EDIT => self.materials.admit(agent, run, action),
+            | file_app::CAPABILITY_VERIFY_EDIT
+            | file_app::CAPABILITY_MKDIR
+            | file_app::CAPABILITY_VERIFY_MKDIR
+            | file_app::CAPABILITY_RENAME
+            | file_app::CAPABILITY_VERIFY_RENAME => self.materials.admit(agent, run, action),
             // 作品面：主体自己的东西。**不绑身份与活动**——只要这一格在场就放行；
             // 不在场（`Absent`）连声明都没有，打不开（`Unusable`）则如实报那个分类。
             CAPABILITY_WORKS_LIST
@@ -841,6 +854,23 @@ impl ActionPort for FileView {
             file_app::CAPABILITY_VERIFY_EDIT => {
                 self.materials
                     .verify_edit_text(agent, operation, action.params())
+            }
+            // 目录级写同样只在真实资料目录里发生（而且只在授权目录那一档存在）。
+            file_app::CAPABILITY_MKDIR => {
+                self.materials
+                    .make_directory(agent, operation, action.params())
+            }
+            file_app::CAPABILITY_VERIFY_MKDIR => {
+                self.materials
+                    .verify_directory(agent, operation, action.params())
+            }
+            file_app::CAPABILITY_RENAME => {
+                self.materials
+                    .rename_file(agent, operation, action.params())
+            }
+            file_app::CAPABILITY_VERIFY_RENAME => {
+                self.materials
+                    .verify_rename(agent, operation, action.params())
             }
             // 作品面那六件：整条交给**主体自己的那一格**（同一套墙、同一份实现，不同的门）。
             CAPABILITY_WORKS_LIST => self.with_works(|works| works.list(action.params())),
@@ -1377,14 +1407,14 @@ impl crate::app_contract::AppPort for FileView {
         self.available_capabilities()
     }
 
-    /// 写得出来的部分必须配得齐：**有创建授权时**才声明 `files_create` 是独占创建、
-    /// `files_edit` 也是独占创建，并各自指向同属本 App 的只读复核能力（`files_verify_text` /
-    /// `files_verify_edit`）。
+    /// 写得出来的部分必须配得齐：**有创建授权时**才声明 `files_create` / `files_edit` /
+    /// `files_mkdir` / `files_rename` 都是独占创建，并各自指向同属本 App 的只读复核能力
+    /// （`files_verify_text` / `files_verify_edit` / `files_verify_mkdir` / `files_verify_rename`）。
     ///
-    /// 改文本与独占创建同类，判据是**同参重放行为**：第一次消耗前置（`old_text` 被换掉），
-    /// 第二次同参数必然明确失败且无害。
+    /// 四件同属 `exclusive-create`，判据都是**同参重放行为**：第一次消耗前置（名字被占、`old_text`
+    /// 被换掉、目录建出来了、旧名字不见了），第二次同参数必然明确失败且无害。
     ///
-    /// 没有授权时这里返回空——那时两个写能力连能力都不存在，声明它们会被装配期按
+    /// 没有授权时这里返回空——那时这些写能力连能力都不存在，声明它们会被装配期按
     /// `unknown-declared-effect` 拒绝；这正是"声明与实例能力同源派生"的含义。
     fn declared_effects(&self) -> Vec<crate::app_contract::EffectDeclaration> {
         use crate::app_contract::{EffectClass, EffectDeclaration};
@@ -1399,6 +1429,20 @@ impl crate::app_contract::AppPort for FileView {
                 ActionId::new(file_app::CAPABILITY_EDIT),
                 EffectClass::ExclusiveCreate,
                 Some(ActionId::new(file_app::CAPABILITY_VERIFY_EDIT)),
+            ));
+        }
+        // 目录级那两件只在授权面存在（见 `FileApp::has_creation_grant`）：同参重放也必然失败
+        // ——目录建过一次就占用着名字，改名一次就把旧名字消耗掉了。
+        if self.materials.has_creation_grant() {
+            declared.push(EffectDeclaration::new(
+                ActionId::new(file_app::CAPABILITY_MKDIR),
+                EffectClass::ExclusiveCreate,
+                Some(ActionId::new(file_app::CAPABILITY_VERIFY_MKDIR)),
+            ));
+            declared.push(EffectDeclaration::new(
+                ActionId::new(file_app::CAPABILITY_RENAME),
+                EffectClass::ExclusiveCreate,
+                Some(ActionId::new(file_app::CAPABILITY_VERIFY_RENAME)),
             ));
         }
         // 作品面：同样两对（独占创建 ＋ 唯一替换），复核与写动词**同参数**。
@@ -1435,6 +1479,8 @@ impl crate::app_contract::AppPort for FileView {
                 let class = match capability.id().as_str() {
                     file_app::CAPABILITY_CREATE_TEXT
                     | file_app::CAPABILITY_EDIT
+                    | file_app::CAPABILITY_MKDIR
+                    | file_app::CAPABILITY_RENAME
                     | CAPABILITY_WORKS_CREATE
                     | CAPABILITY_WORKS_EDIT => SourceClass::System,
                     _ => SourceClass::Environment,

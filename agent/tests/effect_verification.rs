@@ -26,6 +26,10 @@ const CREATE_TEXT: &str = "files_create";
 const VERIFY_TEXT: &str = "files_verify_text";
 const EDIT: &str = "files_edit";
 const VERIFY_EDIT: &str = "files_verify_edit";
+const MKDIR: &str = "files_mkdir";
+const VERIFY_MKDIR: &str = "files_verify_mkdir";
+const RENAME: &str = "files_rename";
+const VERIFY_RENAME: &str = "files_verify_rename";
 const CREATE_NOTE: &str = "notes_create";
 const VERIFY_NOTE: &str = "notes_verify_note";
 
@@ -263,6 +267,10 @@ fn the_verification_capability_exists_exactly_when_the_grant_does() {
     assert!(ids.contains(&VERIFY_TEXT.to_string()));
     assert!(ids.contains(&EDIT.to_string()), "改文本与创建同挂授权");
     assert!(ids.contains(&VERIFY_EDIT.to_string()));
+    assert!(ids.contains(&MKDIR.to_string()), "建目录与创建同挂授权");
+    assert!(ids.contains(&VERIFY_MKDIR.to_string()));
+    assert!(ids.contains(&RENAME.to_string()), "改名与创建同挂授权");
+    assert!(ids.contains(&VERIFY_RENAME.to_string()));
 
     let without_grant =
         FileView::with_history_and_creation(&sandbox.materials(), &sandbox.env(), None)
@@ -275,6 +283,10 @@ fn the_verification_capability_exists_exactly_when_the_grant_does() {
         "没有授权时改文本连能力都不出现（不是\"存在但会被拒绝\"）"
     );
     assert!(!ids.contains(&VERIFY_EDIT.to_string()));
+    assert!(!ids.contains(&MKDIR.to_string()));
+    assert!(!ids.contains(&VERIFY_MKDIR.to_string()));
+    assert!(!ids.contains(&RENAME.to_string()));
+    assert!(!ids.contains(&VERIFY_RENAME.to_string()));
     // ⚠ **作品面与授权无关**（2026-10-14 起）：她自己的那个 `projects/` 不需要任何授权，
     // 所以"没有授权"这一档剩下的正是**它**那一对——而不是"一条声明都没有"。
     assert_eq!(
@@ -284,7 +296,8 @@ fn the_verification_capability_exists_exactly_when_the_grant_does() {
     );
 }
 
-/// 规范句 2 / 判据 1 的正向面：两个 App 各自声明**自己的**类别与复核，互不混用。
+/// 规范句 2 / 判据 1 的正向面：文件 App 的四件写各自声明**自己的**类别与复核，互不混用；
+/// Notes 的写与它们各归各的类别。
 #[test]
 fn the_two_write_capabilities_declare_their_own_classes_and_verifications() {
     let sandbox = Sandbox::new("declared-classes");
@@ -296,10 +309,13 @@ fn the_two_write_capabilities_declare_their_own_classes_and_verifications() {
         vec![
             CREATE_TEXT.to_string(),
             EDIT.to_string(),
+            MKDIR.to_string(),
+            RENAME.to_string(),
             "projects_create".to_string(),
             "projects_edit".to_string(),
         ],
-        "TASK_37 起文件 App 有两件写：创建与改文本；2026-10-14 起作品面再来两件（她自己的目录）"
+        "TASK_37 起文件 App 有两件写：创建与改文本；2026-10-26 起授权目录再来两件（建目录与改名）；\
+         作品面那一对（她自己的目录）照旧"
     );
     assert_eq!(effects[0].class(), EffectClass::ExclusiveCreate);
     assert_eq!(
@@ -312,6 +328,17 @@ fn the_two_write_capabilities_declare_their_own_classes_and_verifications() {
     assert_eq!(
         effects[1].verification().map(|id| id.as_str()),
         Some(VERIFY_EDIT)
+    );
+    // 建目录与改名**同一档、同一个理由**：目录建过一次就占着名字；改名一次就把旧名字消耗掉。
+    assert_eq!(effects[2].class(), EffectClass::ExclusiveCreate);
+    assert_eq!(
+        effects[2].verification().map(|id| id.as_str()),
+        Some(VERIFY_MKDIR)
+    );
+    assert_eq!(effects[3].class(), EffectClass::ExclusiveCreate);
+    assert_eq!(
+        effects[3].verification().map(|id| id.as_str()),
+        Some(VERIFY_RENAME)
     );
 
     let notes = notes_app(&sandbox, "run-1");

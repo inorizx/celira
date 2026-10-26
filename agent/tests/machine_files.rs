@@ -328,7 +328,10 @@ fn the_capability_text_follows_the_scope() {
     let home_spec = path_spec_of(&home, "files_read", "path");
     assert!(home_spec.contains("相对"), "家档的说明：{home_spec}");
     let home_create = path_spec_of(&home, "files_create", "name");
-    assert!(home_create.contains("单层"), "家档的说明：{home_create}");
+    assert!(
+        home_create.contains("相对") && home_create.contains("父目录必须已经存在"),
+        "家档的新建说明必须说清「相对路径 ＋ 父目录必须已经存在」：{home_create}",
+    );
 
     // 机器档：说绝对路径（模型据此决定写什么形状）。
     let machine_spec = path_spec_of(&machine, "files_read", "path");

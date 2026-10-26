@@ -259,7 +259,6 @@ fn path_boundaries_are_refused_without_creating_anything() {
     let outside = temp.path().join("outside.txt");
     for (name, why) in [
         ("../outside.txt", "父路径"),
-        ("sub/inner.txt", "带分隔符（不是单层名字）"),
         ("/abs.txt", "绝对路径"),
         ("C:\\x.txt", "盘符"),
         ("\\\\server\\share\\x.txt", "UNC"),
@@ -275,6 +274,22 @@ fn path_boundaries_are_refused_without_creating_anything() {
         );
     }
     assert!(!outside.exists(), "越界路径不得在授权目录之外创建任何东西");
+
+    // 授权目录内的**相对路径**是合法地址：父目录 `sub` 已经存在 ⇒ 真的落在它里面。
+    let deep = scope.execute(&agent_a(), &op("run-1"), &create("sub/inner.txt", "deep"));
+    assert_eq!(deep.state(), ResultState::Success, "{deep:?}");
+    assert_eq!(
+        std::fs::read_to_string(materials.join("notes/sub/inner.txt")).expect("读回"),
+        "deep",
+        "文件落在授权目录的子目录里，字节逐字相同"
+    );
+    // 父目录不在 ⇒ 明确失败（不递归建父目录，也不悄悄落到根下）。
+    let missing = scope.execute(&agent_a(), &op("run-1"), &create("absent/a.txt", "x"));
+    assert_eq!(missing.state(), ResultState::Failure);
+    assert_eq!(missing.failure_class(), Some("not-found"));
+    assert!(!materials.join("notes/absent").exists());
+    assert!(!materials.join("notes/a.txt").exists());
+
     let created: Vec<String> = std::fs::read_dir(materials.join("notes"))
         .expect("列授权目录")
         .map(|entry| {
