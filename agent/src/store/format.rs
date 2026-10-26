@@ -103,6 +103,11 @@ pub enum WakeOrigin {
     Bell,
     /// 本地钟源：自己约的那个时刻到点了（含离线错过之后的补响）。
     Timer,
+    /// **外部输入入口**：`channels` 收件箱落了一条事件。
+    ///
+    /// ⚠ 它与 [`WakeOrigin::Opened`] / [`WakeOrigin::Changed`] **不是一条通道**：那两态说的是
+    /// im 唤醒通道，这一档说的是外部输入入口。词表值因此不叫 `wake-*`。
+    Channel,
     /// 宿主手动发起、没有外部事件触发。
     Manual,
 }
@@ -118,6 +123,7 @@ impl WakeOrigin {
             WakeOrigin::Changed => "wake-changed",
             WakeOrigin::Bell => "bell",
             WakeOrigin::Timer => "timer",
+            WakeOrigin::Channel => "channel",
             WakeOrigin::Manual => "manual",
         }
     }
@@ -135,6 +141,7 @@ impl WakeOrigin {
             "wake-changed" => Some(WakeOrigin::Changed),
             "bell" => Some(WakeOrigin::Bell),
             "timer" => Some(WakeOrigin::Timer),
+            "channel" => Some(WakeOrigin::Channel),
             "manual" => Some(WakeOrigin::Manual),
             _ => None,
         }

@@ -1,7 +1,8 @@
-//! 唤醒源（TASK_75）：门铃与**本地钟源**，汇成一条等待。
+//! 唤醒源（TASK_75）：门铃、**本地钟源**与**外部输入入口**，汇成一条等待。
 //!
 //! 门铃回答"世界有新动静了吗"（im 那条唤醒流，语义一个字没改）；本地钟源回答"主体给自己约的时刻
-//! 到了吗"。两件事都只是"**何时**开始一次活动"，因此它们可以共用宿主那一条等待——但**来源不同**
+//! 到了吗"；外部输入入口回答"有事件落进收件箱了吗"。三件事都只是"**何时**开始一次活动"，因此它们
+//! 可以共用宿主那一条等待——但**来源不同**
 //! 这件事必须留住：起源行要说清是谁把主体叫醒的（[`Woken`]）。
 //!
 //! 三件摆设：
@@ -10,7 +11,7 @@
 //!   那条路径（离线用例、没约过时间的机器）**一个字节都不用改**；
 //! - [`TimerSource`]：本地钟源。**到点才投一次**（同一个 id 不重复投），表读不出来就安静等着
 //!   （宿主那一轮会如实写 `unknown`，本件不冒充"没有到点"）；
-//! - [`WakeHub`]：把两处合成一条等待。**启动时先补一次**：表里已有过期但还没响过的 `pending`
+//! - [`WakeHub`]：把几处合成一条等待。**启动时先补一次**：表里已有过期但还没响过的 `pending`
 //!   ⇒ 立刻投一次 timer（离线错过这件事，进程一起来就要说，不能等主体下次被别的什么叫醒）。
 //!
 //! ⚠️ 本件**不认识** im 的协议，也不经 im 取时间：那个钟是宿主自己的（[`ClockHandle`]）。
@@ -55,6 +56,12 @@ pub enum Woken {
     Changed,
     /// 本地钟源：表里那条 `pending` 到点了（含**离线错过**的补响）。
     Timer,
+    /// **外部输入入口**：这条环境收到一条外部事件，且已落进收件箱。
+    ///
+    /// 线缆上**不带内容**——入口只回答"有一件事落了盘"，正文在 `channels` 收件箱里，
+    /// 由主体醒着自己去读。它与门铃的 `wake-opened` / `wake-changed` **不是一回事**：
+    /// 那两态说的是 im 唤醒通道，这一档说的是外部输入入口（`channels`）。
+    Channel,
     /// 唤醒通道被终结（fail-closed，宿主据此退出并报分类）。
     Refused(DoorbellFailure),
 }
@@ -222,7 +229,25 @@ fn forward(bell: impl WakePort + Send + 'static, signals: SyncSender<Woken>) -> 
     })
 }
 
-/// 两处来源汇成一条等待。
+/// 把外部输入入口的"有事件落盘"搬进同一条有界通道。
+///
+/// **阻塞送，不丢**：一条已落盘的事件必须换来一次"还有输入"的电平。入口自己那条容量 1
+/// 的通道已经把忙碌期间的 N 条压成一条，因此这里阻塞最多换来收场后**恰好多一场**，
+/// 不会一条事件一场。
+///
+/// 入口那条发送端结束时本线程**安静退出**，**不报 [`Woken::Refused`]**：入口停了不等于
+/// 整台宿主该停——im 与钟源还在，外部输入只是暂时没有了。
+fn forward_channels(channels: Receiver<()>, signals: SyncSender<Woken>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        while channels.recv().is_ok() {
+            if signals.send(Woken::Channel).is_err() {
+                return;
+            }
+        }
+    })
+}
+
+/// 两处来源汇成一条等待（可再加**外部输入入口**这第三处）。
 pub struct WakeHub {
     signals: Receiver<Woken>,
     _threads: Vec<JoinHandle<()>>,
@@ -240,6 +265,27 @@ impl WakeHub {
     /// ⚠️ 这里**曾经**可以装一道「门」（`crate::gate::Gate`，2026-10-06 已删）——**不要加回来**：
     /// "一次铃要不要叫醒主体"不归系统裁决（`RUNTIME_TERMINAL_DECISIONS.md` §7）。
     pub fn new(bell: impl WakePort + Send + 'static, timers: TimerSource) -> Self {
+        Self::build(bell, timers, None)
+    }
+
+    /// 同 [`WakeHub::new`]，再多接一处：**外部输入入口**的"有事件落盘"。
+    ///
+    /// 入口交来的是一条**电平**（容量 1、满了就丢），不是一个事件队列；本件把它搬进同一条
+    /// 有界等待（见 [`forward_channels`]）。入口**没有启动**时用 [`WakeHub::new`]——
+    /// "没有入口"与"入口在、只是没有事件"是两件事，这里不替它们合并。
+    pub fn with_channels(
+        bell: impl WakePort + Send + 'static,
+        timers: TimerSource,
+        channels: Receiver<()>,
+    ) -> Self {
+        Self::build(bell, timers, Some(channels))
+    }
+
+    fn build(
+        bell: impl WakePort + Send + 'static,
+        timers: TimerSource,
+        channels: Option<Receiver<()>>,
+    ) -> Self {
         let (sender, signals) = mpsc::sync_channel::<Woken>(WAKE_QUEUE);
         // ① 离线错过（含"上一次进程死在到点之后"）：先补，再说别的。
         if timers.due_now() {
@@ -248,10 +294,15 @@ impl WakeHub {
         // ② 门铃转发（合并语义见 `forward`）。
         let forwarder = forward(bell, sender.clone());
         // ③ 本地钟源。
-        let timer_thread = timers.run(sender);
+        let timer_thread = timers.run(sender.clone());
+        // ④ 外部输入入口（可选）。
+        let mut threads = vec![forwarder, timer_thread];
+        if let Some(channels) = channels {
+            threads.push(forward_channels(channels, sender));
+        }
         Self {
             signals,
-            _threads: vec![forwarder, timer_thread],
+            _threads: threads,
         }
     }
 

@@ -83,6 +83,13 @@ pub const WAKE_LEGACY_ORIGIN_TEXT: &str = "This activity was started by a wake-u
 pub const TIMER_ORIGIN_TEXT: &str =
     "This activity was started by the timer: an alarm set in this environment has arrived.";
 
+/// **外部输入入口**发起的活动的起源正文：一条机械事实——只说"有外部事件落进了这只环境的
+/// 收件箱"，**不说**它是什么、急不急、该不该处理（那些都要主体自己去看）。
+///
+/// 正文不在唤醒线上；入口那条线只回答"有一件事落了盘"。读法也写在这句里，因为它是
+/// **机械形状**（在哪能读到），不是对内容的判断。
+pub const CHANNEL_ORIGIN_TEXT: &str = "External input for this environment has arrived; the event is in the channels inbox, readable through the files view. Its content is not on the wake-up line.";
+
 /// 处境链的最内层：只说"这次活动是怎么被发起的"。
 ///
 /// 默认构造给的是手动那一句；装配那一层把**存储里的词表值**翻译成对应的人话，再用

@@ -4759,6 +4759,7 @@ fn the_run_start_origin_is_a_vocabulary_value_on_disk() {
         ("run-wake-changed", WakeOrigin::Changed),
         ("run-bell", WakeOrigin::Bell),
         ("run-timer", WakeOrigin::Timer),
+        ("run-channel", WakeOrigin::Channel),
         ("run-manual", WakeOrigin::Manual),
     ] {
         env.append_trace(
@@ -4772,7 +4773,14 @@ fn the_run_start_origin_is_a_vocabulary_value_on_disk() {
 
     // 盘上是**词表字符串**（不是人话）：逐行核对的原始文本。
     let raw = std::fs::read_to_string(dir.env().join("trace.ndjson")).expect("读原始盘面");
-    for value in ["wake-opened", "wake-changed", "bell", "timer", "manual"] {
+    for value in [
+        "wake-opened",
+        "wake-changed",
+        "bell",
+        "timer",
+        "channel",
+        "manual",
+    ] {
         assert!(
             raw.contains(&format!("\"origin\":\"{value}\"")),
             "盘上必须是词表值 {value:?}：{raw}"
@@ -4785,6 +4793,7 @@ fn the_run_start_origin_is_a_vocabulary_value_on_disk() {
         celira_agent::activity_origin::WAKE_CHANGED_ORIGIN_TEXT,
         celira_agent::activity_origin::WAKE_LEGACY_ORIGIN_TEXT,
         celira_agent::activity_origin::TIMER_ORIGIN_TEXT,
+        celira_agent::activity_origin::CHANNEL_ORIGIN_TEXT,
     ] {
         assert!(
             !raw.contains(sentence),
@@ -4804,6 +4813,7 @@ fn the_run_start_origin_is_a_vocabulary_value_on_disk() {
     assert!(seen.contains(&("run-wake-changed".to_string(), Some(WakeOrigin::Changed))));
     assert!(seen.contains(&("run-bell".to_string(), Some(WakeOrigin::Bell))));
     assert!(seen.contains(&("run-timer".to_string(), Some(WakeOrigin::Timer))));
+    assert!(seen.contains(&("run-channel".to_string(), Some(WakeOrigin::Channel))));
     assert!(seen.contains(&("run-manual".to_string(), Some(WakeOrigin::Manual))));
 }
 

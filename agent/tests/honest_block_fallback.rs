@@ -279,6 +279,7 @@ fn a_vocabulary_origin_always_lands_its_derived_text() {
         origin: WakeOrigin::Manual,
         since: None,
         notification: None,
+        channels: None,
         cards: None,
     };
     let mut session = session(&dir, &mut environment, declared, 2);
@@ -324,6 +325,7 @@ fn a_notification_projection_over_the_batch_limit_leaves_a_reading() {
             origin: WakeOrigin::Manual,
             since,
             notification: Some(small),
+            channels: None,
             cards: None,
         },
         2,
@@ -343,6 +345,7 @@ fn a_notification_projection_over_the_batch_limit_leaves_a_reading() {
             origin: WakeOrigin::Manual,
             since,
             notification: Some(&projection),
+            channels: None,
             cards: None,
         },
         2,
@@ -374,6 +377,7 @@ fn event_cards_over_the_batch_limit_leave_a_reading() {
             origin: WakeOrigin::Manual,
             since: None,
             notification: None,
+            channels: None,
             cards: Some(report),
         },
         2,

@@ -27,7 +27,7 @@ use celira_agent::channels::{self, ChannelConfig};
 
 const USAGE: &str = "\
 用法:
-  agent_channel add    --root <环境根> --label <标签> [--max-body N] [--rate N] [--bind 地址]
+  agent_channel add    --root <环境根> --label <标签> [--max-body N] [--rate N] [--bind 地址] [--silent]
   agent_channel list   --root <环境根>
   agent_channel remove --root <环境根> --route <route>
   agent_channel test   --root <环境根> --route <route> [--body TEXT]
@@ -37,8 +37,9 @@ const USAGE: &str = "\
   add     生成 route id（label 的 slug，冲突加 -2 / -3）与 secret（cc_ + 32 字节随机数的
           十六进制），写 <环境根>/channels/routes.json（Unix 0600）。secret 只打印这一次。
           缺省 max-body 32768（硬上限 262144）、rate 60（0 = 不限）、bind 127.0.0.1:8787。
+          `--silent` = 收下但不叫醒（默认响铃）；吵的源用它，主体醒着自己来看。
           label 不是路径：含 / \\ 或 .. 的 label 会被拒绝。
-  list    列出路由（id / label / 开关 / 上限 / 限流），不打印 secret。
+  list    列出路由（id / label / 开关 / 是否响铃 / 上限 / 限流），不打印 secret。
   remove  删一条路由；形状不对的 route id 直接拒绝，不碰任何文件。
   test    对着配置里那个 bind 地址发一条 Bearer + Idempotency-Key 请求，打印状态码与响应体。
           请求没发出去是退出码 3；收到了响应就是 0（状态码本身是读数）。
@@ -54,6 +55,7 @@ enum Command {
         max_body: Option<usize>,
         rate: Option<u32>,
         bind: Option<String>,
+        silent: bool,
     },
     List {
         root: String,
@@ -83,6 +85,7 @@ fn parse(args: &[String]) -> Result<Option<Command>, String> {
     let mut rate: Option<u32> = None;
     let mut bind: Option<String> = None;
     let mut body: Option<String> = None;
+    let mut silent = false;
 
     let mut index = 1;
     while index < args.len() {
@@ -94,6 +97,7 @@ fn parse(args: &[String]) -> Result<Option<Command>, String> {
             "--route" => route = Some(next_value(args, &mut index, "--route")?),
             "--bind" => bind = Some(next_value(args, &mut index, "--bind")?),
             "--body" => body = Some(next_value(args, &mut index, "--body")?),
+            "--silent" => silent = true,
             "--max-body" => {
                 let text = next_value(args, &mut index, "--max-body")?;
                 max_body = Some(
@@ -124,15 +128,17 @@ fn parse(args: &[String]) -> Result<Option<Command>, String> {
             max_body,
             rate,
             bind,
+            silent,
         })),
         "list" => {
-            if label.is_some() || route.is_some() || max_body.is_some() || rate.is_some() {
+            if label.is_some() || route.is_some() || max_body.is_some() || rate.is_some() || silent
+            {
                 return Err("list 只认 --root".to_string());
             }
             Ok(Some(Command::List { root }))
         }
         "remove" => {
-            if label.is_some() || max_body.is_some() || rate.is_some() || bind.is_some() {
+            if label.is_some() || max_body.is_some() || rate.is_some() || bind.is_some() || silent {
                 return Err("remove 只认 --root 与 --route".to_string());
             }
             Ok(Some(Command::Remove {
@@ -141,7 +147,7 @@ fn parse(args: &[String]) -> Result<Option<Command>, String> {
             }))
         }
         "test" => {
-            if label.is_some() || max_body.is_some() || rate.is_some() || bind.is_some() {
+            if label.is_some() || max_body.is_some() || rate.is_some() || bind.is_some() || silent {
                 return Err("test 只认 --root、--route 与 --body".to_string());
             }
             Ok(Some(Command::Test {
@@ -188,7 +194,15 @@ fn main() -> ExitCode {
             max_body,
             rate,
             bind,
-        } => match channels::add_route(Path::new(&root), &label, max_body, rate, bind.as_deref()) {
+            silent,
+        } => match channels::add_route_with_wake(
+            Path::new(&root),
+            &label,
+            max_body,
+            rate,
+            bind.as_deref(),
+            !silent,
+        ) {
             Ok(added) => {
                 println!("route={}", added.id);
                 println!("endpoint={}", added.endpoint);
@@ -205,10 +219,11 @@ fn main() -> ExitCode {
                 println!("routes: {}  bind={}", config.routes().len(), config.bind());
                 for route in config.routes() {
                     println!(
-                        "- id={} label={} enabled={} max_body={} rate={}",
+                        "- id={} label={} enabled={} wake={} max_body={} rate={}",
                         route.id(),
                         route.label(),
                         route.enabled(),
+                        if route.wake() { "on" } else { "off" },
                         route.max_body_bytes(),
                         route.rate_per_minute(),
                     );

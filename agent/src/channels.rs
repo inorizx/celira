@@ -25,7 +25,7 @@
 //!   -> 幂等键（缺就现生成）-> 文件名 <route>--<id>.json，create_new 抢（已存在 = 200 重复）
 //!   -> 写文件 + sync_all（任何失败删半成品、503）
 //!   -> 剪一次保留期（1000 条 / 30 天，最旧先删）
-//!   -> 唤醒信号 try_send(())（满了就丢：它说的是"有输入"，不是"来了几条"）
+//!   -> 唤醒信号 try_send(())（仅当 `route.wake` 且主体没有静音这一路；满了就丢：它说的是"有输入"，不是"来了几条"）
 //! ```
 //!
 //! ## 认证 v1 为什么只有 Bearer（不做 HMAC / 签名）
@@ -93,7 +93,7 @@ use axum::routing::post;
 use serde::{Deserialize, Serialize};
 
 /// 配置所在的子目录（环境根之下）。
-const CONFIG_DIRECTORY: &str = "channels";
+pub(crate) const CONFIG_DIRECTORY: &str = "channels";
 /// 路由表文件名。
 const CONFIG_FILE: &str = "routes.json";
 /// 收件箱子目录（环境根之下）。
@@ -158,6 +158,12 @@ pub struct RouteConfig {
     max_body_bytes: usize,
     #[serde(default = "default_rate")]
     rate_per_minute: u32,
+    /// **这一路源响不响铃**（操作者声明的默认值；缺省 `true`，旧配置照常响）。
+    ///
+    /// 它只决定**叫不叫醒**，不决定收不收：`false` 的事件照样落盘、照样进收件箱，
+    /// 主体醒着的时候自己来看。主体还可以在自己的静音表里再压一层（见 [`muted_routes`]）。
+    #[serde(default = "default_wake")]
+    wake: bool,
 }
 
 impl RouteConfig {
@@ -184,6 +190,11 @@ impl RouteConfig {
 
     pub fn rate_per_minute(&self) -> u32 {
         self.rate_per_minute
+    }
+
+    /// 这一路源默认响不响铃（操作者的声明；主体的静音表可以再压一层）。
+    pub fn wake(&self) -> bool {
+        self.wake
     }
 }
 
@@ -286,12 +297,71 @@ fn default_rate() -> u32 {
     DEFAULT_RATE_PER_MINUTE
 }
 
+/// 缺省响铃：一条路由是**显式建出来的投递口**，默认叫一声；吵闹的源由操作者 `--silent`。
+fn default_wake() -> bool {
+    true
+}
+
 fn routes_path(root: &Path) -> PathBuf {
     root.join(CONFIG_DIRECTORY).join(CONFIG_FILE)
 }
 
-fn inbox_path(root: &Path) -> PathBuf {
+pub(crate) fn inbox_path(root: &Path) -> PathBuf {
     root.join(CONFIG_DIRECTORY).join(INBOX_DIRECTORY)
+}
+
+/// 主体自己的**静音表**文件名（放在主体的作品面里，用 `projects_*` 动词写）。
+///
+/// 一行一个 route id；空行与 `#` 开头的行忽略。入口只**读**它，不替主体改。
+pub const MUTE_FILE: &str = "channels-mute";
+
+/// 静音表所在的目录：主体自己的作品面。
+///
+/// ⚠ 它与 `file_view::WORKS_DIR` **同值**，但这里不能反向 import（`file_view` 已经引用了
+/// 本模块的地址常量，再引回去就是一个模块环）。因此写成一个字面量，并由行为用例证明
+/// 静音表真的落在 `<环境根>/projects/` 下、入口真的读得到。
+const MUTE_DIRECTORY: &str = "projects";
+
+fn mute_path(root: &Path) -> PathBuf {
+    root.join(MUTE_DIRECTORY).join(MUTE_FILE)
+}
+
+/// 读一次静音表。**读不出来 = 没有静音**（缺省是响；文件不在是正常状态）。
+///
+/// 它只影响"叫不叫醒"，不影响收件：被静音的源照样落盘、照样进收件箱、照样进通知栏的总数。
+fn muted_routes(root: &Path) -> HashSet<String> {
+    let Ok(text) = fs::read_to_string(mute_path(root)) else {
+        return HashSet::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// 收件箱里现在有几条（给通知栏的**总数**读数；不是"自锚以来"）。
+///
+/// `None` = 收件箱目录不在（入口没起过 / 没有配置）⇒ 通知栏不摆这一行；
+/// `Some(Err(()))` = 目录在、读不出来 ⇒ 如实写 `unknown`，不冒充 0。
+pub(crate) fn inbox_count(root: &Path) -> Option<Result<usize, ()>> {
+    let inbox = inbox_path(root);
+    match fs::read_dir(&inbox) {
+        Ok(entries) => {
+            let count = entries
+                .flatten()
+                .filter(|entry| {
+                    entry
+                        .file_type()
+                        .map(|kind| kind.is_file())
+                        .unwrap_or(false)
+                })
+                .count();
+            Some(Ok(count))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some(Err(())),
+    }
 }
 
 /// 一条能被安全用作文件名前缀的 route id。
@@ -453,6 +523,18 @@ pub fn add_route(
     rate_per_minute: Option<u32>,
     bind: Option<&str>,
 ) -> Result<AddedRoute, ConfigError> {
+    add_route_with_wake(root, label, max_body_bytes, rate_per_minute, bind, true)
+}
+
+/// 同 [`add_route`]，但由操作者声明这一路源**响不响铃**（`wake=false` = 收下但静默）。
+pub fn add_route_with_wake(
+    root: &Path,
+    label: &str,
+    max_body_bytes: Option<usize>,
+    rate_per_minute: Option<u32>,
+    bind: Option<&str>,
+    wake: bool,
+) -> Result<AddedRoute, ConfigError> {
     let mut config = ChannelConfig::load(root)?.unwrap_or_default();
     let slug = slug_from_label(label)?;
     if let Some(bind) = bind {
@@ -477,6 +559,7 @@ pub fn add_route(
         enabled: true,
         max_body_bytes,
         rate_per_minute,
+        wake,
     });
     config.validate()?;
     store_config(root, &config)?;
@@ -993,7 +1076,12 @@ async fn ingress(
     ) {
         Ok(Recorded::Accepted) => {
             state.prune();
-            let _ = state.wake.try_send(());
+            // **两把闸门**：操作者声明的 `wake`（这一路源默认响不响）与主体自己的静音表
+            // （`projects/channels-mute`，主体自己写）。只压**叫醒**，不压收件——事件已经落盘，
+            // 通知栏会照实报总数。
+            if route.wake() && !muted_routes(&state.root).contains(route.id()) {
+                let _ = state.wake.try_send(());
+            }
             (
                 StatusCode::ACCEPTED,
                 axum::Json(serde_json::json!({ "status": "accepted", "id": event_id })),

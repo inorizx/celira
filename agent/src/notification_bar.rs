@@ -18,6 +18,10 @@
 //! 十进制 unix 毫秒，见 [`crate::clock::anchor_value`]），不是两个来源。
 //! 形状收在一处是有意的：那个值的唯一用处是递给 `im_rooms(since=…)`，所以两处都得是它吃的形状。
 //!
+//! **另有一行 `channels-inbox = N`（可选）**：它不是 im 投影的一部分，也**不共用** `since`——
+//! 那是**私有外部输入收件箱的总数**（`channels` 入口的存量，**不是未读**）。它只给静默源一个
+//! 被看见的机会；没有入口时这一行不出现，读不回来时写 `unknown`。两件读数各说各的，不合并。
+//!
 //! 三条纪律（都是这一刀裁定的）：
 //!
 //! 1. **它不读、不解析、不判断**：拿到什么摆什么。读是**宿主**的事（**每开一段**恰好一次
@@ -78,6 +82,11 @@ pub const UNKNOWN_COUNTS: &str = "unknown";
 pub struct NotificationBar<Inner> {
     /// 宿主读回来的投影（`None` = 这一次没有投影：没锚、或读失败）。
     projection: Option<String>,
+    /// **收件箱总数**（`None` = 没有入口 / 不摆这一行）。
+    ///
+    /// ⚠ 它是**总数**，不是"自锚以来"：`since` 那段只属于 im 投影。两条读数各说各的，
+    /// 不共用一个锚——把总数挂在 `since` 下面会替机制多说一句。
+    channels: Option<String>,
     /// 投影的起点（与状态行 `since` **同一个声明**）：宿主记录的**「新」从哪一刻起算**。
     /// `None` = 宿主不知道「新」该从哪个时刻算起（新进程的第一段就是）。
     ///
@@ -88,10 +97,16 @@ pub struct NotificationBar<Inner> {
 }
 
 impl<Inner> NotificationBar<Inner> {
-    /// 用宿主的声明装配：投影正文（可缺）+ 起点（可缺）+ 内层来源。
-    pub fn new(projection: Option<&str>, since: Option<SystemTime>, inner: Inner) -> Self {
+    /// 用宿主的声明装配：投影正文（可缺）+ 收件箱总数（可缺）+ 起点（可缺）+ 内层来源。
+    pub fn new(
+        projection: Option<&str>,
+        channels: Option<&str>,
+        since: Option<SystemTime>,
+        inner: Inner,
+    ) -> Self {
         Self {
             projection: projection.map(str::to_string),
+            channels: channels.map(str::to_string),
             since,
             inner,
         }
@@ -110,7 +125,7 @@ impl<Inner> NotificationBar<Inner> {
             Some(at) => anchor_value(at),
             None => UNKNOWN_SINCE.to_string(),
         };
-        match (&self.projection, self.since) {
+        let mut text = match (&self.projection, self.since) {
             // 有投影就摆（**有锚没锚都算**）：起点的时刻 + 投影正文。
             //
             // ⚠ **2026-10-10 改**：从前这里是"有锚才摆"，而**没锚时整块只写 `unknown`**
@@ -121,7 +136,13 @@ impl<Inner> NotificationBar<Inner> {
             (None, Some(_)) => format!("since = {since}\ncounts = {UNKNOWN_COUNTS}"),
             // 既没投影、也没起点：**两件事各说各的**（"没锚"与"没读到"不是同一件事）。
             (None, None) => format!("since = {UNKNOWN_SINCE}\ncounts = {UNKNOWN_COUNTS}"),
+        };
+        // 收件箱那一行是**总数**，不是"自锚以来"——放在最后，不跟 `since` 共用锚。
+        if let Some(channels) = &self.channels {
+            text.push('\n');
+            text.push_str(channels);
         }
+        text
     }
 
     /// 此刻的内容块（标签是本件的身份）。

@@ -642,6 +642,9 @@ impl<'a> Host<'a> {
     /// 1. **钟必须赴**：窗口里到了主体自己约的时刻 ⇒ **立刻**开，起源记 `Timer`（不被铃压住）；
     /// 2. **通道终结立刻报**：`Refused` 不等到窗口结束——那只会让操作者晚知道；
     /// 3. **起源取最早的**：窗口里又来的铃只说明"还有动静"，不改"是谁叫醒的"。
+    ///
+    /// 第四条（2026-10-26）：**外部输入也赴**——它不是"又一声铃"，是另一件事；窗口里到了就
+    /// 立刻开，起源记 `Channel`。被它顶掉的铃不丢事实：im 那一份仍在开场投影里（锚照旧推进）。
     fn coalesce_window(&self, first: Woken, wake: &impl WakePort) -> Woken {
         let window = self.coalesce;
         if window.is_zero() || !matches!(first, Woken::Opened | Woken::Changed) {
@@ -656,6 +659,7 @@ impl<'a> Host<'a> {
             match wake.next_within(remaining) {
                 None => return first,
                 Some(Woken::Timer) => return Woken::Timer,
+                Some(Woken::Channel) => return Woken::Channel,
                 Some(Woken::Refused(failure)) => return Woken::Refused(failure),
                 // 同一批里的又一声铃：丢掉——"还有动静"这件事已经说过了。
                 Some(Woken::Opened) | Some(Woken::Changed) => {}
@@ -853,6 +857,13 @@ impl<'a> Host<'a> {
         // ——今天由持有物如实摆出 `pending + overdue`（`holdings.rs` 的 `//!` 第 3 条纪律）。
         let projection = self.project(options, previous);
         let read = projection.is_some();
+        // **外部输入收件箱的总数**（与 im 投影各读各的）：入口没起过 ⇒ 不摆这一行；
+        // 目录在、读不出来 ⇒ 如实写 `unknown`，不冒充 0。它只进通知栏，不挡这一段。
+        let channels_line = match crate::channels::inbox_count(options.environment_root) {
+            None => None,
+            Some(Ok(count)) => Some(format!("channels-inbox = {count}")),
+            Some(Err(())) => Some("channels-inbox = unknown".to_string()),
+        };
         // **锚的推进**（⚠ 2026-10-10 改：推进到"**这一段收场**"那一刻，见下面收场处的赋值）。
         //
         // 从前这里推的是 `looked_at`（**去看的那一刻**，即这一段的**开头**）⇒ 窗口 = （上一段开头，
@@ -878,10 +889,12 @@ impl<'a> Host<'a> {
                     Woken::Opened => WakeOrigin::Opened,
                     Woken::Changed => WakeOrigin::Changed,
                     Woken::Timer => WakeOrigin::Timer,
+                    Woken::Channel => WakeOrigin::Channel,
                     Woken::Refused(failure) => return Err(HostFailure::Doorbell(failure)),
                 },
                 since: previous,
                 notification: projection.as_deref(),
+                channels: channels_line.as_deref(),
                 cards: Some(cards),
             },
             request,

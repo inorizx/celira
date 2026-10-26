@@ -1,4 +1,4 @@
-//! 文件视图：**一个 App、一个逻辑命名空间**。资料面与三个派生地址共用 `files_*`（默认只读，
+//! 文件视图：**一个 App、一个逻辑命名空间**。资料面与四个保留地址共用 `files_*`（默认只读，
 //! 宿主给出创建授权时才多出写）；**主体自己的作品面**是另一格，动词名分开（`projects_*`）——
 //! 那一格带写，而且**不需要任何授权**。
 //!
@@ -9,10 +9,13 @@
 //!   地盘上的文件（可删可改），在这里只读地可读；那一份不在环境根里时这个地址**缺席**。
 //! - **派生单文件地址（第二例）**：保留逻辑地址 `self_concept`，背后是**主体自己写下的那一篇自识**
 //!   （2026-10-13 加：在那之前 `write_self_concept` 是全库唯一一个**写完读不回来**的自持物）；
+//! - **外部输入收件箱**：保留逻辑地址 `channels/`，背后是**这个环境自己的**收件箱目录
+//!   （`<环境根>/channels/inbox`）——只读、最近到的先；收件箱不在时这个地址**缺席**，
+//!   在但读不出来时**如实报错**（不冒充空目录）。
 //! - **主体自己的作品面**：`<环境根>/projects`。读两件（`projects_list` / `projects_read`）、写两件
 //!   （`projects_create` / `projects_edit`）＋ 各自**同参复核**——**不需要任何授权，也不需要任何
 //!   声明**：有环境根的装配里这一格都在场，动词跟着在（装配期缺席才建那个目录）。
-//!   ⚠ 归属与门在别处写死：它**不是**资料面的第四个地址（名字自答，见 [`WORKS_DIR`]），两种写面
+//!   ⚠ 归属与门在别处写死：它**不是**资料面里的一个保留地址（名字自答，见 [`WORKS_DIR`]），两种写面
 //!   为什么各走各的门见 `file_app` 那两种写面——本视图不另立判据。
 //!
 //! 为什么经历是**派生视图**而不是真实文件：环境的内部记录（身份记录、两份追加存储、写锁、
@@ -30,15 +33,18 @@
 //! history/<活动>/000.txt              ← 一段经历：机械事实行 + 按序号排列的记录
 //! manual.md                           ← 派生单文件地址：环境根下那一份手册（环境根里有才在）
 //! self_concept                        ← 派生单文件地址：主体自己写下的自识（写过了才有）
+//! channels/                           ← 外部输入收件箱：只读、最近到的先（收件箱在才有）
 //! projects/                           ← 主体自己的作品目录：本视图唯一属于主体的写面
 //! ```
 //!
-//! **三个派生地址是同一套模式的实例**，区别只在"背后是什么"：`history/` 背后是**一组记录**
+//! **history/ 与两个单文件地址是同一套模式的实例**，区别只在"背后是什么"：`history/` 背后是**一组记录**
 //! （按活动与段机械切分），`manual.md` / `self_concept` 背后各是**一份文件**（整份读，没有"某一段"这回事）。
-//! 它们共享同一件事：地址**不是真实路径**，存在与否由**装配那一刻的事实**定（给了环境根 ⇒ 经历
+//! **`channels/` 是第四种形状**：它不是派生文本，而是外部输入收件箱的只读投影（目录本身在
+//! 环境根里），列与读仍走同一套 `files_*`。
+//! 那三个派生地址共享同一件事：地址**不是真实路径**，存在与否由**装配那一刻的事实**定（给了环境根 ⇒ 经历
 //! 地址在；环境根下真有那一份 ⇒ 那个单文件地址在），列与读都走同一套通用动词，从外面看不出"这个
-//! 是派生的"。派生**不等于**环境内部记录可读：环境根永远不被当作普通文件根，只有白名单里的这几个
-//! 地址有派生投影。**作品面不是派生地址**：它是环境根里名副其实的一个目录，只是走自己的动词名
+//! 是派生的"。派生**不等于**环境内部记录可读：环境根永远不被当作普通文件根，只有白名单里的这些
+//! 保留地址有投影。**作品面不是派生地址**：它是环境根里名副其实的一个目录，只是走自己的动词名
 //! （`projects_*`），因此不在这条白名单里——派生那一套"地址不是真实路径"的话不适用于它。
 //!
 //! ⚠ **2026-10-13 记账**：单文件那一路现在是**两份同形实现**（`ManualView` / `SelfConceptView`）。第三份
@@ -50,7 +56,7 @@
 //!
 //! 边界（与"不替主体判断"直接相关）：
 //!
-//! - **资料面与三个派生地址不给写入口**：派生那三个永不可写；资料面的写只来自宿主显式给出的
+//! - **资料面与四个保留地址不给写入口**：派生那三个永不可写，收件箱也永不可写；资料面的写只来自宿主显式给出的
 //!   创建授权，那四件（新建 / 唯一替换 / 建一层目录 / 同目录内改名）归 `files_*`；
 //! - **唯一的写面是主体自己的作品面**：一样是独占新建 / 唯一替换 / 不改名不删不追加 / 64 KiB，
 //!   差别只在**归属**（见 `file_app` 那两种写面）。它给的是写与读、**没有执行**——要跑这些文本
@@ -106,6 +112,17 @@ pub const MANUAL_ADDRESS: &str = crate::orientation::MANUAL_FILE;
 /// 名字不在这里另写一遍：它就是环境根下那一份的文件名（[`crate::self_concept::SELF_CONCEPT_FILE`]）。
 pub const SELF_CONCEPT_ADDRESS: &str = crate::self_concept::SELF_CONCEPT_FILE;
 
+/// **外部输入收件箱**的逻辑地址（**目录**，只读）。
+///
+/// 落点是 `<环境根>/channels/inbox`，由 `channels` 入口写；本视图只读它——**从不创建、
+/// 从不改写、也不替它决定留下哪一条**。它不给主体"外部系统能直接对话"的通道：这里只是一只
+/// 收件箱，入口把事件落成文件，主体在醒着的时候自己来看。
+///
+/// 三态与手册/自识同族，但判据是**目录在不在**（入口起过、且有落点）而不是文件：
+/// 目录不在 ⇒ 地址缺席（还没起过入口，或从没有事件）；在场但打不开 ⇒ 如实报那个分类；
+/// 在场且可读 ⇒ 每次现读，名字按**到达时间倒序**（收件箱的名字是随机的，名字序不表达"新"）。
+pub const CHANNELS_ADDRESS: &str = crate::channels::CONFIG_DIRECTORY;
+
 /// 一段派生经历最多包含多少条记录。
 pub const RECORDS_PER_SEGMENT: usize = 50;
 
@@ -118,8 +135,8 @@ const CAPABILITY_FIND_TEXT: &str = "files_grep";
 
 /// **主体的作品目录**的逻辑名：`<环境根>/projects`。
 ///
-/// 与 `history` / 手册 / 自识那三个保留地址不同：那三个是**别人的或派生的**，这一格是**主体自己的**
-/// ——所以它有自己的动词名（`projects_*`），而不是资料面里的第四个地址（归属由名字自答）。
+/// 与 `history` / 手册 / 自识 / 收件箱那几个保留地址不同：它们都是**别人的或派生的**，这一格是**主体自己的**
+/// ——所以它有自己的动词名（`projects_*`），而不是资料面里的一个保留地址（归属由名字自答）。
 pub const WORKS_DIR: &str = "projects";
 
 /// 作品面的六件动词。
@@ -141,7 +158,7 @@ pub enum FileViewFailure {
     /// 资料目录与环境目录重叠（相等或互相包含）：那会把这个身份环境的内部记录当成
     /// 普通资料直接暴露给本轮模型，因此拒绝装配。
     MaterialsExposeEnvironment,
-    /// 资料目录里已经有与**现存的**保留逻辑地址同名的真实条目（`history` / 手册）：
+    /// 资料目录里已经有与**现存的**保留逻辑地址同名的真实条目（`history` / 手册 / 自识 / 收件箱）：
     /// 那个地址无法被唯一解释。
     ReservedAddressTaken,
     /// 创建授权目录不可用（不存在 / 不是目录 / 是链接或 reparse point / 没有权限）。
@@ -171,7 +188,7 @@ pub struct FileView {
     ///
     /// 机器档与家档共用同一个视图：差别只有一条 —— `materials` 那一面换成了
     /// `FileApp::machine_with_writes()`（整台机器），于是**绝对路径**整条交给它，
-    /// 而三个保留地址（`history` / 手册 / 自识）与作品面**一个字都不变**
+    /// 而那几个保留地址（`history` / 手册 / 自识 / 收件箱）与作品面**一个字都不变**
     /// （它们不是资料面的地址，是派生的与主体自己的东西）。
     machine: bool,
     history: Option<HistoryView>,
@@ -184,9 +201,32 @@ pub struct FileView {
     /// **主体自己的作品面**（`<环境根>/projects`）：读 ＋ 写，**不需要任何授权**
     /// （判据：「自己的东西不用申请，别处的要」，与 `notes_*` 同族）。
     ///
-    /// ⚠ 它**不是**资料面的一个地址：那三个保留地址（`history` / 手册 / 自识）都是**别人的或
+    /// ⚠ 它**不是**资料面的一个地址：那几个保留地址（`history` / 手册 / 自识 / 收件箱）都是**别人的或
     /// 派生的**，而这一格是**主体自己的**，连动词名都分开（`projects_*`）——归属由名字自答。
     works: WorksFace,
+    /// **外部输入收件箱**（`<环境根>/channels/inbox`）：只读。
+    ///
+    /// 它是**宿主入口**写下的私有输入，不是公共事实，也不是主体自己的作品；本视图只给它
+    /// 一条"看得到"的派生投影（列 / 读），没有写面。
+    channels: ChannelsFace,
+}
+
+/// 外部输入收件箱的三态：与作品面同一套纪律，不许压成两态。
+#[derive(Debug)]
+enum ChannelsFace {
+    /// 在场且可读：列与读都归它。
+    Ready(FileApp),
+    /// 目录不在：还没有入口落点（没起过入口，或从没有事件）——地址**缺席**。
+    Absent,
+    /// 在，但打不开（链接 / 不是目录 / I/O 失败）：如实记着那个分类，**不冒充"没有输入"**。
+    Unusable(FailureClass),
+}
+
+impl ChannelsFace {
+    /// 这个地址在这一次装配里**摆不摆出来**（打不开也算摆——名字不能被静默吞掉）。
+    fn is_present(&self) -> bool {
+        !matches!(self, ChannelsFace::Absent)
+    }
 }
 
 /// 主体的作品面：三态，不许压成两态。
@@ -276,6 +316,18 @@ fn works_face(environment_root: &Path) -> WorksFace {
     }
 }
 
+/// 装配外部输入收件箱的只读投影：`<环境根>/channels/inbox`。
+///
+/// **不创建**（入口才建；没有入口就没有这只箱子，"没起过"与"空的"在这里是两件事），
+/// 只认三态：不在 / 打不开 / 可读。目录在但为空是 `Ready`——空收件箱是诚实的"没有事件"。
+fn channels_face(environment_root: &Path) -> ChannelsFace {
+    match FileApp::open(crate::channels::inbox_path(environment_root)) {
+        Ok(app) => ChannelsFace::Ready(app),
+        Err(FailureClass::NotFound) => ChannelsFace::Absent,
+        Err(class) => ChannelsFace::Unusable(class),
+    }
+}
+
 impl FileView {
     /// 只装配授权资料目录：没有经历目录、也没有手册，逻辑地址里就只有资料本身。
     pub fn materials_only(root: &Path) -> Result<Self, FailureClass> {
@@ -286,6 +338,7 @@ impl FileView {
             manual: None,
             self_concept: None,
             works: WorksFace::Absent,
+            channels: ChannelsFace::Absent,
         })
     }
 
@@ -317,7 +370,7 @@ impl FileView {
     /// 判据（2026-10-20 主人裁）：不给 ⇒ 只能动自己那一块；给了 ⇒ **任意文件夹**。
     /// 因此这一档**不装配资料根**（没有那一个根可装配）、也**不需要 `CreationGrant`**
     /// （那份授权说的是"资料根里哪一个子目录可以写"，机器档没有那个根）；
-    /// 三个保留地址与作品面照旧 —— 它们不是资料面的地址。
+    /// 那几个保留地址与作品面照旧 —— 它们不是资料面的地址。
     pub fn with_machine_scope(
         materials: &Path,
         environment_root: &Path,
@@ -350,6 +403,7 @@ impl FileView {
             let manual = manual_view(&environment_root);
             let self_concept = self_concept_view(&environment_root);
             let works = works_face(&environment_root);
+            let channels = channels_face(&environment_root);
             return Ok(Self {
                 materials: materials_app,
                 machine,
@@ -359,6 +413,7 @@ impl FileView {
                 manual,
                 self_concept,
                 works,
+                channels,
             });
         }
         // 家档才有那一个根（机器档的根由每条绝对路径自己点名）⇒ 这一层装配只认家档；
@@ -394,6 +449,14 @@ impl FileView {
         {
             return Err(FileViewFailure::ReservedAddressTaken);
         }
+        // 收件箱的地址也由"落点在不在"决定（入口起过才有）：在 ⇒ 资料面里同名条目会让
+        // 这个地址无法被唯一解释；不在 ⇒ 地址压根不存在，资料面里有同名目录也无关。
+        let channels = channels_face(&environment_root);
+        if channels.is_present()
+            && fs::symlink_metadata(materials_root.join(CHANNELS_ADDRESS)).is_ok()
+        {
+            return Err(FileViewFailure::ReservedAddressTaken);
+        }
         // 作品面：**主体自己的东西**，不需要任何授权，也不需要任何声明——在每一支上都在场。
         let works = works_face(&environment_root);
         // 创建目标必须**严格**在资料根之内：等于根本身或越出它都不是本版给的授权。
@@ -419,6 +482,7 @@ impl FileView {
             manual,
             self_concept,
             works,
+            channels,
         })
     }
 
@@ -460,7 +524,7 @@ impl FileView {
                 "读数：首行 `more` 是机械读数——`none` = 没有更多，`after <名字>` = 下次用这个名字\
                  接着列。上限：一次最多 100 项。边界：`after` 是名字不是下标；它不属于\
                  这个目录时明确失败（不猜近似名）。`history`（这个身份环境已确认的经历）与\
-                 `manual.md`（你家里那份手册）与 `self_concept`（你自己的自识）是保留的逻辑地址，\
+                 `manual.md`（你家里那份手册）与 `self_concept`（你自己的自识）与 `channels`（外部输入收件箱，只读）是保留的逻辑地址，\
                  不是任务完成判定。",
             ),
             Capability::new(
@@ -484,7 +548,7 @@ impl FileView {
                  整份读、没有分段，对它给窗口参数同样明确失败。派生自识：`self_concept` 是你自己写下的\
                  那一篇（`write_self_concept` 写的就是它）——同一条路整份读。注意：这个地址在这一段\
                  开场时是否在场就已定下；开场时没有 ⇒ 本段里读不到，刚写下的那一份下一次开场才出现；\
-                 开场时已有 ⇒ 每次读都是现读最新内容。写入回执会给出长度，可先据此确认写成功。\
+                 开场时已有 ⇒ 每次读都是现读最新内容。写入回执会给出长度，可先据此确认写成功。外部输入：`channels/<事件文件>` 是收件箱里的一条（只读），整份或按窗口读都与资料面同一套规则。\
                  若文件长、先把这一段的长度读成小一点更省事。",
             ),
             Capability::new(
@@ -504,8 +568,8 @@ impl FileView {
                  命中位置（`name` 或 `line=N`）+ 那一段片段（片段最多 120 字节，超长以 `…` 截断\
                  ——正文仍在盘上，要用就 `files_read`）。结果按路径名排序，同一条材料最多出现一次。\
                  上限：最多扫 500 个文件、最多返回 100 条候选；触到任一上限时首行如实报截断。\
-                 不搜保留地址（`history/`、`manual.md` 与 `self_concept`）：经历有自己的分段结构、手册与\
-                 自识各是一份文件，三者都用 `files_list` + `files_read` 看。",
+                 不搜保留地址（`history/`、`manual.md`、`self_concept` 与 `channels/`）：经历有自己的分段结构、手册与\
+                 自识各是一份文件、收件箱是外部输入，它们都用 `files_list` + `files_read` 看。",
             ),
         ])
     }
@@ -687,6 +751,97 @@ impl FileView {
     /// 自识那个地址（单文件，与手册同款）。
     fn is_self_concept_address(names: &[String]) -> bool {
         names.first().map(String::as_str) == Some(SELF_CONCEPT_ADDRESS)
+    }
+
+    /// 外部输入收件箱那个地址（目录，只读）。
+    fn is_channels_address(names: &[String]) -> bool {
+        names.first().map(String::as_str) == Some(CHANNELS_ADDRESS)
+    }
+
+    /// 列出收件箱：**最近的先**（名字是随机的，名字序不表达"新"）；空箱子就是空列表。
+    ///
+    /// `after` 与资料面共用同一套续列语义（它必须是**这一份列表里**的名字）——因此排序在
+    /// 分页之前一次定死，两页之间不会因为新到一条就错位。
+    fn list_channels(&self, sub: &[String], after: Option<&str>) -> ActionOutcome {
+        let app = match &self.channels {
+            ChannelsFace::Absent => return ActionOutcome::failure(FailureClass::NotFound.as_str()),
+            ChannelsFace::Unusable(class) => return ActionOutcome::failure(class.as_str()),
+            ChannelsFace::Ready(app) => app,
+        };
+        if !sub.is_empty() {
+            // 收件箱按设计是**平的**；真有子目录时也让它自己的路径校验说话（不在这里另写一套）。
+            return match app.entries_of(&sub.join("/")) {
+                Ok(items) => match file_app::render_listing_page(&items, after) {
+                    Ok(text) => {
+                        ActionOutcome::success(vec![ContentBlock::new(CAPABILITY_LIST, text)])
+                    }
+                    Err(class) => ActionOutcome::failure(class.as_str()),
+                },
+                Err(class) => ActionOutcome::failure(class.as_str()),
+            };
+        }
+        let mut items = match app.entries_of("") {
+            Ok(items) => items,
+            Err(class) => return ActionOutcome::failure(class.as_str()),
+        };
+        let root = app.home().map(Path::to_path_buf);
+        let stamp = |name: &str| {
+            root.as_ref()
+                .and_then(|root| fs::metadata(root.join(name)).ok())
+                .and_then(|metadata| metadata.modified().ok())
+                .unwrap_or(std::time::UNIX_EPOCH)
+        };
+        // 同一毫秒内到达的按名字排：排序必须是**全序**，否则同一份列表两页之间会漂。
+        items.sort_by(|left, right| {
+            stamp(&right.0)
+                .cmp(&stamp(&left.0))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        match file_app::render_listing_page(&items, after) {
+            Ok(mut text) => {
+                // **静音表在哪**：一行机械地址，不是建议。它放在作品面里，用 `projects_*` 动词写；
+                // 入口只读它，不收任何"命令"。
+                text.push_str(&format!(
+                    "mute-file = {}/{} (one route id per line; write with projects_create / projects_edit)\n",
+                    WORKS_DIR,
+                    crate::channels::MUTE_FILE
+                ));
+                ActionOutcome::success(vec![ContentBlock::new(CAPABILITY_LIST, text)])
+            }
+            Err(class) => ActionOutcome::failure(class.as_str()),
+        }
+    }
+
+    /// 读收件箱里的一个事件（只读、现读）。
+    ///
+    /// 路径、链接检查、UTF-8、窗口参数与 64 KiB 上限**整条委托给 `FileApp`**：同一个
+    /// `files_read` 在资料面与收件箱上不许有两套脾气。地址本身（`names.len() == 1`）是目录，
+    /// 读它是 `invalid-path`（与在资料面里读一个目录同款）。
+    fn read_channels(
+        &mut self,
+        agent: &AgentId,
+        operation: &OperationId,
+        action: &Action,
+        sub: &[String],
+    ) -> ActionOutcome {
+        let app = match &mut self.channels {
+            ChannelsFace::Absent => return ActionOutcome::failure(FailureClass::NotFound.as_str()),
+            ChannelsFace::Unusable(class) => return ActionOutcome::failure(class.as_str()),
+            ChannelsFace::Ready(app) => app,
+        };
+        if sub.is_empty() {
+            return ActionOutcome::failure(FailureClass::InvalidPath.as_str());
+        }
+        let mut params = ActionParams::none();
+        for (name, value) in action.params().entries() {
+            if name == PARAM_PATH {
+                continue;
+            }
+            params = params.with(name.clone(), value.clone());
+        }
+        params = params.with(PARAM_PATH, sub.join("/"));
+        let inner = Action::with_params(action.id().clone(), params);
+        app.execute(agent, operation, &inner)
     }
 
     /// 列出派生经历目录。
@@ -953,8 +1108,14 @@ impl FileView {
                 None => ActionOutcome::failure(FailureClass::NotFound.as_str()),
             };
         }
+        if FileView::is_channels_address(&names) {
+            return self.list_channels(&names[1..], after);
+        }
         if names.is_empty()
-            && (self.history.is_some() || self.manual.is_some() || self.self_concept.is_some())
+            && (self.history.is_some()
+                || self.manual.is_some()
+                || self.self_concept.is_some()
+                || self.channels.is_present())
         {
             // 视图根的合并列表：真实条目 + 保留的逻辑地址（哪个在就摆哪个）。
             return match self.materials.entries_of("") {
@@ -967,6 +1128,9 @@ impl FileView {
                     }
                     if self.self_concept.is_some() {
                         items.push((SELF_CONCEPT_ADDRESS.to_string(), "file"));
+                    }
+                    if self.channels.is_present() {
+                        items.push((CHANNELS_ADDRESS.to_string(), "dir"));
                     }
                     items.sort();
                     match file_app::render_listing_page(&items, after) {
@@ -1049,13 +1213,16 @@ impl FileView {
             }
             return self.read_self_concept();
         }
+        if FileView::is_channels_address(&names) {
+            return self.read_channels(agent, operation, action, &names[1..]);
+        }
         self.materials.execute(agent, operation, action)
     }
 
     /// 读自识的正文（**整份**，现读）。
     ///
     /// 与手册、与资料面的整份读取**共用同一条实现**（[`file_app::read_text_file`]）：同一个动词在
-    /// 三个地址上不许有三套脾气。
+    /// 几个地址上不许有几套脾气。
     ///
     /// ⚠ **它就是"写完能不能核实"那条判据的落点**（2026-10-13）：但"地址在不在"是**这一段开场时**
     /// 拍下的；开场时已有 ⇒ `files_read("self_concept")` 每次现读最新；开场时没有 ⇒ 刚写下的那一份
@@ -1130,6 +1297,16 @@ impl FileView {
                     return match self.self_concept {
                         Some(_) => ActionOutcome::failure(FailureClass::InvalidArgument.as_str()),
                         None => ActionOutcome::failure(FailureClass::NotFound.as_str()),
+                    };
+                }
+                Ok(names) if FileView::is_channels_address(&names) => {
+                    // 收件箱是**空间**，本可以查；但这一版先只给它列与读（查找面仍只含
+                    // 资料面与经历面）。说"保留地址不在查找面内"，不说"不存在"。
+                    return match self.channels {
+                        ChannelsFace::Absent => {
+                            ActionOutcome::failure(FailureClass::NotFound.as_str())
+                        }
+                        _ => ActionOutcome::failure(FailureClass::InvalidArgument.as_str()),
                     };
                 }
                 Ok(_) => {}

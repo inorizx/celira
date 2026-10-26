@@ -136,6 +136,7 @@ fn fresh_process_origin() -> RunOrigin<'static> {
         origin: WakeOrigin::Timer,
         since: None,
         notification: None,
+        channels: None,
         cards: None,
     }
 }

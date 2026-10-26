@@ -34,6 +34,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use celira_agent::channels::ChannelServer;
 use celira_agent::clock::ClockHandle;
 use celira_agent::composition::{FilesScope, SessionDeclarations};
 use celira_agent::context_reading::{ContextReading, ContextReadingWriter};
@@ -639,10 +640,25 @@ fn main() -> ExitCode {
     // **2026-10-06 删掉门（`gate`）**：门铃**直连**本件，中间不再有任何裁决点。判据是唤醒只决定
     // 「**何时**」，不决定「**要不要**」——"要不要"归主体自己设置，不归系统裁决
     // （`RUNTIME_TERMINAL_DECISIONS.md` §7；唤醒节流那一格见 `agent/README.md` §4）。
-    let hub = WakeHub::new(
-        bell,
-        TimerSource::production(Path::new(&options.root), clock.clone()),
-    );
+    //
+    // **2026-10-26 第三处来源**：外部输入入口（`channels`）。没有 `routes.json` 就不启动——
+    // 不建目录、不监听端口；启动了就把它的"有事件落盘"接进同一条等待（`Woken::Channel`）。
+    // 入口占的端口/路由数由下面那行读数回答；**服务活到进程结束**，因此这一绑定不能是临时值。
+    let channel_server = ChannelServer::start(Path::new(&options.root));
+    let hub = match channel_server
+        .as_ref()
+        .and_then(ChannelServer::take_wake_receiver)
+    {
+        Some(receiver) => WakeHub::with_channels(
+            bell,
+            TimerSource::production(Path::new(&options.root), clock.clone()),
+            receiver,
+        ),
+        None => WakeHub::new(
+            bell,
+            TimerSource::production(Path::new(&options.root), clock.clone()),
+        ),
+    };
     // **这一行回答操作者的两个量**（每个字段的解释都在 `doorbell.rs` 的 `DoorbellPolicy` 上）：
     // 这条通道**最坏会退到多慢**（`backoff-ms` 起点..上限）、**最坏多久一定会核一次持久事实**
     // （`max-age-ms`：寿命到点主动换新；换新**不算**一次唤醒，见 `doorbell::FollowEnd` 的
@@ -654,6 +670,11 @@ fn main() -> ExitCode {
         doorbell_policy.stable_after.as_millis(),
         doorbell_policy.max_age.as_millis()
     );
+    // 外部输入入口只在配置存在时启动：这一行**有**就是"在听"，没有就是"没开"——不写
+    // "已启用"再让操作者去猜端口。
+    if let Some(server) = &channel_server {
+        println!("channels={}", server.local_addr());
+    }
     // **这一次装配的声明包**（宿主给出）：启动读数与每一段活动都从它派生。
     let declarations = SessionDeclarations {
         // 这一段由谁想、想多用力：**从将要发请求的那个对象取**（`ModelChoice`）——入口不另算

@@ -15,13 +15,15 @@
 //! 以及 `doorbell.rs` 自己那条容量 1 的通道——前者如实登记为未覆盖，后者由 `tests/host_doorbell.rs`
 //! 从外面量。
 
+use std::path::Path;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
+use celira_agent::clock::ClockHandle;
 use celira_agent::doorbell::DoorbellFailure;
-use celira_agent::wake::{WakeHub, WakePort, Woken};
+use celira_agent::wake::{TimerSource, WakeHub, WakePort, Woken};
 
 /// 一个**受控门铃**：测试往里推信号，它按序交给 [`WakePort::next`]。
 ///
@@ -154,4 +156,36 @@ fn activity_arriving_after_the_wake_is_taken_wakes_again() {
             .expect("新动静要再叫一次"),
         Woken::Changed
     );
+}
+
+/// **外部输入入口那一处也接在同一条等待上，而且不被"取一次"吃掉。**
+///
+/// 入口只交一条电平（容量 1、满了就丢）：这里证明它被搬成 `Woken::Channel`，并且第二次
+/// 落盘还能再叫一次——不是"一辈子说一次"。
+#[test]
+fn a_channel_signal_wakes_the_host_and_stays_a_level() {
+    let (bell, bell_source) = mpsc::channel::<Woken>();
+    let (channels, channel_source) = mpsc::sync_channel::<()>(1);
+    let hub = WakeHub::with_channels(
+        ScriptedBell::new(bell_source),
+        TimerSource::new(
+            Path::new("/nonexistent-celira-wake-hub-timers"),
+            ClockHandle::fixed_at_unix_seconds(1_800_000_000),
+            Duration::from_millis(50),
+        ),
+        channel_source,
+    );
+
+    channels.send(()).expect("入口还在");
+    assert_eq!(
+        hub.next(),
+        Woken::Channel,
+        "外部输入必须被搬成 Channel 起源"
+    );
+
+    // 电平不是"一次性边沿"：又落一条，必须再叫一次。
+    channels.send(()).expect("入口还在");
+    assert_eq!(hub.next(), Woken::Channel, "第二次输入还要再叫一次");
+
+    drop(bell);
 }

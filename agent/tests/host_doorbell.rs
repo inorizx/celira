@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::time::{Duration, SystemTime};
 
 use celira_agent::activity_origin::{
-    MANUAL_ORIGIN_TEXT, WAKE_CHANGED_ORIGIN_TEXT, WAKE_OPENED_ORIGIN_TEXT,
+    CHANNEL_ORIGIN_TEXT, MANUAL_ORIGIN_TEXT, WAKE_CHANGED_ORIGIN_TEXT, WAKE_OPENED_ORIGIN_TEXT,
 };
 use celira_agent::clock::{ClockHandle, anchor_value};
 use celira_agent::composition::SessionDeclarations;
@@ -1672,6 +1672,7 @@ fn a_declared_since_is_rendered_and_an_absent_one_stays_unknown() {
                 origin: celira_agent::store::WakeOrigin::Changed,
                 since,
                 notification: None,
+                channels: None,
             },
             request,
         )
@@ -1872,6 +1873,69 @@ fn notification_readings(fixture: &Fixture) -> Vec<(String, Option<u32>, String)
 /// 盘上每一条**持有物**读数。
 fn holdings_readings(fixture: &Fixture) -> Vec<(String, Option<u32>, String)> {
     block_readings(fixture, celira_agent::holdings::HOLDINGS_LABEL)
+}
+
+/// **收件箱总数进通知栏**：静默源的事件不叫醒，但通知栏照实报总数——"不叫"不等于"看不见"。
+///
+/// 它量的是**生产宿主那一次读**：`host_loop` 在开段时读 `<环境根>/channels/inbox`，
+/// 把总数交给通知栏；`since` 那一段仍只属于 im 投影，两件事不共用锚。
+#[test]
+fn the_notification_bar_reports_the_channels_inbox_total() {
+    let fixture = Fixture::new("channels-total");
+    fixture.im_face.reply(200, &rooms_body());
+    let inbox = fixture.environment_root.join("channels").join("inbox");
+    std::fs::create_dir_all(&inbox).expect("建收件箱");
+    std::fs::write(inbox.join("github--one.json"), "{}\n").expect("写一条");
+    std::fs::write(inbox.join("github--two.json"), "{}\n").expect("写第二条");
+    let access = fixture.access();
+    let bell = fixture.rings.doorbell();
+    let mut host = fixture.host(&access);
+    let mut model = ScriptedModel::new(pad(4));
+
+    fixture.rings.answer(200, "text/event-stream");
+    let wake = host.wake_and_run(&bell, &mut model).expect("一次唤醒");
+
+    let readings = notification_readings(&fixture);
+    let text = readings
+        .iter()
+        .find(|(run, _, _)| run == wake.run.as_str())
+        .map(|(_, _, text)| text.as_str())
+        .expect("这一段必须有一块通知栏");
+    assert!(
+        text.contains("channels-inbox = 2"),
+        "收件箱总数要摆出来：{text}"
+    );
+    assert!(text.contains("since ="), "im 那一段照旧：{text}");
+}
+
+/// **读不回来的收件箱写 `unknown`，不冒充 0**：目录在、但 `read_dir` 失败（这里用一个同名
+/// 普通文件演"不是一个目录"），通知栏要如实说不知道，而不是让主体以为"没有输入"。
+#[test]
+fn an_unreadable_inbox_is_reported_as_unknown_not_zero() {
+    let fixture = Fixture::new("channels-unknown");
+    fixture.im_face.reply(200, &rooms_body());
+    let channels = fixture.environment_root.join("channels");
+    std::fs::create_dir_all(&channels).expect("建 channels 目录");
+    std::fs::write(channels.join("inbox"), "not a directory\n").expect("放一个同名文件");
+    let access = fixture.access();
+    let bell = fixture.rings.doorbell();
+    let mut host = fixture.host(&access);
+    let mut model = ScriptedModel::new(pad(4));
+
+    fixture.rings.answer(200, "text/event-stream");
+    let wake = host.wake_and_run(&bell, &mut model).expect("一次唤醒");
+
+    let readings = notification_readings(&fixture);
+    let text = readings
+        .iter()
+        .find(|(run, _, _)| run == wake.run.as_str())
+        .map(|(_, _, text)| text.as_str())
+        .expect("这一段必须有一块通知栏");
+    assert!(
+        text.contains("channels-inbox = unknown"),
+        "读不回来要如实说：{text}"
+    );
+    assert!(!text.contains("channels-inbox = 0"), "不许冒充零：{text}");
 }
 
 /// 投影说**分母 ＋ 有新的那几间**：两间有新的各一行、**余数一行 `其余 N−k 间 = 0`**、
@@ -2389,6 +2453,51 @@ fn the_run_start_line_records_the_timer_origin_distinctly_from_the_bell() {
         starts[0].1.as_deref(),
         Some("bell"),
         "钟源与门铃必须不同——否则两个来源分不开"
+    );
+}
+
+/// **刀一判据 D（外部输入）**：`Woken::Channel` 叫醒的那一场，`run-start` 行与起源块都
+/// 如实说 `channel`——不是门铃那一档，也不是钟源那一档。正文不在开场里（那句自己会说）。
+#[test]
+fn a_channel_wake_records_the_channel_origin_and_its_own_sentence() {
+    let fixture = Fixture::new("origin-channel");
+    fixture.im_face.reply(200, &rooms_body());
+    let access = fixture.access();
+    let mut host = fixture.host(&access);
+    let mut model = ScriptedModel::new(pad(4));
+
+    let wake = host
+        .wake_and_run(
+            &ScriptedWake::of(vec![celira_agent::wake::Woken::Channel]),
+            &mut model,
+        )
+        .expect("外部输入那一拍要跑起来");
+
+    let starts = run_start_origins(&fixture)
+        .into_iter()
+        .filter(|(run, _)| run == wake.run.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(starts.len(), 1, "这一次活动恰好一条 run-start 登记");
+    assert_eq!(
+        starts[0].1.as_deref(),
+        Some("channel"),
+        "run-start 行记的是**外部输入入口**那一档"
+    );
+    assert_ne!(starts[0].1.as_deref(), Some("timer"), "与钟源必须分得开");
+    assert_ne!(
+        starts[0].1.as_deref(),
+        Some("wake-changed"),
+        "与 im 唤醒通道必须分得开"
+    );
+
+    let origins = activity_origins(&fixture)
+        .into_iter()
+        .filter(|(run, _)| run == wake.run.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(origins.len(), 1, "开场恰好一块起源事实");
+    assert_eq!(
+        origins[0].1, CHANNEL_ORIGIN_TEXT,
+        "起源如实说外部输入到了，并指向收件箱"
     );
 }
 

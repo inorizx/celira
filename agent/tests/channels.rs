@@ -19,6 +19,9 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use celira_agent::channels::{self, ChannelServer, Retention};
+use celira_agent::clock::ClockHandle;
+use celira_agent::doorbell::DoorbellFailure;
+use celira_agent::wake::{TimerSource, WakeHub, WakePort, Woken};
 use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
@@ -60,14 +63,18 @@ impl TempRoot {
         let routes: Vec<Value> = routes
             .iter()
             .map(|route| {
-                json!({
+                let mut value = json!({
                     "id": route.id,
                     "label": route.label,
                     "secret": route.secret,
                     "enabled": route.enabled,
                     "max_body_bytes": route.max_body,
                     "rate_per_minute": route.rate,
-                })
+                });
+                if let Some(wake) = route.wake {
+                    value["wake"] = json!(wake);
+                }
+                value
             })
             .collect();
         write_json(&self.config(), &json!({ "bind": bind, "routes": routes }));
@@ -113,6 +120,8 @@ struct Route {
     enabled: bool,
     max_body: usize,
     rate: u32,
+    /// `None` = 不写这个键（走缺省 `true`）；`Some(false)` = 静默源。
+    wake: Option<bool>,
 }
 
 impl Route {
@@ -124,7 +133,13 @@ impl Route {
             enabled: true,
             max_body: channels::DEFAULT_MAX_BODY_BYTES,
             rate: channels::DEFAULT_RATE_PER_MINUTE,
+            wake: None,
         }
+    }
+
+    fn silent(mut self) -> Self {
+        self.wake = Some(false);
+        self
     }
 
     fn disabled(mut self) -> Self {
@@ -1024,4 +1039,128 @@ fn the_cli_adds_lists_tests_and_removes_a_route() {
     // 用法错：退出码 1，且不写文件。
     let usage = run(&["add", "--root", &root_text]);
     assert_eq!(usage.status.code(), Some(1));
+}
+
+/// **落盘之后才响铃；这条铃接进宿主那条等待时，起源记作 `Channel`。**
+///
+/// 这是"入口 → 宿主"这一段接缝的证明：真起服务、真 POST、真把 `take_wake_receiver` 交出来的
+/// 那条电平接进 `WakeHub::with_channels`，读到的下一次唤醒必须是 `Woken::Channel`。
+#[test]
+fn a_delivered_event_reaches_the_wake_hub_as_a_channel_wake() {
+    let root = TempRoot::new("hub");
+    root.write_config("127.0.0.1:0", &[Route::new("github", "cc_secret_one")]);
+    let (server, wake) = start(root.path());
+
+    let (bell, bell_source) = std::sync::mpsc::channel::<Woken>();
+    let hub = WakeHub::with_channels(
+        ManualBell {
+            incoming: std::sync::Mutex::new(bell_source),
+        },
+        TimerSource::new(
+            std::path::Path::new("/nonexistent-celira-channels-timers"),
+            ClockHandle::fixed_at_unix_seconds(1_800_000_000),
+            Duration::from_millis(50),
+        ),
+        wake,
+    );
+
+    let reply = post(server.local_addr(), "github", Request::new("hello"));
+    assert_eq!(reply.status, 202, "新事件必须 202（得到 {}）", reply.status);
+    assert_eq!(
+        hub.next(),
+        Woken::Channel,
+        "入口的铃必须被搬成 Channel 起源"
+    );
+
+    // 铃与盘面是两件事：读到的这一声之后，文件仍在。
+    assert_eq!(root.inbox_files().len(), 1);
+    drop(bell);
+}
+
+/// 只用来占住门铃那一处：本用例要量的是**入口那一处**，门铃永远沉默。
+struct ManualBell {
+    incoming: std::sync::Mutex<Receiver<Woken>>,
+}
+
+impl WakePort for ManualBell {
+    fn next(&self) -> Woken {
+        self.incoming
+            .lock()
+            .expect("短临界区")
+            .recv()
+            .unwrap_or(Woken::Refused(DoorbellFailure::ChannelLost))
+    }
+}
+
+/// **静默源**：事件照样收、照样落盘，只是不叫醒。操作者用 `wake=false` 声明。
+#[test]
+fn a_silent_route_keeps_the_event_without_waking() {
+    let root = TempRoot::new("silent");
+    root.write_config(
+        "127.0.0.1:0",
+        &[Route::new("github", "cc_secret_one").silent()],
+    );
+    let (server, wake) = start(root.path());
+
+    let reply = post(server.local_addr(), "github", Request::new("hello"));
+    assert_eq!(reply.status, 202, "静默不等于拒收");
+    assert_eq!(root.inbox_files().len(), 1, "事件必须落盘");
+    assert!(
+        matches!(wake.try_recv(), Err(TryRecvError::Empty)),
+        "静默源不许响铃"
+    );
+}
+
+/// **主体自己的静音表**：她在 `projects/channels-mute` 里写一行 route id，入口就不再叫醒；
+/// 把那一行删掉，叫醒恢复。表里的注释与空行忽略。
+#[test]
+fn the_subject_can_silence_a_route_with_her_own_file() {
+    let root = TempRoot::new("mute");
+    root.write_config("127.0.0.1:0", &[Route::new("github", "cc_secret_one")]);
+    let projects = root.path().join("projects");
+    fs::create_dir_all(&projects).expect("建作品面");
+    let mute = projects.join("channels-mute");
+    fs::write(&mute, "# 我自己写的\n\ngithub\n").expect("写静音表");
+
+    let (server, wake) = start(root.path());
+    let reply = post(
+        server.local_addr(),
+        "github",
+        Request::new("first").key("mute-1"),
+    );
+    assert_eq!(reply.status, 202);
+    assert_eq!(root.inbox_files().len(), 1);
+    assert!(
+        matches!(wake.try_recv(), Err(TryRecvError::Empty)),
+        "她写了静音，就不许叫"
+    );
+
+    fs::remove_file(&mute).expect("撤掉静音");
+    let reply = post(
+        server.local_addr(),
+        "github",
+        Request::new("second").key("mute-2"),
+    );
+    assert_eq!(reply.status, 202);
+    assert!(wake.try_recv().is_ok(), "静音撤掉之后，下一次到达要照常叫");
+}
+
+/// 操作者用 `--silent` 建的路由，`list` 里要看得到 `wake=off`——不然"为什么没响"只能靠猜。
+#[test]
+fn the_cli_silent_flag_is_visible_in_the_list() {
+    let root = TempRoot::new("cli-silent");
+    let root_text = root.path().to_str().expect("UTF-8").to_string();
+
+    let added = run(&["add", "--root", &root_text, "--label", "Noisy", "--silent"]);
+    assert_eq!(
+        added.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let listed = run(&["list", "--root", &root_text]);
+    assert_eq!(listed.status.code(), Some(0));
+    let text = stdout_of(&listed);
+    assert!(text.contains("id=noisy"), "{text}");
+    assert!(text.contains("wake=off"), "{text}");
 }

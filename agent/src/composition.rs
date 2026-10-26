@@ -535,6 +535,11 @@ pub struct RunOrigin<'a> {
     /// 它是**宿主**的读数（走 App 的只读投影入口），进的是**通知栏**那块呈现——
     /// 本层只搬运，不解析、不判断、不排序。**它不含任何正文**。
     pub notification: Option<&'a str>,
+    /// **外部输入收件箱的总数读数**（`None` = 没有入口 / 不摆这一行）。
+    ///
+    /// ⚠ 它是**总数**，不是"自锚以来"：与 [`RunOrigin::notification`] 的那个 `since` 不共用锚。
+    /// 这一行只回答"收件箱里现在有几条"，给静默源一个被看见的机会。
+    pub channels: Option<&'a str>,
     /// **事件卡片的细胞**（Run 级内存，宿主写、本件读）。
     ///
     /// `None` = 这次装配没接细胞（离线夹具、恢复路径、不经门铃的入口）⇒ 永远不出卡片。
@@ -551,6 +556,7 @@ impl<'a> RunOrigin<'a> {
             origin: WakeOrigin::Manual,
             since: None,
             notification: None,
+            channels: None,
             cards: None,
         }
     }
@@ -851,6 +857,8 @@ struct SituationLive<'a> {
     since: Option<SystemTime>,
     /// 世界那一块投影（`None` = 没锚、或这一次没读到）。**不含正文**。
     notification: Option<&'a str>,
+    /// 收件箱总数（`None` = 没有入口 / 不摆）。
+    channels: Option<&'a str>,
     /// 本次 Run 的事件卡片细胞（`None` = 这次装配没接细胞）。
     cards: Option<EventCardsReport>,
     /// 起源那句人话。由 [`WakeOrigin::text`] 派生（不在盘上存一句话）。
@@ -877,6 +885,7 @@ fn origin_text(origin: WakeOrigin) -> &'static str {
         // 旧账（照读不写）：**不替它认**是哪一种，如实说"这一条没说是哪一种"。
         WakeOrigin::Bell => crate::activity_origin::WAKE_LEGACY_ORIGIN_TEXT,
         WakeOrigin::Timer => crate::activity_origin::TIMER_ORIGIN_TEXT,
+        WakeOrigin::Channel => crate::activity_origin::CHANNEL_ORIGIN_TEXT,
         WakeOrigin::Manual => crate::activity_origin::MANUAL_ORIGIN_TEXT,
     }
 }
@@ -1156,6 +1165,7 @@ fn situation_chain(
         reading,
         NotificationBar::new(
             live.notification,
+            live.channels,
             live.since,
             PinsBoard::new(
                 materials.pinned.as_deref(),
@@ -1819,6 +1829,7 @@ impl<'a> RunSession<'a> {
                     SituationLive {
                         since: declared.since,
                         notification: declared.notification,
+                        channels: declared.channels,
                         cards: declared.cards.clone(),
                         origin: origin_text(declared.origin),
                         // **复用**装配那一轮已经取过的钟（`clock_at_open`，算时长用的那一次），
